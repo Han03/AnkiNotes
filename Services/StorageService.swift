@@ -278,4 +278,182 @@ final class StorageService: ObservableObject {
         }
         if didFix { persistNoteIndex() }
     }
+    
+    // MARK: - Markdown 批量导入（通过文件共享）
+    
+    /// 批量导入报告
+    struct ImportReport: Identifiable, Equatable {
+        let id = UUID()
+        var importedCount: Int = 0
+        var skippedCount: Int = 0
+        var failedCount: Int = 0
+        var folderCreatedCount: Int = 0
+        var scannedMarkdownFiles: Int = 0
+        var messages: [String] = []   // 简单说明 / 错误 / 导入的笔记标题样例 (最多前 10)
+        var warningMessages: [String] = [] // 警告（如空文件）
+    }
+    
+    /// 从 App Documents 目录（文件共享拖入）递归扫描 Markdown 并导入笔记库
+    /// - 跳过内部目录 Notes/ 和 .metadata/
+    /// - 按物理相对路径自动创建 Folder 层级
+    /// - 解析 YAML Frontmatter（title/tags/date）
+    /// - 去重：同路径+同标题已存在时跳过
+    @discardableResult
+    func importMarkdownFromDocuments() -> ImportReport {
+        let fm = FileManager.default
+        let root = fileSystem.rootDirectory
+        var report = ImportReport()
+        
+        // 1. 递归枚举所有 .md / .markdown 文件，跳过 Notes 和 .metadata
+        let skipNames: Set<String> = ["Notes", ".metadata"]
+        let keys: [URLResourceKey] = [.isDirectoryKey, .nameKey, .pathKey]
+        guard let enumerator = fm.enumerator(
+            at: root,
+            includingPropertiesForKeys: keys,
+            options: [.skipsHiddenFiles, .skipsPackageDescendants],
+            errorHandler: { _, _ in true }
+        ) else {
+            report.warningMessages.append("无法创建 Documents 目录枚举器")
+            return report
+        }
+        
+        var mdFiles: [URL] = []
+        for case let url as URL in enumerator {
+            guard let rv = try? url.resourceValues(forKeys: Set(keys)) else { continue }
+            if rv.isDirectory ?? false {
+                if let name = rv.name, skipNames.contains(name) {
+                    enumerator.skipDescendants()
+                }
+                continue
+            }
+            let ext = url.pathExtension.lowercased()
+            if ext == "md" || ext == "markdown" {
+                mdFiles.append(url)
+            }
+        }
+        report.scannedMarkdownFiles = mdFiles.count
+        
+        guard report.scannedMarkdownFiles > 0 else {
+            report.warningMessages.append("Documents 目录没有发现 .md/.markdown 文件（请通过爱思助手/iTunes 文件共享先把 Markdown 文件夹拖入）")
+            return report
+        }
+        
+        // 2. 逐个导入
+        for (idx, srcURL) in mdFiles.enumerated() {
+            // 防止重复（按标题+folder 路径粗略查重）
+            let relativePathComponents = srcURL.pathComponents
+                .dropFirst(root.pathComponents.count)
+                .map(String.init)
+            let folderComponents = Array(relativePathComponents.dropLast()) // 去掉文件名
+            let fileName = srcURL.lastPathComponent
+            
+            do {
+                let rawBody = try fileSystem.readNoteContent(from: srcURL)
+                let parsed = MarkdownFrontmatterParser.parse(rawBody)
+                
+                // 标题：Frontmatter.title → 文件名去掉 .md → 默认 "未命名"
+                var title = (parsed.title?.isEmpty == false) ? parsed.title! : parseTitleFromFileName(fileName)
+                if title.isEmpty { title = "未命名-\(UUID().uuidString.prefix(6))" }
+                
+                // 文件夹：按相对路径创建层级
+                let folderId = try getOrCreateFolder(pathComponents: folderComponents,
+                                                     createdCount: &report.folderCreatedCount)
+                
+                // 粗略查重（同 folder + 同 title → 跳过）
+                let exists = noteMetas.contains { m in
+                    m.folderId == folderId && m.title.lowercased() == title.lowercased()
+                }
+                if exists {
+                    report.skippedCount += 1
+                    if report.messages.count < 10 {
+                        report.messages.append("⏭️ 跳过重复：\(folderComponents.joined(separator: "/"))/\(title)")
+                    }
+                    continue
+                }
+                
+                // 创建笔记（调用现有 createNote 自动生成 SRS 默认值、写 Notes/ 目录、索引）
+                let bodyToUse = parsed.body.isEmpty ? rawBody : parsed.body
+                createNote(
+                    title: title,
+                    folderId: folderId,
+                    markdownContent: bodyToUse,
+                    tags: parsed.tags
+                )
+                report.importedCount += 1
+                
+                if report.messages.count < 10 {
+                    let prefix = folderComponents.isEmpty ? "" : folderComponents.joined(separator: "/") + "/"
+                    report.messages.append("✅ \(prefix)\(title)")
+                }
+            } catch {
+                report.failedCount += 1
+                if report.warningMessages.count < 5 {
+                    report.warningMessages.append("❌ 导入失败 \(fileName): \(error.localizedDescription)")
+                }
+            }
+            
+            // 每 50 条持久化一次，避免丢数据
+            if idx % 50 == 0 {
+                persistFolders()
+                persistNoteIndex()
+            }
+        }
+        
+        persistFolders()
+        persistNoteIndex()
+        
+        return report
+    }
+    
+    // MARK: - 导入辅助
+    
+    /// 按「从根到当前」的路径组件数组，查重创建 Folder 树，返回最终文件夹 ID（nil 表示根）
+    private func getOrCreateFolder(pathComponents: [String],
+                                    createdCount: inout Int) throws -> UUID? {
+        guard !pathComponents.isEmpty else { return nil }
+        var parentId: UUID? = nil
+        
+        for name in pathComponents {
+            let clean = fileSystem.sanitizeFileName(name)
+            guard !clean.isEmpty else { continue }
+            
+            // 查重：同 parent 同 name
+            if let existed = folders.first(where: { f in
+                f.parentId == parentId && f.name.lowercased() == clean.lowercased()
+            }) {
+                parentId = existed.id
+                continue
+            }
+            // 新建
+            let f = createFolder(name: clean, parentId: parentId)
+            createdCount += 1
+            parentId = f.id
+        }
+        return parentId
+    }
+    
+    /// 从文件名提取标题（去掉 UUID 前缀、.md/.markdown 后缀、去除非法字符占位、去前后空格）
+    private func parseTitleFromFileName(_ fileName: String) -> String {
+        var s = fileName
+        // 去掉 .md / .markdown
+        if s.lowercased().hasSuffix(".markdown") {
+            s = String(s.dropLast(".markdown".count))
+        } else if s.lowercased().hasSuffix(".md") {
+            s = String(s.dropLast(3))
+        }
+        // 去掉形如 "UUID_Title" 或 "UUIDTitle" 中的 UUID 前缀
+        // UUID 固定 36 位 8-4-4-4-12
+        if s.count > 36 {
+            let prefixPart = String(s.prefix(36))
+            let uuidRegex = #"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"#
+            if prefixPart.range(of: uuidRegex, options: .regularExpression) != nil {
+                s = String(s.dropFirst(36))
+                if s.first == "_" || s.first == "-" || s.first == " " { s = String(s.dropFirst()) }
+            }
+        }
+        // 把下划线/连字符替换成空格
+        s = s.replacingOccurrences(of: "_", with: " ")
+             .replacingOccurrences(of: "-", with: " ")
+        return s.trimmingCharacters(in: .whitespaces)
+    }
 }

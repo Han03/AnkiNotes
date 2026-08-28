@@ -25,6 +25,7 @@
 		ANReviewHome /* ReviewHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANReviewHomeRef /* ReviewHomeView.swift */; };
 		ANReviewSession /* ReviewSessionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANReviewSessionRef /* ReviewSessionView.swift */; };
 		ANStats /* StatsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANStatsRef /* StatsView.swift */; };
+		ANFrontMat /* MarkdownFrontmatterParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANFrontMatRef /* MarkdownFrontmatterParser.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -46,6 +47,7 @@
 		ANReviewSessionRef /* ReviewSessionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewSessionView.swift; sourceTree = "<group>"; };
 		ANStatsRef /* StatsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsView.swift; sourceTree = "<group>"; };
 		ANSharedViewRef /* SharedViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedViews.swift; sourceTree = "<group>"; };
+		ANFrontMatRef /* MarkdownFrontmatterParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownFrontmatterParser.swift; sourceTree = "<group>"; };
 		ANInfoPlist /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		ANProductApp /* AnkiNotes.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AnkiNotes.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -91,6 +93,7 @@
 				ANStoreRef /* StorageService.swift */,
 				ANSM2Ref /* SM2Algorithm.swift */,
 				ANSchedRef /* SchedulerService.swift */,
+				ANFrontMatRef /* MarkdownFrontmatterParser.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -214,6 +217,7 @@
 				ANReviewHome /* ReviewHomeView.swift in Sources */,
 				ANReviewSession /* ReviewSessionView.swift in Sources */,
 				ANStats /* StatsView.swift in Sources */,
+				ANFrontMat /* MarkdownFrontmatterParser.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
