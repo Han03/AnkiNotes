@@ -81,14 +81,14 @@ struct NoteEditorView: View {
                 .padding(.horizontal, 12).padding(.vertical, 8)
                 .background(Color(.secondarySystemBackground))
                 .cornerRadius(8)
-                .onChange(of: title) { _, _ in hasChanges = true }
+                .onChange(of: title) { _ in hasChanges = true }
             
             TextField("标签（用逗号分隔）", text: $tagsText)
                 .font(.subheadline)
                 .padding(.horizontal, 12).padding(.vertical, 6)
                 .background(Color(.secondarySystemBackground))
                 .cornerRadius(8)
-                .onChange(of: tagsText) { _, _ in hasChanges = true }
+                .onChange(of: tagsText) { _ in hasChanges = true }
             
             // 模式切换
             Picker("", selection: $mode) {
@@ -110,7 +110,7 @@ struct NoteEditorView: View {
             TextEditor(text: $markdownText)
                 .font(.system(.body, design: .monospaced))
                 .padding()
-                .onChange(of: markdownText) { _, _ in hasChanges = true }
+                .onChange(of: markdownText) { _ in hasChanges = true }
                 .scrollContentBackground(.hidden)
             
             // 快捷插入按钮
