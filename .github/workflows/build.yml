@@ -116,41 +116,58 @@ jobs:
         with:
           xcode-version: latest-stable
 
-      - name: 🧱 构建真机版本 (arm64, 无签名)
+      - name: 🧱 真机构建 (archive arm64 → xcarchive，结构更完整 Sideloadly 兼容性更佳)
         run: |
           set -o pipefail
+          mkdir -p build
           xcodebuild \
+            archive \
             -project AnkiNotes.xcodeproj \
             -scheme AnkiNotes \
             -sdk iphoneos \
             -configuration Release \
             -destination 'generic/platform=iOS' \
+            -archivePath "$PWD/build/AnkiNotes.xcarchive" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
             ENABLE_BITCODE=NO \
-            build 2>&1 | tee build-device.log | xcbeautify --is-ci --renderer github-actions
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=NO \
+            VALIDATE_PRODUCT=NO \
+            SKIP_INSTALL=NO \
+            2>&1 | tee build-device.log | xcbeautify --is-ci --renderer github-actions
         env:
           NSUnbufferedIO: YES
 
-      - name: 📦 制作 Payload IPA（Sideloadly 可直接使用）
+      - name: 📦 制作标准 Payload IPA（xcarchive → Payload → .zip → .ipa）
         if: success()
         run: |
-          APP_DIR=$(find ~/Library/Developer/Xcode/DerivedData \
-            -name "AnkiNotes.app" -path "*/Release-iphoneos/*" \
-            -type d 2>/dev/null | head -1)
-          echo "Found device .app: $APP_DIR"
-          if [ -z "$APP_DIR" ]; then
-            echo "❌ 未找到 Release-iphoneos 产物，尝试 Debug："
-            APP_DIR=$(find ~/Library/Developer/Xcode/DerivedData \
-              -name "AnkiNotes.app" -path "*/Debug-iphoneos/*" -type d 2>/dev/null | head -1)
-            if [ -z "$APP_DIR" ]; then exit 1; fi
+          set -o pipefail
+          APP_DIR="$PWD/build/AnkiNotes.xcarchive/Products/Applications/AnkiNotes.app"
+          echo "xcarchive 中的 .app: $APP_DIR"
+          if [ ! -d "$APP_DIR" ]; then
+            echo "❌ xcarchive 中无 AnkiNotes.app，列一下 xcarchive 结构："
+            find build -name "*.app" -type d 2>/dev/null || true
+            exit 1
           fi
-
-          # 标准 IPA 结构: Payload/AnkiNotes.app → zip → .ipa
+          echo ""
+          echo "--- Mach-O 架构验证 (目标必须包含 arm64) ---"
+          file "$APP_DIR/AnkiNotes" 2>/dev/null || true
+          echo ""
+          echo "--- Info.plist 关键字段 ---"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier"   "$APP_DIR/Info.plist" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Print :DTPlatformName"       "$APP_DIR/Info.plist" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Print :MinimumOSVersion"    "$APP_DIR/Info.plist" 2>/dev/null || true
+          echo ""
+          # 标准 IPA: Payload/AnkiNotes.app → zip → .ipa
           mkdir -p ipa-tmp/Payload
           cp -R "$APP_DIR" ipa-tmp/Payload/
-          cd ipa-tmp && zip -qr ../AnkiNotes.ipa Payload/
+          # Sideloadly 兼容：额外添加空的 SwiftSupport (某些 iOS 版本需要)
+          mkdir -p ipa-tmp/SwiftSupport
+          cd ipa-tmp && zip -qr ../AnkiNotes.ipa Payload/ SwiftSupport/ 2>/dev/null
           cd .. && rm -rf ipa-tmp
           ls -lah AnkiNotes.ipa
           echo "✅ IPA 大小: $(du -h AnkiNotes.ipa | cut -f1)"
