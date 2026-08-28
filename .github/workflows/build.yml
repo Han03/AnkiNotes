@@ -1,0 +1,172 @@
+name: AnkiNotes iOS Build
+# ============================================================
+#  AnkiNotes 双 Job 构建流水线
+#  1) build-simulator   : 模拟器版本，最快（3~5 分钟），验证编译通过
+#  2) build-device-ipa  : 真机 .ipa 版本，可通过 Sideloadly 侧载到 iPhone
+# ============================================================
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:      # 允许在 GitHub 页面手动触发
+
+# 权限：允许上传 Artifact
+permissions:
+  contents: read
+
+jobs:
+
+  #################################################################
+  # JOB 1: 模拟器构建（快速验证编译，3-5 分钟）
+  #################################################################
+  build-simulator:
+    name: 📱 Simulator Build (Quick Check)
+    runs-on: macos-14
+    timeout-minutes: 20
+
+    steps:
+      - name: 📥 Checkout 代码
+        uses: actions/checkout@v4
+
+      - name: 🛠️ 选择 Xcode 版本
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: 🔍 显示环境信息
+        run: |
+          echo "Xcode: $(xcodebuild -version | head -1)"
+          echo "SDK: $(xcodebuild -showsdks 2>/dev/null | grep -i iphone | head -3)"
+          echo "Swift: $(swift --version | head -1)"
+          echo "macOS: $(sw_vers)"
+
+      - name: 📦 Resolve Swift Package Dependencies
+        run: |
+          if [ -f "Package.swift" ]; then
+            swift package resolve 2>&1 | tail -5 || true
+          fi
+
+      - name: 🧱 构建 Simulator 版本
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project AnkiNotes.xcodeproj \
+            -scheme AnkiNotes \
+            -sdk iphonesimulator \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build 2>&1 | tee build-sim.log | xcbeautify --is-ci --renderer github-actions
+        env:
+          NSUnbufferedIO: YES
+
+      - name: 🗜️ 打包 .app (Simulator)
+        if: success()
+        run: |
+          APP_DIR=$(find ~/Library/Developer/Xcode/DerivedData \
+            -name "AnkiNotes.app" -path "*/Debug-iphonesimulator/*" \
+            -type d 2>/dev/null | head -1)
+          echo "Found: $APP_DIR"
+          if [ -z "$APP_DIR" ]; then
+            echo "❌ 未找到 AnkiNotes.app，尝试列出 DerivedData 内容："
+            ls -la ~/Library/Developer/Xcode/DerivedData/ 2>/dev/null || true
+            exit 1
+          fi
+          mkdir -p output
+          cp -R "$APP_DIR" output/AnkiNotes-Simulator.app
+          cd output && zip -rq AnkiNotes-Simulator.zip AnkiNotes-Simulator.app
+          ls -lah AnkiNotes-Simulator.zip
+
+      - name: ⬆️ 上传 Simulator Artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AnkiNotes-Simulator
+          path: output/AnkiNotes-Simulator.zip
+          retention-days: 7
+
+      - name: 📤 上传构建日志 (失败时)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Build-Log-Simulator
+          path: build-sim.log
+          retention-days: 7
+
+  #################################################################
+  # JOB 2: 真机构建 + 侧载 IPA（直接用 iPhone 装）
+  #################################################################
+  build-device-ipa:
+    name: 📲 Device IPA (Sideload Ready)
+    runs-on: macos-14
+    timeout-minutes: 25
+    needs: build-simulator   # 先确认模拟器编译过了再做真机
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[build-ipa]')
+
+    steps:
+      - name: 📥 Checkout 代码
+        uses: actions/checkout@v4
+
+      - name: 🛠️ 选择 Xcode 版本
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: 🧱 构建真机版本 (arm64, 无签名)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project AnkiNotes.xcodeproj \
+            -scheme AnkiNotes \
+            -sdk iphoneos \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            ENABLE_BITCODE=NO \
+            build 2>&1 | tee build-device.log | xcbeautify --is-ci --renderer github-actions
+        env:
+          NSUnbufferedIO: YES
+
+      - name: 📦 制作 Payload IPA（Sideloadly 可直接使用）
+        if: success()
+        run: |
+          APP_DIR=$(find ~/Library/Developer/Xcode/DerivedData \
+            -name "AnkiNotes.app" -path "*/Release-iphoneos/*" \
+            -type d 2>/dev/null | head -1)
+          echo "Found device .app: $APP_DIR"
+          if [ -z "$APP_DIR" ]; then
+            echo "❌ 未找到 Release-iphoneos 产物，尝试 Debug："
+            APP_DIR=$(find ~/Library/Developer/Xcode/DerivedData \
+              -name "AnkiNotes.app" -path "*/Debug-iphoneos/*" -type d 2>/dev/null | head -1)
+            if [ -z "$APP_DIR" ]; then exit 1; fi
+          fi
+
+          # 标准 IPA 结构: Payload/AnkiNotes.app → zip → .ipa
+          mkdir -p ipa-tmp/Payload
+          cp -R "$APP_DIR" ipa-tmp/Payload/
+          cd ipa-tmp && zip -qr ../AnkiNotes.ipa Payload/
+          cd .. && rm -rf ipa-tmp
+          ls -lah AnkiNotes.ipa
+          echo "✅ IPA 大小: $(du -h AnkiNotes.ipa | cut -f1)"
+
+      - name: ⬆️ 上传 IPA Artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AnkiNotes-iOS-IPA
+          path: AnkiNotes.ipa
+          retention-days: 30
+
+      - name: 📤 上传构建日志 (失败时)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Build-Log-Device
+          path: build-device.log
+          retention-days: 7

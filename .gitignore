@@ -1,0 +1,64 @@
+# === Xcode ===
+# Xcode 构建产物
+build/
+DerivedData/
+*.hmap
+*.ipa
+*.xcuserstate
+*.xcuserdatad
+xcuserdata/
+xcshareddata/IDEWorkspaceChecks.plist
+xcshareddata/WorkspaceSettings.xcsettings
+
+# Xcode 临时文件
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+*.pbxuser
+!default.pbxuser
+*.moved-aside
+*.xccheckout
+*.xcscmblueprint
+
+# Swift Package Manager
+.swiftpm/
+.spm-build/
+.build/
+Package.resolved
+
+# macOS / Finder
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# 备份
+*.bak
+*.backup
+*~
+
+# Xcode 签名临时文件
+*.provisionprofile
+*.entitlements
+*.mobileprovision
+
+# Logs / 缓存
+*.log
+Logs/
+*.dSYM.zip
+*.dSYM
+
+# CI 临时输出
+output/
+artifacts/
+AnkiNotes.app
+AnkiNotes.app.zip
+AnkiNotes.ipa
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+*.swo

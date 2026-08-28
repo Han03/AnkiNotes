@@ -1,0 +1,418 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		ANAppSwift /* AnkiNotesApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANAppSwiftRef /* AnkiNotesApp.swift */; };
+		ANFolder /* Folder.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANFolderRef /* Folder.swift */; };
+		ANSRS /* SRSData.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANSRSRef /* SRSData.swift */; };
+		ANNote /* Note.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANNoteRef /* Note.swift */; };
+		ANLog /* ReviewLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANLogRef /* ReviewLog.swift */; };
+		ANFS /* FileSystemService.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANFSRef /* FileSystemService.swift */; };
+		ANStore /* StorageService.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANStoreRef /* StorageService.swift */; };
+		ANSM2 /* SM2Algorithm.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANSM2Ref /* SM2Algorithm.swift */; };
+		ANSched /* SchedulerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANSchedRef /* SchedulerService.swift */; };
+		ANMDView /* MarkdownView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANMDViewRef /* MarkdownView.swift */; };
+		ANTab /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANTabRef /* MainTabView.swift */; };
+		ANFolderView /* FolderBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANFolderViewRef /* FolderBrowserView.swift */; };
+		ANDetail /* NoteDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANDetailRef /* NoteDetailView.swift */; };
+		ANEditor /* NoteEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANEditorRef /* NoteEditorView.swift */; };
+		ANReviewHome /* ReviewHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANReviewHomeRef /* ReviewHomeView.swift */; };
+		ANReviewSession /* ReviewSessionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANReviewSessionRef /* ReviewSessionView.swift */; };
+		ANStats /* StatsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANStatsRef /* StatsView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		ANAppSwiftRef /* AnkiNotesApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnkiNotesApp.swift; sourceTree = "<group>"; };
+		ANFolderRef /* Folder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Folder.swift; sourceTree = "<group>"; };
+		ANSRSRef /* SRSData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SRSData.swift; sourceTree = "<group>"; };
+		ANNoteRef /* Note.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Note.swift; sourceTree = "<group>"; };
+		ANLogRef /* ReviewLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewLog.swift; sourceTree = "<group>"; };
+		ANFSRef /* FileSystemService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileSystemService.swift; sourceTree = "<group>"; };
+		ANStoreRef /* StorageService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageService.swift; sourceTree = "<group>"; };
+		ANSM2Ref /* SM2Algorithm.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SM2Algorithm.swift; sourceTree = "<group>"; };
+		ANSchedRef /* SchedulerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SchedulerService.swift; sourceTree = "<group>"; };
+		ANMDViewRef /* MarkdownView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownView.swift; sourceTree = "<group>"; };
+		ANTabRef /* MainTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainTabView.swift; sourceTree = "<group>"; };
+		ANFolderViewRef /* FolderBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderBrowserView.swift; sourceTree = "<group>"; };
+		ANDetailRef /* NoteDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteDetailView.swift; sourceTree = "<group>"; };
+		ANEditorRef /* NoteEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteEditorView.swift; sourceTree = "<group>"; };
+		ANReviewHomeRef /* ReviewHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewHomeView.swift; sourceTree = "<group>"; };
+		ANReviewSessionRef /* ReviewSessionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewSessionView.swift; sourceTree = "<group>"; };
+		ANStatsRef /* StatsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsView.swift; sourceTree = "<group>"; };
+		ANInfoPlist /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		ANProductApp /* AnkiNotes.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AnkiNotes.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		ANFrameworksPhase /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		ANRootGroup = {
+			isa = PBXGroup;
+			children = (
+				ANAppSwiftRef /* AnkiNotesApp.swift */,
+				ANModelsGroup /* Models */,
+				ANServicesGroup /* Services */,
+				ANViewsGroup /* Views */,
+				ANResourcesGroup /* AnkiNotes */,
+				ANProductsGroup /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		ANModelsGroup /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				ANFolderRef /* Folder.swift */,
+				ANSRSRef /* SRSData.swift */,
+				ANNoteRef /* Note.swift */,
+				ANLogRef /* ReviewLog.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		ANServicesGroup /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				ANFSRef /* FileSystemService.swift */,
+				ANStoreRef /* StorageService.swift */,
+				ANSM2Ref /* SM2Algorithm.swift */,
+				ANSchedRef /* SchedulerService.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		ANViewsGroup /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				ANMDViewRef /* MarkdownView.swift */,
+				ANTabRef /* MainTabView.swift */,
+				ANFolderViewRef /* FolderBrowserView.swift */,
+				ANDetailRef /* NoteDetailView.swift */,
+				ANEditorRef /* NoteEditorView.swift */,
+				ANReviewHomeRef /* ReviewHomeView.swift */,
+				ANReviewSessionRef /* ReviewSessionView.swift */,
+				ANStatsRef /* StatsView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		ANResourcesGroup /* AnkiNotes */ = {
+			isa = PBXGroup;
+			children = (
+				ANInfoPlist /* Info.plist */,
+			);
+			path = AnkiNotes;
+			sourceTree = "<group>";
+		};
+		ANProductsGroup /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				ANProductApp /* AnkiNotes.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		ANTarget /* AnkiNotes */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = ANTargetConfigList /* Build configuration list for PBXNativeTarget "AnkiNotes" */;
+			buildPhases = (
+				ANSourcesPhase /* Sources */,
+				ANFrameworksPhase /* Frameworks */,
+				ANResourcesPhase /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = AnkiNotes;
+			productName = AnkiNotes;
+			productReference = ANProductApp /* AnkiNotes.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		ANProject /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					ANTarget = {
+						CreatedOnToolsVersion = 15.0;
+					};
+				};
+			};
+			buildConfigurationList = ANProjectConfigList /* Build configuration list for PBXProject "AnkiNotes" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+				zh_Hans,
+			);
+			mainGroup = ANRootGroup;
+			productRefGroup = ANProductsGroup /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				ANTarget /* AnkiNotes */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		ANResourcesPhase /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		ANSourcesPhase /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				ANAppSwift /* AnkiNotesApp.swift in Sources */,
+				ANFolder /* Folder.swift in Sources */,
+				ANSRS /* SRSData.swift in Sources */,
+				ANNote /* Note.swift in Sources */,
+				ANLog /* ReviewLog.swift in Sources */,
+				ANFS /* FileSystemService.swift in Sources */,
+				ANStore /* StorageService.swift in Sources */,
+				ANSM2 /* SM2Algorithm.swift in Sources */,
+				ANSched /* SchedulerService.swift in Sources */,
+				ANMDView /* MarkdownView.swift in Sources */,
+				ANTab /* MainTabView.swift in Sources */,
+				ANFolderView /* FolderBrowserView.swift in Sources */,
+				ANDetail /* NoteDetailView.swift in Sources */,
+				ANEditor /* NoteEditorView.swift in Sources */,
+				ANReviewHome /* ReviewHomeView.swift in Sources */,
+				ANReviewSession /* ReviewSessionView.swift in Sources */,
+				ANStats /* StatsView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		ANDebug /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		ANRelease /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		ANTargetDebug /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = AnkiNotes/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Anki 笔记";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ankinotes.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		ANTargetRelease /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = AnkiNotes/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Anki 笔记";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ankinotes.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		ANProjectConfigList /* Build configuration list for PBXProject "AnkiNotes" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				ANDebug /* Debug */,
+				ANRelease /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		ANTargetConfigList /* Build configuration list for PBXNativeTarget "AnkiNotes" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				ANTargetDebug /* Debug */,
+				ANTargetRelease /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = ANProject /* Project object */;
+}
