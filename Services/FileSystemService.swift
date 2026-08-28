@@ -27,7 +27,7 @@ final class FileSystemService {
     
     /// 元数据（索引）存放目录
     var metadataDirectory: URL {
-        let dir = rootDirectory.appendingPathComponent(".metadata", isDirectory: true)
+        var dir = rootDirectory.appendingPathComponent(".metadata", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         // 隐藏目录，在文件App中不显示
         var values = URLResourceValues()
@@ -86,7 +86,7 @@ final class FileSystemService {
     }
     
     /// 文件名安全处理（去除非法字符，限制长度）
-    private func sanitizeFileName(_ name: String) -> String {
+    func sanitizeFileName(_ name: String) -> String {
         let invalidChars = CharacterSet(charactersIn: "/\\:*?\"<>|\n\r\t")
         var safe = name.components(separatedBy: invalidChars).joined(separator: "_")
         if safe.isEmpty { safe = "Untitled" }

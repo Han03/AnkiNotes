@@ -36,7 +36,7 @@ struct MainTabView: View {
                 Text("复习")
             }
             .tag(1)
-            .badge(appState.todayDueCount > 0 ? appState.todayDueCount : nil)
+            .badge(appState.todayDueCount > 0 ? String(appState.todayDueCount) : nil)
             
             NavigationStack {
                 StatsView()
