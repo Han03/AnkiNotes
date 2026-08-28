@@ -27,7 +27,7 @@ struct ReviewSessionView: View {
     var body: some View {
         Group {
             if queue.isEmpty {
-                ContentUnavailableView(
+                EmptyStateView(
                     "没有需要复习的卡片",
                     systemImage: "checkmark.circle.fill",
                     description: Text("所有内容已到期复习完毕！")

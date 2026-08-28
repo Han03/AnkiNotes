@@ -95,7 +95,7 @@ struct NoteDetailView: View {
                     .onAppear { selectedFolderId = note.folderId }
                 }
             } else {
-                ContentUnavailableView("笔记不存在或已删除", systemImage: "trash")
+                EmptyStateView("笔记不存在或已删除", systemImage: "trash")
             }
         }
         .onAppear { loadNote() }

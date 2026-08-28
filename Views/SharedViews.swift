@@ -200,3 +200,61 @@ struct StatCard: View {
         .padding(.vertical, 8)
     }
 }
+
+// MARK: - 空状态视图（兼容 iOS 16）
+/// 系统 ContentUnavailableView 仅 iOS 17+ 可用，这里做向后兼容包装：
+/// - iOS 17+ → 直接调用原生 ContentUnavailableView（保留视差动画等效果）
+/// - iOS 16   → 用 VStack + Image + Text 模拟相同外观
+struct EmptyStateView: View {
+    private let title: String
+    private let systemImage: String
+    private let description: Text?
+    
+    /// 空状态 + 描述文字（Text 类型，可自定义样式）
+    init(_ title: String, systemImage: String, description: Text?) {
+        self.title = title
+        self.systemImage = systemImage
+        self.description = description
+    }
+    
+    /// 仅有标题和图标的空状态
+    init(_ title: String, systemImage: String) {
+        self.title = title
+        self.systemImage = systemImage
+        self.description = nil
+    }
+    
+    var body: some View {
+        if #available(iOS 17.0, *) {
+            if let description = description {
+                ContentUnavailableView(
+                    title,
+                    systemImage: systemImage,
+                    description: description
+                )
+            } else {
+                ContentUnavailableView(title, systemImage: systemImage)
+            }
+        } else {
+            // iOS 16 Fallback（视觉上尽量对齐 iOS 17 原生样式）
+            VStack(spacing: 14) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 56, weight: .thin))
+                    .foregroundStyle(.secondary)
+                    .symbolRenderingMode(.hierarchical)
+                Text(title)
+                    .font(.title2.weight(.semibold))
+                    .multilineTextAlignment(.center)
+                if let description = description {
+                    description
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 20)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.vertical, 40)
+        }
+    }
+}

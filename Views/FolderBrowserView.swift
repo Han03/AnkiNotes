@@ -94,11 +94,11 @@ struct FolderBrowserView: View {
             
             Section {
                 if filteredNotes.isEmpty && searchText.isEmpty {
-                    ContentUnavailableView("暂无笔记",
-                                           systemImage: "note.text",
-                                           description: Text("点击右上角 + 新建笔记"))
+                    EmptyStateView("暂无笔记",
+                                   systemImage: "note.text",
+                                   description: Text("点击右上角 + 新建笔记"))
                 } else if filteredNotes.isEmpty {
-                    ContentUnavailableView("无搜索结果", systemImage: "magnifyingglass")
+                    EmptyStateView("无搜索结果", systemImage: "magnifyingglass")
                 } else {
                     ForEach(filteredNotes) { note in
                         NavigationLink {
