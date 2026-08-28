@@ -47,7 +47,7 @@ struct MainTabView: View {
             }
             .tag(2)
         }
-        .onChange(of: selectedTab) { _ in
+        .onChange(of: selectedTab) { _, _ in
             appState.refreshStats()
         }
     }

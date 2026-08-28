@@ -1,13 +1,19 @@
+//  MARK: - 跨页面共享的辅助组件（ReviewHomeView / StatsView / 其他页面复用）
 //
 //  SharedViews.swift
 //  AnkiNotes
 //
 //  Created by AI Assistant on 2026/8/29.
 //
-//  跨页面共享的辅助组件（ReviewHomeView / StatsView / 其他页面复用）
-//
 
 import SwiftUI
+
+// MARK: - 通用类型扩展
+
+/// 让 UUID 支持 SwiftUI sheet(item:) 的 Identifiable 约束
+extension UUID: Identifiable {
+    public var id: UUID { self }
+}
 
 // MARK: - 7 日复习柱状图
 

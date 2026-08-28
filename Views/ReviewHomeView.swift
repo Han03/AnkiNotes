@@ -19,7 +19,6 @@ struct ReviewHomeView: View {
         let queue = scheduler.getTodayReviewQueue()
         let newCount = queue.filter { $0.srs.cardState == .new }.count
         let learningCount = queue.filter { $0.srs.cardState == .learning || $0.srs.cardState == .relearning }.count
-        _ = queue.filter { $0.srs.cardState == .review }.count  // reviewCount (保留供扩展)
         
         ScrollView {
             VStack(spacing: 18) {

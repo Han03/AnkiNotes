@@ -183,7 +183,7 @@ struct FolderBrowserView: View {
             Text("笔记将以 Markdown 文件形式存储在当前文件夹中。")
         }
         // 编辑笔记
-        .sheet(item: $editingNoteId.mappedToUUID()) { noteId in
+        .sheet(item: $editingNoteId) { noteId in
             NavigationStack {
                 NoteEditorView(noteId: noteId)
             }
