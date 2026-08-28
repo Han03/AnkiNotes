@@ -341,9 +341,16 @@ final class StorageService: ObservableObject {
         // 2. 逐个导入
         for (idx, srcURL) in mdFiles.enumerated() {
             // 防止重复（按标题+folder 路径粗略查重）
-            let relativePathComponents = srcURL.pathComponents
-                .dropFirst(root.pathComponents.count)
-                .map(String.init)
+            // 显式声明 [String] + Array(dropFirst) 避免 Swift 在
+            // Sequence.dropFirst / Array.dropFirst 两重载间类型推断 ambiguous
+            let paths: [String] = srcURL.pathComponents
+            let rootCount = root.pathComponents.count
+            let relativePathComponents: [String]
+            if paths.count > rootCount {
+                relativePathComponents = Array(paths.dropFirst(rootCount))
+            } else {
+                relativePathComponents = []
+            }
             let folderComponents = Array(relativePathComponents.dropLast()) // 去掉文件名
             let fileName = srcURL.lastPathComponent
             
