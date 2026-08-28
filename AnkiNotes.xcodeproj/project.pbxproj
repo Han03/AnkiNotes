@@ -49,6 +49,7 @@
 		ANSharedViewRef /* SharedViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedViews.swift; sourceTree = "<group>"; };
 		ANFrontMatRef /* MarkdownFrontmatterParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownFrontmatterParser.swift; sourceTree = "<group>"; };
 		ANInfoPlist /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		ANEntitlements /* AnkiNotes.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = AnkiNotes.entitlements; sourceTree = "<group>"; };
 		ANProductApp /* AnkiNotes.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AnkiNotes.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -118,6 +119,7 @@
 			isa = PBXGroup;
 			children = (
 				ANInfoPlist /* Info.plist */,
+				ANEntitlements /* AnkiNotes.entitlements */,
 			);
 			path = AnkiNotes;
 			sourceTree = "<group>";
@@ -362,6 +364,7 @@
 				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ankinotes.app;
+				CODE_SIGN_ENTITLEMENTS = AnkiNotes/AnkiNotes.entitlements;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
@@ -392,6 +395,7 @@
 				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ankinotes.app;
+				CODE_SIGN_ENTITLEMENTS = AnkiNotes/AnkiNotes.entitlements;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;

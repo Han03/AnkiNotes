@@ -25,6 +25,8 @@ struct StatsView: View {
                 distributionSection
                 // 评级比例
                 ratingRatioSection
+                // 同步设置
+                syncSection
             }
             .padding()
         }
@@ -156,6 +158,76 @@ struct StatsView: View {
             }
             RatingDistributionView()
                 .frame(height: 160)
+        }
+        .padding(18)
+        .background(RoundedRectangle(cornerRadius: 18).fill(Color(.systemBackground)))
+        .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
+    }
+
+    // MARK: - 同步设置
+
+    private var syncSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Label("☁️ 云同步 & 存储位置", systemImage: "externaldrive.badge.icloud")
+                    .font(.headline)
+                Spacer()
+                Image(systemName: appState.isICloudContainerAvailable ? "icloud.fill" : "icloud.slash")
+                    .foregroundStyle(appState.isICloudContainerAvailable ? .blue : .secondary)
+            }
+
+            // iCloud 开关
+            Toggle(isOn: $appState.useICloud) {
+                HStack(spacing: 6) {
+                    Text("启用 iCloud 同步")
+                        .font(.subheadline.bold())
+                    if !appState.isICloudContainerAvailable {
+                        Text("（未生效）")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .tint(.blue)
+
+            // 状态 / 路径
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("当前模式：").font(.caption).foregroundStyle(.secondary)
+                    Text(appState.storageModeDisplayName).font(.caption.bold())
+                }
+                HStack(alignment: .top) {
+                    Text("存储路径：").font(.caption).foregroundStyle(.secondary)
+                    Text(appState.storageLocationDescription).font(.caption).lineLimit(2)
+                }
+                if let msg = appState.syncStatusMessage {
+                    HStack(alignment: .top) {
+                        Text("状态：").font(.caption).foregroundStyle(.secondary)
+                        Text(msg)
+                            .font(.caption.bold())
+                            .foregroundStyle(msg.contains("失败") ? Color.red : (msg.contains("上传") ? .orange : .green))
+                            .lineLimit(4)
+                    }
+                }
+            }
+            .padding(12)
+            .background(RoundedRectangle(cornerRadius: 12).fill(Color(.secondarySystemBackground)))
+
+            // 使用说明
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 4) {
+                    Image(systemName: "info.circle").foregroundStyle(.blue)
+                    Text("iCloud 生效条件 & 说明")
+                        .font(.caption.bold())
+                        .foregroundStyle(.primary)
+                }
+                Text("• **需要 ¥688/年的 Apple Developer 账号**，在后台为该 App ID 开启 iCloud Container（名称 iCloud.com.ankinotes.app）并关联；免费侧载场景 entitlements 不被苹果承认，容器返回 nil，Toggle 会自动弹回本地模式。")
+                    .font(.caption2).foregroundStyle(.secondary)
+                Text("• 数据存储根目录位于 iCloud Drive ▸ **AnkiNotes**（在文件 App 可见），内部 Notes 放 Markdown、.metadata 放 JSON 索引；App 更新或更换设备时数据永不丢失。")
+                    .font(.caption2).foregroundStyle(.secondary)
+                Text("• 切换开关时自动迁移已有笔记，冲突不会覆盖（目标目录会备份为 _backup_时间戳），数据安全双保险。")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
         }
         .padding(18)
         .background(RoundedRectangle(cornerRadius: 18).fill(Color(.systemBackground)))

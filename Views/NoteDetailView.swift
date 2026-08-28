@@ -119,8 +119,12 @@ struct NoteDetailView: View {
         VStack(spacing: 12) {
             ZStack {
                 RoundedRectangle(cornerRadius: 16)
-                    .fill(Color.white)
+                    .fill(Color(.systemBackground))
                     .shadow(color: .black.opacity(0.08), radius: 8, y: 2)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(Color(.separator).opacity(0.5), lineWidth: 0.5)
+                    )
                 VStack(spacing: 16) {
                     Text("卡片预览")
                         .font(.caption)
@@ -252,7 +256,7 @@ struct NoteDetailView: View {
                     if idx < min(logs.count, 10) - 1 { Divider().padding(.leading, 30) }
                 }
             }
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color.white))
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color(.systemBackground)))
         }
     }
     
@@ -293,15 +297,16 @@ private struct InfoChip: View {
         VStack(spacing: 4) {
             Text(label)
                 .font(.caption2)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
             Text(value)
                 .font(.subheadline.bold())
+                .foregroundStyle(.primary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 10)
-        .background(Color.white)
+        .background(Color(.secondarySystemBackground))
         .cornerRadius(10)
     }
 }
