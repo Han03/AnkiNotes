@@ -63,7 +63,7 @@ final class SchedulerService: ObservableObject {
         
         // 2) 新卡片：按“今日还没复习过”的优先，限制 dailyNewCardLimit
         var newCards: [Note] = []
-        let reviewedTodayCount = todayReviewedIds.count
+        _ = todayReviewedIds.count  // 供未来扩展每日已复习上限判断
         for note in allNotes where note.srs.cardState == .new {
             if todayReviewedIds.contains(note.id) { continue }
             if newCards.count >= dailyNewCardLimit { break }

@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		ANAppSwift /* AnkiNotesApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANAppSwiftRef /* AnkiNotesApp.swift */; };
+		ANSharedView /* SharedViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANSharedViewRef /* SharedViews.swift */; };
 		ANFolder /* Folder.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANFolderRef /* Folder.swift */; };
 		ANSRS /* SRSData.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANSRSRef /* SRSData.swift */; };
 		ANNote /* Note.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANNoteRef /* Note.swift */; };
@@ -44,6 +45,7 @@
 		ANReviewHomeRef /* ReviewHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewHomeView.swift; sourceTree = "<group>"; };
 		ANReviewSessionRef /* ReviewSessionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewSessionView.swift; sourceTree = "<group>"; };
 		ANStatsRef /* StatsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsView.swift; sourceTree = "<group>"; };
+		ANSharedViewRef /* SharedViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedViews.swift; sourceTree = "<group>"; };
 		ANInfoPlist /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		ANProductApp /* AnkiNotes.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AnkiNotes.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -96,6 +98,7 @@
 		ANViewsGroup /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				ANSharedViewRef /* SharedViews.swift */,
 				ANMDViewRef /* MarkdownView.swift */,
 				ANTabRef /* MainTabView.swift */,
 				ANFolderViewRef /* FolderBrowserView.swift */,
@@ -194,6 +197,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				ANAppSwift /* AnkiNotesApp.swift in Sources */,
+				ANSharedView /* SharedViews.swift in Sources */,
 				ANFolder /* Folder.swift in Sources */,
 				ANSRS /* SRSData.swift in Sources */,
 				ANNote /* Note.swift in Sources */,

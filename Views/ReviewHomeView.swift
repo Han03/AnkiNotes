@@ -19,7 +19,7 @@ struct ReviewHomeView: View {
         let queue = scheduler.getTodayReviewQueue()
         let newCount = queue.filter { $0.srs.cardState == .new }.count
         let learningCount = queue.filter { $0.srs.cardState == .learning || $0.srs.cardState == .relearning }.count
-        let reviewCount = queue.filter { $0.srs.cardState == .review }.count
+        _ = queue.filter { $0.srs.cardState == .review }.count  // reviewCount (保留供扩展)
         
         ScrollView {
             VStack(spacing: 18) {
@@ -202,117 +202,5 @@ struct ReviewHomeView: View {
     private func estimatedTime(for count: Int) -> String {
         let minutes = max(1, count / 10)
         return "\(minutes)"
-    }
-}
-
-// MARK: - 辅助视图
-
-private struct StatCard: View {
-    let title: String
-    let value: String
-    let systemImage: String
-    let color: Color
-    var highlight: Bool = false
-    
-    var body: some View {
-        VStack(spacing: 6) {
-            ZStack {
-                Circle()
-                    .fill(color.opacity(highlight ? 0.2 : 0.12))
-                    .frame(width: 38, height: 38)
-                Image(systemName: systemImage)
-                    .foregroundColor(color)
-                    .font(.system(size: 16, weight: .bold))
-            }
-            Text(value)
-                .font(.title3.bold())
-            Text(title)
-                .font(.caption2)
-                .foregroundColor(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 8)
-    }
-}
-
-/// 7 日柱状图
-private struct WeeklyChartView: View {
-    let counts: [Int]
-    var body: some View {
-        let max = max(counts.max() ?? 0, 1)
-        let labels = dayLabels()
-        GeometryReader { geo in
-            HStack(alignment: .bottom, spacing: 8) {
-                ForEach(0..<7) { idx in
-                    VStack(spacing: 4) {
-                        Text("\(counts[idx])")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(
-                                LinearGradient(
-                                    colors: counts[idx] > 0 ? [.blue, .purple] : [.gray.opacity(0.3), .gray.opacity(0.3)],
-                                    startPoint: .bottom, endPoint: .top)
-                            )
-                            .frame(height: geo.size.height * 0.65 * CGFloat(counts[idx]) / CGFloat(max))
-                        Text(labels[idx])
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-            }
-        }
-    }
-    
-    private func dayLabels() -> [String] {
-        let cal = Calendar.current
-        return (0..<7).map { offset in
-            guard let d = cal.date(byAdding: .day, value: -(6 - offset), to: Date()) else { return "" }
-            let symbols = cal.shortWeekdaySymbols
-            let idx = cal.component(.weekday, from: d) - 1
-            return symbols[idx]
-        }
-    }
-}
-
-/// 卡片状态分布
-private struct StatusDistributionView: View {
-    let stats: StatsSummary
-    var body: some View {
-        let total = max(stats.totalNotes, 1)
-        let data: [(label: String, value: Int, color: Color)] = [
-            ("新卡片", stats.newCount, .blue),
-            ("学习中", stats.learningCount, .orange),
-            ("已掌握", stats.masteredCount, .green),
-            ("复习中", max(0, stats.totalNotes - stats.newCount - stats.learningCount - stats.masteredCount), .purple)
-        ]
-        return VStack(spacing: 12) {
-            GeometryReader { geo in
-                HStack(spacing: 2) {
-                    ForEach(data, id: \.label) { d in
-                        let w = CGFloat(d.value) / CGFloat(total) * geo.size.width
-                        if d.value > 0 {
-                            Rectangle()
-                                .fill(d.color)
-                                .frame(width: w)
-                        }
-                    }
-                }
-                .cornerRadius(6)
-                .frame(height: 10)
-            }
-            HStack(spacing: 8) {
-                ForEach(data, id: \.label) { d in
-                    HStack(spacing: 4) {
-                        Circle().fill(d.color).frame(width: 8, height: 8)
-                        Text("\(d.label) \(d.value)")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity)
-        }
     }
 }

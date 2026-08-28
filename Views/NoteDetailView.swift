@@ -328,8 +328,9 @@ struct FolderPickerView: View {
     @Binding var selectedFolderId: UUID?
     @State private var currentParentId: UUID? = nil
     
+    private var storage: StorageService { appState.storage! }
+    
     var body: some View {
-        let storage = appState.storage
         List {
             Button {
                 selectedFolderId = nil

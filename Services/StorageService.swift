@@ -116,7 +116,7 @@ final class StorageService: ObservableObject {
     
     @discardableResult
     func createNote(title: String, folderId: UUID?, markdownContent: String = "", tags: [String] = []) -> Note {
-        var note = Note(
+        let note = Note(
             title: title,
             folderId: folderId,
             markdownContent: markdownContent.isEmpty ? defaultMarkdown(for: title) : markdownContent,
@@ -163,8 +163,6 @@ final class StorageService: ObservableObject {
         
         let oldMeta = noteMetas[idx]
         let fileURL = noteFileURL(for: note)
-        let oldURL = fileSystem.notesRootDirectory
-            .appendingPathComponent(oldMeta.fileName)  // 不完整路径，下面用旧 folder 构建
         // 删除旧文件（仅当文件夹或标题发生变更时）
         if oldMeta.title != note.title || oldMeta.folderId != note.folderId {
             let oldFileURL = buildOldFileURL(meta: oldMeta)

@@ -90,7 +90,7 @@ final class MarkdownRenderer {
             }
             
             // 有序列表
-            if let match = line.range(of: #"^\d+\.\s"#, options: .regularExpression) {
+            if line.range(of: #"^\d+\.\s"#, options: .regularExpression) != nil {
                 var items: [String] = []
                 while i < lines.count {
                     let l = lines[i]
@@ -256,7 +256,7 @@ struct InlineMarkdownText: View {
             case .normal, .bold, .italic, .boldItalic:
                 t = t.foregroundColor(color)
             }
-            if let url = seg.linkURL {
+            if seg.linkURL != nil {
                 return partial + t.underline().foregroundColor(.blue)
             }
             return partial + t

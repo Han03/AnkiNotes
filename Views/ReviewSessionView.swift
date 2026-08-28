@@ -222,24 +222,27 @@ struct ReviewSessionView: View {
         )
     }
     
-    @ViewBuilder
     private func stateLabel(_ state: SRSData.CardState) -> some View {
-        let (text, color): (String, Color)
-        switch state {
-        case .new: text = "新"; color = .blue
-        case .learning: text = "学"; color = .orange
-        case .relearning: text = "重学"; color = .red
-        case .review: text = "复习"; color = .green
-        }
-        Text(text)
+        let mapping: [(SRSData.CardState, String, Color)] = [
+            (.new, "新", .blue),
+            (.learning, "学", .orange),
+            (.relearning, "重学", .red),
+            (.review, "复习", .green)
+        ]
+        let result = mapping.first(where: { $0.0 == state }) ?? (.new, "新", .blue)
+        return Text(result.1)
             .font(.caption2.bold())
             .padding(.horizontal, 6).padding(.vertical, 3)
-            .background(color.opacity(0.15))
-            .foregroundColor(color)
+            .background(result.2.opacity(0.15))
+            .foregroundColor(result.2)
             .cornerRadius(6)
     }
     
     // MARK: - 评级按钮
+    
+    private var shortcutButtons: [(key: String, rating: ReviewRating)] {
+        [("1 重来", .again), ("2 困难", .hard), ("3 良好", .good), ("4 简单", .easy)]
+    }
     
     @ViewBuilder
     private func ratingButtons(note: Note, scheduler: SchedulerService) -> some View {
@@ -274,10 +277,7 @@ struct ReviewSessionView: View {
             }
             
             HStack(spacing: 10) {
-                let shortcutInfo: [(key: String, rating: ReviewRating)] = [
-                    ("1 重来", .again), ("2 困难", .hard), ("3 良好", .good), ("4 简单", .easy)
-                ]
-                ForEach(shortcutInfo, id: \.key) { info in
+                ForEach(shortcutButtons, id: \.key) { info in
                     Button {
                         applyRating(info.rating)
                     } label: {
