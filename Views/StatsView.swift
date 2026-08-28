@@ -163,71 +163,7 @@ struct StatsView: View {
     }
 }
 
-// MARK: - 辅助组件
-
-private struct BigStat: View {
-    let title: String
-    let value: String
-    let systemImage: String
-    let color: Color
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: systemImage)
-                    .foregroundColor(color)
-                Spacer()
-                Text(value)
-                    .font(.title.bold())
-            }
-            Text(title)
-                .font(.caption)
-                .foregroundColor(.secondary)
-        }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(Color(.systemBackground))
-        )
-        .shadow(color: .black.opacity(0.05), radius: 6, y: 2)
-    }
-}
-
-private struct DistributionCard: View {
-    let title: String
-    let value: Int
-    let total: Int
-    let color: Color
-    let systemImage: String
-    
-    var body: some View {
-        let ratio = total > 0 ? CGFloat(value) / CGFloat(total) : 0
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: systemImage)
-                    .foregroundColor(color)
-                    .font(.system(size: 14, weight: .bold))
-                Spacer()
-                Text("\(value)")
-                    .font(.headline.bold())
-            }
-            Text(title)
-                .font(.caption2)
-                .foregroundColor(.secondary)
-            ProgressView(value: ratio)
-                .tint(color)
-                .scaleEffect(x: 1, y: 1.5)
-            Text(String(format: "%.0f%%", ratio * 100))
-                .font(.caption2)
-                .foregroundColor(.secondary)
-        }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(color.opacity(0.08))
-        )
-    }
-}
+// MARK: - 评级分布（仅本页使用）
 
 private struct RatingDistributionView: View {
     @EnvironmentObject var appState: AppState
