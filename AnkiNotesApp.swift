@@ -16,7 +16,7 @@ struct AnkiNotesApp: App {
                 .environmentObject(appState)
                 // 注入全局文字缩放倍率 → 所有 .textStyle() modifier 自动生效
                 .environment(\.textScale, appState.textScale)
-                .onAppear { Task { await appState.bootstrap() } }
+                .onAppear { appState.bootstrap() }
         }
     }
 }
@@ -102,8 +102,10 @@ final class AppState: ObservableObject {
     private static let keyTextScale     = "AnkiNotes.TextScale"
 
     // MARK: - 启动
-
-    func bootstrap() async {
+    // 注意：bootstrap 是同步方法，确保 MainTabView Preview 与 App.init 里都能直接调用，
+    // 避免 Swift 宏展开为 @__swiftmacro…PreviewfMf_.swift 时报出 "'async' call in a function that does not support concurrency"。
+    // WebDAV 测试连接这类真正需要 async 的场景已独立为 testCurrentWebDAVConnection() async。
+    func bootstrap() {
         // 1) 恢复上次选择的 Provider
         if let raw = UserDefaults.standard.string(forKey: Self.keyProviderType),
            let t = CloudProviderType(rawValue: raw) {
