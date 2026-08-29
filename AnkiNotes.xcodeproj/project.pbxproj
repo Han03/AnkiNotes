@@ -25,6 +25,7 @@
 		ANReviewHome /* ReviewHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANReviewHomeRef /* ReviewHomeView.swift */; };
 		ANReviewSession /* ReviewSessionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANReviewSessionRef /* ReviewSessionView.swift */; };
 		ANStats /* StatsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANStatsRef /* StatsView.swift */; };
+		ANSett /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANSettRef /* SettingsView.swift */; };
 		ANFrontMat /* MarkdownFrontmatterParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANFrontMatRef /* MarkdownFrontmatterParser.swift */; };
 		ANCloudProvider /* CloudProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANCloudProviderRef /* CloudProvider.swift */; };
 /* End PBXBuildFile section */
@@ -47,6 +48,7 @@
 		ANReviewHomeRef /* ReviewHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewHomeView.swift; sourceTree = "<group>"; };
 		ANReviewSessionRef /* ReviewSessionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewSessionView.swift; sourceTree = "<group>"; };
 		ANStatsRef /* StatsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsView.swift; sourceTree = "<group>"; };
+		ANSettRef /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		ANSharedViewRef /* SharedViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedViews.swift; sourceTree = "<group>"; };
 		ANFrontMatRef /* MarkdownFrontmatterParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownFrontmatterParser.swift; sourceTree = "<group>"; };
 		ANCloudProviderRef /* CloudProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudProvider.swift; sourceTree = "<group>"; };
@@ -114,6 +116,7 @@
 				ANReviewHomeRef /* ReviewHomeView.swift */,
 				ANReviewSessionRef /* ReviewSessionView.swift */,
 				ANStatsRef /* StatsView.swift */,
+				ANSettRef /* SettingsView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -222,6 +225,7 @@
 				ANReviewHome /* ReviewHomeView.swift in Sources */,
 				ANReviewSession /* ReviewSessionView.swift in Sources */,
 				ANStats /* StatsView.swift in Sources */,
+				ANSett /* SettingsView.swift in Sources */,
 				ANFrontMat /* MarkdownFrontmatterParser.swift in Sources */,
 				ANCloudProvider /* CloudProvider.swift in Sources */,
 			);

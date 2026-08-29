@@ -49,11 +49,20 @@ final class AppState: ObservableObject {
     @Published var totalNotes:   Int = 0
     @Published var totalFolders: Int = 0
 
+    /// 主 Tabs 的选中索引（0 笔记 / 1 复习 / 2 统计 / 3 设置），方便 StatsView 页面内部「前往设置」按钮直接切 Tab
+    @Published var mainTabIndex: Int = 0
+
     // MARK: - Provider 选择 & 配置（持久化）
+
+    /// 内部回退保护标志：当 applyCurrentProviderSelection() 因配置不完整
+    /// 而强制把 selectedProvider 写回旧值时，临时关闭 didSet 逻辑，
+    /// 避免再次触发异步 applyCurrentProviderSelection 导致 UI "选完 WebDAV → 立刻跳回本机" 的 bug。
+    private var isRollingBackProviderSelection = false
 
     @Published var selectedProvider: CloudProviderType = .local {
         didSet {
             guard isBootstrapped else { return }
+            guard !isRollingBackProviderSelection else { return }
             guard oldValue != selectedProvider else { return }
             // 切换时：把当前配置用起来，执行迁移
             Task { @MainActor in
@@ -147,21 +156,27 @@ final class AppState: ObservableObject {
             applyFileSystem(type: type, webDAVConfig: webDAVConfig, migrateFromScratch: true)
 
         case .webDAV:
-            // 先保存密码到 Keychain（如果 pending 有值就写）
-            if !pendingWebDAVPassword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            // 先保存密码到 Keychain（如果 pending 有值就写；如果 pending 为空但 Keychain 已有密码，
+            // 复用旧密码——避免用户只是改了 provider 选择器而被判定为"密码缺失"直接回退）
+            let pendingPwd = pendingWebDAVPassword.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !pendingPwd.isEmpty {
                 do {
-                    try KeychainHelper.setWebDAVPassword(pendingWebDAVPassword.trimmingCharacters(in: .whitespacesAndNewlines))
+                    try KeychainHelper.setWebDAVPassword(pendingPwd)
                 } catch {
                     providerStatus = "❌ WebDAV 密码保存到 Keychain 失败：\(error.localizedDescription)"
                     return
                 }
             }
-            // 如果配置不完整，就不能切
-            guard webDAVConfig.isComplete,
-                  !(KeychainHelper.webDAVPassword()?.isEmpty ?? true) else {
-                providerStatus = "⚠️ WebDAV 配置不完整（地址/用户名/密码缺一不可），已回退选择。"
-                // 弹回去（防止 didSet 再次循环调用）
-                if selectedProvider == .webDAV { selectedProvider = activeFS.providerType }
+            // 如果配置不完整，就不能切（密码：pending 或 Keychain 任一非空即视为有）
+            let finalPwd = (pendingPwd.isEmpty ? KeychainHelper.webDAVPassword() : pendingPwd) ?? ""
+            guard webDAVConfig.isComplete, !finalPwd.isEmpty else {
+                providerStatus = "⚠️ WebDAV 配置不完整（地址/用户名/密码缺一不可），请在下方表单填好后再把 Picker 选回 WebDAV。"
+                // 弹回去（使用保护标志防止 didSet 再次触发异步切换 → 形成"一选就跳回本机"的假象）
+                if selectedProvider == .webDAV {
+                    isRollingBackProviderSelection = true
+                    selectedProvider = activeFS.providerType
+                    isRollingBackProviderSelection = false
+                }
                 return
             }
             // 保存配置
