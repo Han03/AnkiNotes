@@ -47,6 +47,10 @@ struct QuizHomeView: View {
         .onAppear {
             refreshStats()
         }
+        // 下拉刷新题库统计
+        .refreshable {
+            refreshStats()
+        }
         .fullScreenCover(isPresented: $showingQuiz) {
             NavigationStack {
                 QuizSessionView(questionCount: selectedCount)

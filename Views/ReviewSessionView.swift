@@ -15,7 +15,6 @@ struct ReviewSessionView: View {
     
     @State private var queue: [Note] = []
     @State private var currentIndex = 0
-    @State private var showAnswer = false
     @State private var cardStartTime = Date()
     @State private var reviewedCount = 0
     @State private var sessionComplete = false
@@ -90,136 +89,43 @@ struct ReviewSessionView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
             
-            // 卡片区
-            ZStack {
-                // 卡片本体
-                ZStack {
-                    // 正面
-                    cardFace(front: true, note: note)
-                        .opacity(showAnswer ? 0 : 1)
-                        .rotation3DEffect(.degrees(showAnswer ? 90 : 0), axis: (x: 0, y: 1, z: 0))
-                    // 背面
-                    cardFace(front: false, note: note)
-                        .opacity(showAnswer ? 1 : 0)
-                        .rotation3DEffect(.degrees(showAnswer ? 0 : -90), axis: (x: 0, y: 1, z: 0))
-                }
-                .rotation3DEffect(.degrees(cardDegrees), axis: (x: 0, y: 1, z: 0))
-                .offset(x: offsetX)
-                .gesture(
-                    TapGesture()
-                        .onEnded {
-                            if !showAnswer { flipCard() }
-                        }
-                )
-                .gesture(
-                    DragGesture()
-                        .onChanged { v in
-                            offsetX = v.translation.width
-                            cardDegrees = Double(v.translation.width / 20)
-                        }
-                        .onEnded { v in
-                            if abs(v.translation.width) > 150 {
-                                // 滑走，跳过或显示答案
-                                withAnimation(.easeOut) {
-                                    offsetX = v.translation.width > 0 ? 500 : -500
-                                    cardDegrees = v.translation.width > 0 ? 20 : -20
-                                }
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                                    offsetX = 0
-                                    cardDegrees = 0
-                                    if !showAnswer { flipCard() }
-                                    else { applyRating(.good) }
-                                }
-                            } else {
-                                withAnimation { offsetX = 0; cardDegrees = 0 }
-                            }
-                        }
-                )
-                
-                if !showAnswer {
-                    VStack {
+            // 笔记内容区（直接展示完整内容，取消翻卡机制）
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    // 笔记标题和状态
+                    HStack(spacing: 8) {
+                        stateLabel(note.srs.cardState)
+                        Text(note.title)
+                            .font(.headline)
+                            .lineLimit(2)
                         Spacer()
-                        Text("点击卡片显示答案")
-                            .textStyle(.secondaryText)
+                        let sched = SM2Algorithm.dueDescription(note.srs.dueDate)
+                        Text(sched)
+                            .font(.caption)
                             .foregroundColor(.secondary)
-                            .padding(.bottom, 20)
                     }
+                    
+                    Divider()
+                    
+                    // 完整笔记内容
+                    MarkdownView(markdown: note.markdownContent)
                 }
+                .padding(20)
             }
-            .frame(maxHeight: .infinity)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color(.systemBackground))
+            )
             .padding(.horizontal, 16)
+            .padding(.vertical, 8)
             
-            // 评级按钮
-            if showAnswer {
-                ratingButtons(note: note, scheduler: scheduler)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 20)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            } else {
-                Button {
-                    flipCard()
-                } label: {
-                    Text("显示答案")
-                        .bold()
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 16)
-                        .background(
-                            LinearGradient(
-                                colors: [.blue, .purple],
-                                startPoint: .leading, endPoint: .trailing)
-                        )
-                        .foregroundColor(.white)
-                        .cornerRadius(14)
-                }
+            // 评级按钮（直接显示，不需要先翻卡）
+            ratingButtons(note: note, scheduler: scheduler)
                 .padding(.horizontal, 16)
                 .padding(.bottom, 20)
-            }
         }
         .background(Color(.systemGroupedBackground))
-    }
-    
-    // MARK: - 卡片面
-    
-    @ViewBuilder
-    private func cardFace(front: Bool, note: Note) -> some View {
-        let content = front ? note.cardFront : (note.cardBack.isEmpty ? "（暂无答案内容）" : note.cardBack)
-        let color = front ? Color.blue : Color.green
-        VStack(alignment: .leading, spacing: 14) {
-            // 顶部标签
-            HStack(spacing: 8) {
-                Text(front ? "正面" : "背面")
-                    .textStyle(.subsectionTitle)
-                    .padding(.horizontal, 8).padding(.vertical, 3)
-                    .background(color.opacity(0.18))
-                    .foregroundColor(color)
-                    .cornerRadius(6)
-                stateLabel(note.srs.cardState)
-                Spacer()
-                let sched = SM2Algorithm.dueDescription(note.srs.dueDate)
-                Text(sched)
-                    .textStyle(.miniText)
-                    .foregroundColor(.secondary)
-            }
-            
-            ScrollView {
-                if front {
-                    MarkdownView(markdown: "# " + content, bodyFont: .title2, textColor: .primary)
-                } else {
-                    MarkdownView(markdown: content)
-                }
-            }
-        }
-        .padding(20)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(
-            RoundedRectangle(cornerRadius: 20)
-                .fill(Color(.systemBackground))
-                .shadow(color: .black.opacity(0.1), radius: 10, y: 4)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 20)
-                .stroke(color.opacity(0.25), lineWidth: 1.5)
-        )
     }
     
     private func stateLabel(_ state: SRSData.CardState) -> some View {
@@ -241,13 +147,13 @@ struct ReviewSessionView: View {
     // MARK: - 评级按钮
     
     private var shortcutButtons: [(key: String, rating: ReviewRating)] {
-        [("1 重来", .again), ("2 困难", .hard), ("3 良好", .good), ("4 简单", .easy)]
+        [("1 极难", .again), ("2 困难", .hard), ("3 良好", .good), ("4 简单", .easy)]
     }
     
     @ViewBuilder
     private func ratingButtons(note: Note, scheduler: SchedulerService) -> some View {
         VStack(spacing: 10) {
-            Text("你还记得这张卡片吗？")
+            Text("请根据对笔记内容的掌握程度选择评级")
                 .textStyle(.secondaryText)
                 .foregroundColor(.secondary)
             
@@ -297,12 +203,6 @@ struct ReviewSessionView: View {
     
     // MARK: - 操作
     
-    private func flipCard() {
-        withAnimation(.easeInOut(duration: 0.35)) {
-            showAnswer.toggle()
-        }
-    }
-    
     private func applyRating(_ rating: ReviewRating) {
         guard currentIndex < queue.count else { return }
         let note = queue[currentIndex]
@@ -321,7 +221,6 @@ struct ReviewSessionView: View {
                 sessionComplete = true
             } else {
                 currentIndex += 1
-                showAnswer = false
                 offsetX = 0
                 cardDegrees = 0
                 cardStartTime = Date()

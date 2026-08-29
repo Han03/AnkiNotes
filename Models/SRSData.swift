@@ -41,7 +41,7 @@ enum ReviewRating: Int, Codable, CaseIterable, Identifiable {
     
     var description: String {
         switch self {
-        case .again: return "重来"
+        case .again: return "极难"
         case .hard:  return "困难"
         case .good:  return "良好"
         case .easy:  return "简单"

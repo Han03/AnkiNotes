@@ -127,9 +127,14 @@ struct ReviewHomeView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("按文件夹复习")
                         .textStyle(.sectionTitle)
-                    let folders = storage.getAllFolders()
+                    let folders = storage.getAllFolders().filter { folder in
+                        // 只显示有复习任务或有笔记的文件夹（递归统计）
+                        let dueCount = scheduler.getTodayDueCount(in: folder.id)
+                        let noteCount = storage.countNotesRecursive(in: folder.id)
+                        return dueCount > 0 || noteCount > 0
+                    }
                     if folders.isEmpty {
-                        Text("尚未创建文件夹")
+                        Text("暂无需要复习的文件夹")
                             .foregroundColor(.secondary)
                             .textStyle(.secondaryText)
                     }

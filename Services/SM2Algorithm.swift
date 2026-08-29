@@ -13,7 +13,7 @@ import Foundation
 enum SM2Algorithm {
     
     // MARK: - 学习阶段的短间隔（分钟）
-    private static let learningIntervalsMinutes: [Int] = [1, 10]   // 学习阶段 Again 回到 1min，Hard/Graduate
+    private static let learningIntervalsMinutes: [Int] = [1, 10]   // 已弃用，所有最小间隔改为1天
     private static let graduatingIntervalDays: Int = 1              // 学习阶段 Good => 1天
     private static let easyIntervalDays: Int = 4                    // 学习阶段 Easy => 4天
     
@@ -46,14 +46,14 @@ enum SM2Algorithm {
     private static func applyLearningRating(current srs: inout SRSData, rating: ReviewRating) -> SRSData {
         switch rating {
         case .again:
-            // Again: 回到学习第0步（1分钟）
+            // Again: 1天后复习（避免当天重复）
             srs.repetitions = 0
             srs.cardState = .learning
-            srs.dueDate = Date().addingTimeInterval(TimeInterval(learningIntervalsMinutes[0] * 60))
+            srs.dueDate = Calendar.current.date(byAdding: .day, value: 1, to: startOfDay())!
         case .hard:
-            // Hard: 当前学习步骤延长，约中间值 5 分钟
+            // Hard: 1天后复习（避免当天重复）
             srs.cardState = .learning
-            srs.dueDate = Date().addingTimeInterval(5 * 60)
+            srs.dueDate = Calendar.current.date(byAdding: .day, value: 1, to: startOfDay())!
         case .good:
             // Good: 毕业了，进入 review，间隔 1 天
             srs.repetitions = 1
@@ -79,12 +79,12 @@ enum SM2Algorithm {
         
         switch rating {
         case .again:
-            // 遗忘，进入重新学习
+            // 遗忘，1天后重新复习
             srs.repetitions = 0
             srs.interval = 0
             srs.cardState = .relearning
             srs.easeFactor = max(1.3, srs.easeFactor - 0.20)
-            srs.dueDate = Date().addingTimeInterval(TimeInterval(learningIntervalsMinutes[0] * 60))
+            srs.dueDate = Calendar.current.date(byAdding: .day, value: 1, to: startOfDay())!
             
         case .hard:
             // 当前间隔 × 1.2，EF - 0.15
@@ -125,12 +125,12 @@ enum SM2Algorithm {
     private static func applyRelearningRating(current srs: inout SRSData, rating: ReviewRating) -> SRSData {
         switch rating {
         case .again:
-            // Again: 回到 1 分钟
+            // Again: 1天后复习（避免当天重复）
             srs.cardState = .relearning
-            srs.dueDate = Date().addingTimeInterval(TimeInterval(learningIntervalsMinutes[0] * 60))
+            srs.dueDate = Calendar.current.date(byAdding: .day, value: 1, to: startOfDay())!
         case .hard:
             srs.cardState = .relearning
-            srs.dueDate = Date().addingTimeInterval(5 * 60)
+            srs.dueDate = Calendar.current.date(byAdding: .day, value: 1, to: startOfDay())!
         case .good:
             // 重新毕业：使用原间隔（至少1天）作为恢复起点
             let newInterval = max(1, srs.interval == 0 ? 1 : srs.interval)

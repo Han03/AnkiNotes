@@ -32,6 +32,7 @@ final class QuizService {
     private(set) var isGenerating = false  // 是否正在生成题目
     private(set) var isCancelled = false    // 是否被用户取消
     private(set) var failedNoteIds: Set<UUID> = []  // 生成失败的笔记ID（可重试）
+    private var currentAPITask: URLSessionDataTask?  // 当前正在进行的 API 请求任务
 
     private let fileURL: URL
     private let generatedIdsURL: URL
@@ -144,9 +145,11 @@ final class QuizService {
 
     // MARK: - 大模型生成题目
 
-    /// 取消正在进行的题目生成
+    /// 取消正在进行的题目生成（立即响应，取消正在进行的网络请求）
     func cancelGeneration() {
         isCancelled = true
+        currentAPITask?.cancel()
+        currentAPITask = nil
     }
     
     /// 为所有未生成题目的笔记生成题目（后台异步执行）
@@ -284,6 +287,9 @@ final class QuizService {
 
     /// 调用百炼 API
     private func callBailianAPI(prompt: String, config: BailianConfig) -> String? {
+        // 如果已被取消，立即返回
+        guard !isCancelled else { return nil }
+        
         let url = URL(string: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -307,8 +313,14 @@ final class QuizService {
 
         let task = URLSession.shared.dataTask(with: request) { data, response, error in
             defer { semaphore.signal() }
+            // 如果被取消，不处理结果
+            guard !self.isCancelled else { return }
             guard let data = data, error == nil else {
-                print("⚠️ 百炼 API 请求失败: \(error?.localizedDescription ?? "unknown")")
+                if let error = error as? URLError, error.code == .cancelled {
+                    print("ℹ️ 百炼 API 请求已取消")
+                } else {
+                    print("⚠️ 百炼 API 请求失败: \(error?.localizedDescription ?? "unknown")")
+                }
                 return
             }
             if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -321,8 +333,10 @@ final class QuizService {
                 print("⚠️ 百炼 API 响应解析失败: \(String(data: data, encoding: .utf8) ?? "")")
             }
         }
+        currentAPITask = task
         task.resume()
         _ = semaphore.wait(timeout: .now() + 120)  // 超时 120 秒
+        currentAPITask = nil
         return result
     }
 
