@@ -20,16 +20,16 @@ struct FolderBrowserView: View {
     @State private var searchText = ""
     @State private var editingNoteId: UUID?
     @State private var displayCount = 10  // 分页加载，默认显示10条
+    @State private var searchedNoteId: UUID?  // 搜索选中的笔记ID，用于跳转
+    @State private var isLoadingMore = false  // 是否正在加载更多
     
     var body: some View {
         let storage = appState.storage!
         let subFolders = storage.getSubFolders(of: currentFolderId)
         // 递归获取当前文件夹及所有子文件夹的笔记
         let allNotes = storage.getAllNotesRecursive(in: currentFolderId)
-        let filteredNotes = searchText.isEmpty
-            ? allNotes
-            : allNotes.filter { $0.title.localizedCaseInsensitiveContains(searchText) ||
-                $0.markdownContent.localizedCaseInsensitiveContains(searchText) }
+        // 搜索时不直接过滤列表，而是通过 searchSuggestions 下拉浮层展示
+        let filteredNotes = allNotes
         // 分页显示
         let displayedNotes = Array(filteredNotes.prefix(displayCount))
         
@@ -60,18 +60,16 @@ struct FolderBrowserView: View {
             }
             
             Section {
-                if filteredNotes.isEmpty && searchText.isEmpty {
+                if filteredNotes.isEmpty {
                     EmptyStateView("暂无笔记",
                                    systemImage: "note.text",
                                    description: Text("点击右上角 + 新建笔记"))
-                } else if filteredNotes.isEmpty {
-                    EmptyStateView("无搜索结果", systemImage: "magnifyingglass")
                 } else {
                     ForEach(displayedNotes) { note in
                         NavigationLink {
                             NoteDetailView(noteId: note.id)
                         } label: {
-                            NoteRow(note: note, folderPath: storage.getNoteFolderPath(for: note))
+                            NoteRow(note: note, folderPath: storage.getNoteFolderPath(for: note), hasQuestions: appState.quizService.generatedNoteIds.contains(note.id))
                         }
                         .swipeActions(edge: .leading) {
                             Button {
@@ -95,20 +93,34 @@ struct FolderBrowserView: View {
                 Text("笔记 · \(filteredNotes.count)")
             }
             
-            // 加载更多
+            // 滚动到底部自动加载更多
             if displayedNotes.count < filteredNotes.count {
                 Section {
-                    Button {
-                        displayCount += 10
-                    } label: {
-                        HStack {
-                            Spacer()
-                            Text("加载更多（\(filteredNotes.count - displayedNotes.count) 条）")
+                    HStack {
+                        Spacer()
+                        if isLoadingMore {
+                            ProgressView()
+                                .padding(.vertical, 12)
+                            Text("加载中...")
+                                .foregroundColor(.secondary)
+                                .font(.subheadline)
+                        } else {
+                            Text("加载更多")
                                 .foregroundColor(.blue)
-                            Spacer()
+                                .font(.subheadline)
+                        }
+                        Spacer()
+                    }
+                    .padding(.vertical, 8)
+                    .onAppear {
+                        // 当这个视图出现时，自动加载更多
+                        guard !isLoadingMore else { return }
+                        isLoadingMore = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            displayCount += 10
+                            isLoadingMore = false
                         }
                     }
-                    .buttonStyle(.plain)
                 }
             }
         }
@@ -116,6 +128,60 @@ struct FolderBrowserView: View {
         .navigationTitle(currentFolder?.name ?? "全部笔记")
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $searchText, prompt: "搜索笔记标题或内容")
+        // 搜索建议下拉浮层：最多5条，高亮匹配字符，选中跳转详情
+        .searchSuggestions {
+            if !searchText.isEmpty {
+                let searchResults = allNotes.filter {
+                    $0.title.localizedCaseInsensitiveContains(searchText) ||
+                    $0.markdownContent.localizedCaseInsensitiveContains(searchText)
+                }.prefix(5)
+                if searchResults.isEmpty {
+                    Text("无匹配结果")
+                        .foregroundColor(.secondary)
+                } else {
+                    ForEach(Array(searchResults)) { note in
+                        Button {
+                            searchedNoteId = note.id
+                            searchText = ""
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "magnifyingglass")
+                                    .foregroundColor(.secondary)
+                                    .font(.caption)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    highlightedText(note.title, searchText: searchText)
+                                        .font(.subheadline)
+                                        .lineLimit(1)
+                                    // 显示文件夹路径
+                                    let path = storage.getNoteFolderPath(for: note)
+                                    Text(path)
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                        .lineLimit(1)
+                                }
+                                Spacer()
+                            }
+                            .padding(.vertical, 4)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        // 搜索选中后跳转到详情
+        .background(
+            NavigationLink(destination: Group {
+                if let noteId = searchedNoteId {
+                    NoteDetailView(noteId: noteId)
+                }
+            }, isActive: Binding(
+                get: { searchedNoteId != nil },
+                set: { if !$0 { searchedNoteId = nil } }
+            )) {
+                EmptyView()
+            }
+            .hidden()
+        )
         // 下拉刷新：从云端同步笔记到本地（全局唯一同步入口）
         .refreshable {
             await withCheckedContinuation { continuation in
@@ -238,15 +304,23 @@ private struct FolderRow: View {
 private struct NoteRow: View {
     let note: Note
     let folderPath: String
+    let hasQuestions: Bool
     
     var body: some View {
         HStack(spacing: 12) {
             statusIcon
                 .frame(width: 32)
             VStack(alignment: .leading, spacing: 4) {
-                Text(note.title)
-                    .textStyle(.sectionTitle)
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(note.title)
+                        .textStyle(.sectionTitle)
+                        .lineLimit(1)
+                    if hasQuestions {
+                        Image(systemName: "questionmark.circle.fill")
+                            .foregroundColor(.purple)
+                            .font(.caption)
+                    }
+                }
                 // 文件夹路径小字标识
                 Text(folderPath)
                     .font(.caption2)
@@ -309,6 +383,27 @@ private struct NoteRow: View {
     private var dueText: String {
         SM2Algorithm.dueDescription(note.srs.dueDate)
     }
+}
+
+// MARK: - 搜索高亮文本
+
+private func highlightedText(_ text: String, searchText: String) -> Text {
+    guard !searchText.isEmpty else { return Text(text) }
+    var result = Text("")
+    var remaining = text
+    while let range = remaining.range(of: searchText, options: .caseInsensitive) {
+        let before = String(remaining[..<range.lowerBound])
+        let matched = String(remaining[range])
+        if !before.isEmpty {
+            result = result + Text(before)
+        }
+        result = result + Text(matched).bold().foregroundColor(.blue)
+        remaining = String(remaining[range.upperBound...])
+    }
+    if !remaining.isEmpty {
+        result = result + Text(remaining)
+    }
+    return result
 }
 
 // MARK: - UUID Binding helper

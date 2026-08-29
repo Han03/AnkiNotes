@@ -350,10 +350,18 @@ final class AppState: ObservableObject {
             config: bailianConfig,
             onProgress: { [weak self] current, total, title in
                 self?.generationProgress = (current, total, title)
+                // 每处理完一篇笔记都刷新题库统计
+                DispatchQueue.main.async {
+                    self?.objectWillChange.send()
+                }
             },
             completion: { [weak self] newCount, processedCount, wasCancelled in
                 self?.isGeneratingQuestions = false
                 self?.generationProgress = nil
+                // 生成完成后刷新统计
+                DispatchQueue.main.async {
+                    self?.objectWillChange.send()
+                }
                 completion?(newCount, processedCount, wasCancelled)
             }
         )

@@ -116,16 +116,31 @@ final class StorageService: ObservableObject {
     }
 
     /// 递归获取指定文件夹及其所有子文件夹中的笔记
+    /// 排序规则：当前文件夹层级的笔记优先（按标题升序），然后子文件夹笔记按路径升序+标题升序
     func getAllNotesRecursive(in folderId: UUID?) -> [Note] {
-        var result: [Note] = []
-        // 当前文件夹的笔记
-        result.append(contentsOf: getNotes(in: folderId))
-        // 递归子文件夹
+        // 当前文件夹的笔记（按标题升序）
+        let currentNotes = getNotes(in: folderId)
+            .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+        
+        // 递归获取所有子文件夹的笔记
+        var subNotes: [(note: Note, path: String)] = []
         let subFolders = getSubFolders(of: folderId)
         for sub in subFolders {
-            result.append(contentsOf: getAllNotesRecursive(in: sub.id))
+            let notes = getAllNotesRecursive(in: sub.id)
+            for note in notes {
+                let path = getFolderPath(for: note.folderId)
+                subNotes.append((note: note, path: path))
+            }
         }
-        return result.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+        // 子文件夹笔记按路径升序+标题升序
+        subNotes.sort { a, b in
+            if a.path != b.path {
+                return a.path.localizedStandardCompare(b.path) == .orderedAscending
+            }
+            return a.note.title.localizedStandardCompare(b.note.title) == .orderedAscending
+        }
+        
+        return currentNotes + subNotes.map { $0.note }
     }
 
     /// 递归统计指定文件夹及其所有子文件夹中的笔记数量

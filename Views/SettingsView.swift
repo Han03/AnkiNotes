@@ -34,7 +34,7 @@ struct SettingsView: View {
     private var cloudProviderSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Label("☁️ 云盘 & 存储位置", systemImage: "externaldrive.badge.icloud")
+                Label("云盘 & 存储位置", systemImage: "externaldrive.badge.icloud")
                     .textStyle(.subsectionTitle)
                 Spacer()
                 Image(systemName: appState.iCloudContainerAvailable ? "icloud.fill" : "icloud.slash")
@@ -88,14 +88,14 @@ struct SettingsView: View {
     private var webDAVConfigForm: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Image(systemName: "network.badge.shield.half.filled").foregroundStyle(.purple)
-                Text("🥇 WebDAV 连接配置")
+                Image(systemName: "network").foregroundStyle(.purple)
+                Text("WebDAV 连接配置")
                     .textStyle(.subsectionTitle)
                     .foregroundStyle(.primary)
                 Spacer()
             }
             // 新 UX：先占位显示表单 → 填完地址/用户/密码 → 点 💾保存并应用 才真的把 activeFS 重写为 WebDAV 后端
-            Text("👇 先把下面 5 项填完 → 点底部紫色「💾保存并应用 WebDAV 配置」按钮完成切换（期间可随时点🔗测试连接先确认连通性）。")
+            Text("填写以下配置后，点击底部「保存并应用 WebDAV 配置」按钮完成切换。可先点击「测试连接」确认连通性。")
                 .textStyle(.miniText)
                 .foregroundStyle(.secondary)
                 .padding(.top, -2)
@@ -129,7 +129,7 @@ struct SettingsView: View {
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "square.and.arrow.down.fill")
-                    Text("💾 保存并应用 WebDAV 配置")
+                    Text("保存并应用 WebDAV 配置")
                         .fontWeight(.semibold)
                 }
                 .frame(maxWidth: .infinity)
@@ -180,7 +180,7 @@ struct SettingsView: View {
                         .textStyle(.tertiaryText)
                         .foregroundStyle(.primary)
                 }
-                Text("• 推荐：🥜**坚果云**（免费版即可，个人设置 → 安全选项 → 添加应用 → 复制生成的应用专用密码，服务器填 `https://dav.jianguoyun.com/dav/`）").textStyle(.miniText).foregroundStyle(.secondary)
+                Text("• 推荐：坚果云（免费版即可，个人设置 → 安全选项 → 添加应用 → 复制生成的应用专用密码，服务器填 `https://dav.jianguoyun.com/dav/`）").textStyle(.miniText).foregroundStyle(.secondary)
                 Text("• 或：群晖 DSM「WebDAV Server」、Nextcloud、AList（可挂载百度/阿里云盘后对外暴露 WebDAV）。").textStyle(.miniText).foregroundStyle(.secondary)
                 Text("• 点 💾保存并应用 成功后，自动把本机 Notes + .metadata 迁移到远端（冲突时备份为 _backup_时间戳），数据双保险。").textStyle(.miniText).foregroundStyle(.secondary)
             }
@@ -228,7 +228,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 4) {
                 Image(systemName: "internaldrive").foregroundStyle(.gray)
-                Text("📁 本机存储说明")
+                Text("本机存储说明")
                     .textStyle(.tertiaryText)
                     .foregroundStyle(.primary)
             }
@@ -267,7 +267,7 @@ struct SettingsView: View {
         if let msg = appState.providerStatus {
             testResult = (ok, msg)
         } else if ok {
-            testResult = (true, "✅ 已成功切换为 🥇 WebDAV 并完成数据迁移。")
+            testResult = (true, "已成功切换为 WebDAV 并完成数据迁移。")
         } else {
             testResult = (false, "❌ 切换失败，请查看状态区提示。")
         }
@@ -333,7 +333,7 @@ struct SettingsView: View {
     private var textScaleSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Label("🔠 全局文字大小", systemImage: "textformat.size")
+                Label("全局文字大小", systemImage: "textformat.size")
                     .textStyle(.subsectionTitle)
                 Spacer()
                 Text("当前：\(appState.textScaleLabel)")

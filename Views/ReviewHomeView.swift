@@ -12,6 +12,8 @@ struct ReviewHomeView: View {
     @EnvironmentObject var appState: AppState
     @State private var showingReview = false
     @State private var stats = StatsSummary()
+    @State private var folderDisplayCount = 10  // 文件夹列表分页
+    @State private var isLoadingFolders = false  // 是否正在加载更多文件夹
     
     var body: some View {
         let storage = appState.storage!
@@ -127,19 +129,21 @@ struct ReviewHomeView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("按文件夹复习")
                         .textStyle(.sectionTitle)
-                    let folders = storage.getAllFolders().filter { folder in
+                    let allFolders = storage.getAllFolders().filter { folder in
                         // 只显示有复习任务或有笔记的文件夹（递归统计）
                         let dueCount = scheduler.getTodayDueCount(in: folder.id)
                         let noteCount = storage.countNotesRecursive(in: folder.id)
                         return dueCount > 0 || noteCount > 0
                     }
-                    if folders.isEmpty {
+                    let displayedFolders = Array(allFolders.prefix(folderDisplayCount))
+                    if allFolders.isEmpty {
                         Text("暂无需要复习的文件夹")
                             .foregroundColor(.secondary)
                             .textStyle(.secondaryText)
                     }
-                    ForEach(folders) { folder in
+                    ForEach(displayedFolders) { folder in
                         let count = scheduler.getTodayDueCount(in: folder.id)
+                        let folderPath = storage.getFolderPath(for: folder.id)
                         NavigationLink {
                             ReviewSessionView(folderId: folder.id)
                         } label: {
@@ -147,8 +151,16 @@ struct ReviewHomeView: View {
                                 Image(systemName: "folder.fill")
                                     .foregroundColor(.yellow)
                                     .frame(width: 24)
-                                Text(folder.name)
-                                    .textStyle(.secondaryText)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(folder.name)
+                                        .textStyle(.secondaryText)
+                                        .lineLimit(1)
+                                    // 显示完整文件夹路径
+                                    Text(folderPath)
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                        .lineLimit(1)
+                                }
                                 Spacer()
                                 if count > 0 {
                                     Text("\(count)")
@@ -168,6 +180,33 @@ struct ReviewHomeView: View {
                         }
                         .buttonStyle(.plain)
                         .disabled(count == 0)
+                    }
+                    // 滚动到底部自动加载更多文件夹
+                    if displayedFolders.count < allFolders.count {
+                        HStack {
+                            Spacer()
+                            if isLoadingFolders {
+                                ProgressView()
+                                    .padding(.vertical, 8)
+                                Text("加载中...")
+                                    .foregroundColor(.secondary)
+                                    .font(.subheadline)
+                            } else {
+                                Text("加载更多")
+                                    .foregroundColor(.blue)
+                                    .font(.subheadline)
+                            }
+                            Spacer()
+                        }
+                        .padding(.vertical, 8)
+                        .onAppear {
+                            guard !isLoadingFolders else { return }
+                            isLoadingFolders = true
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                folderDisplayCount += 10
+                                isLoadingFolders = false
+                            }
+                        }
                     }
                 }
                 .padding(18)
