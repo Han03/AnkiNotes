@@ -144,7 +144,7 @@ final class MarkdownRenderer {
             
             // 任务列表
             if (line.starts(with: "- [") || line.starts(with: "* [")) && line.count > 4 {
-                var items: [(text: String, checked: Bool)] = []
+                var items: [TaskItem] = []
                 while i < lines.count {
                     let l = lines[i]
                     if l.starts(with: "- [") || l.starts(with: "* [") {
