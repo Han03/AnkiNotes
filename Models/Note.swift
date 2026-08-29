@@ -82,3 +82,30 @@ struct Note: Identifiable, Codable, Hashable {
         return lines.dropFirst(titleIndex + 1).joined(separator: "\n")
     }
 }
+
+// MARK: - NoteMeta（笔记索引元数据，与 Note 一对一保存在 .metadata/notes_index.json，便于快速枚举而不用读每个 Markdown 文件）
+
+/// 笔记索引条目（避免每次启动全量解析 Markdown）
+struct NoteMeta: Identifiable, Codable, Hashable {
+    let id: UUID
+    var title: String
+    var folderId: UUID?
+    /// 物理文件名（含 .md 后缀，可能带 UUID 前缀 & 非法字符占位）
+    var fileName: String
+    var srs: SRSData
+    var createdAt: Date
+    var updatedAt: Date
+    var tags: [String]
+
+    init(id: UUID, title: String, folderId: UUID?, fileName: String,
+         srs: SRSData, createdAt: Date, updatedAt: Date, tags: [String]) {
+        self.id = id
+        self.title = title
+        self.folderId = folderId
+        self.fileName = fileName
+        self.srs = srs
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.tags = tags
+    }
+}
