@@ -232,37 +232,49 @@ struct QuizHomeView: View {
                 Spacer()
             }
 
-            Button {
-                appState.generateQuestionsForAllNotes { newCount, processedCount in
-                    refreshStats()
-                }
-            } label: {
-                HStack {
-                    Spacer()
-                    if appState.isGeneratingQuestions {
-                        ProgressView()
-                            .tint(.white)
-                        Text("生成中...")
+            if appState.isGeneratingQuestions {
+                // 生成中：显示取消按钮
+                Button {
+                    appState.cancelQuestionGeneration()
+                } label: {
+                    HStack {
+                        Spacer()
+                        Image(systemName: "xmark.circle.fill")
+                        Text("取消生成")
                             .font(.subheadline)
                             .fontWeight(.medium)
-                            .foregroundColor(.white)
-                    } else {
+                        Spacer()
+                    }
+                    .padding(.vertical, 12)
+                    .background(RoundedRectangle(cornerRadius: 10).fill(Color.red))
+                    .foregroundColor(.white)
+                }
+                .buttonStyle(.plain)
+            } else {
+                // 未生成：显示生成按钮
+                Button {
+                    appState.generateQuestionsForAllNotes { newCount, processedCount, wasCancelled in
+                        refreshStats()
+                    }
+                } label: {
+                    HStack {
+                        Spacer()
                         Image(systemName: "wand.and.stars")
                         Text("生成题目")
                             .font(.subheadline)
                             .fontWeight(.medium)
+                        Spacer()
                     }
-                    Spacer()
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(appState.bailianConfig.isConfigured ? Color.purple : Color.gray)
+                    )
+                    .foregroundColor(.white)
                 }
-                .padding(.vertical, 12)
-                .background(
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(appState.bailianConfig.isConfigured && !appState.isGeneratingQuestions ? Color.purple : Color.gray)
-                )
-                .foregroundColor(.white)
+                .buttonStyle(.plain)
+                .disabled(!appState.bailianConfig.isConfigured)
             }
-            .buttonStyle(.plain)
-            .disabled(!appState.bailianConfig.isConfigured || appState.isGeneratingQuestions)
         }
         .padding(18)
         .background(RoundedRectangle(cornerRadius: 18).fill(Color(.systemBackground)))

@@ -332,15 +332,15 @@ final class AppState: ObservableObject {
 
     // MARK: - 题库生成
 
-    /// 为所有未生成题目的笔记生成题目（后台异步）
-    func generateQuestionsForAllNotes(completion: ((Int, Int) -> Void)? = nil) {
+    /// 为所有未生成题目的笔记生成题目（后台异步，每完成一个笔记立即保存）
+    func generateQuestionsForAllNotes(completion: ((Int, Int, Bool) -> Void)? = nil) {
         guard bailianConfig.isConfigured else {
             print("⚠️ 百炼平台未配置，无法生成题目")
-            completion?(0, 0)
+            completion?(0, 0, false)
             return
         }
         guard let storage = storage, let quiz = quizService else {
-            completion?(0, 0)
+            completion?(0, 0, false)
             return
         }
         let allNotes = storage.getAllNotes()
@@ -351,12 +351,17 @@ final class AppState: ObservableObject {
             onProgress: { [weak self] current, total, title in
                 self?.generationProgress = (current, total, title)
             },
-            completion: { [weak self] newCount, processedCount in
+            completion: { [weak self] newCount, processedCount, wasCancelled in
                 self?.isGeneratingQuestions = false
                 self?.generationProgress = nil
-                completion?(newCount, processedCount)
+                completion?(newCount, processedCount, wasCancelled)
             }
         )
+    }
+    
+    /// 取消正在进行的题目生成
+    func cancelQuestionGeneration() {
+        quizService?.cancelGeneration()
     }
 
     // MARK: - 内部：创建 CloudFileSystem + 迁移 + 重建 Storage/Scheduler

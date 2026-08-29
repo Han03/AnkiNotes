@@ -30,6 +30,8 @@ final class QuizService {
     private(set) var questions: [Question] = []
     private(set) var generatedNoteIds: Set<UUID> = []  // 已生成题目的笔记 ID
     private(set) var isGenerating = false  // 是否正在生成题目
+    private(set) var isCancelled = false    // 是否被用户取消
+    private(set) var failedNoteIds: Set<UUID> = []  // 生成失败的笔记ID（可重试）
 
     private let fileURL: URL
     private let generatedIdsURL: URL
@@ -142,6 +144,11 @@ final class QuizService {
 
     // MARK: - 大模型生成题目
 
+    /// 取消正在进行的题目生成
+    func cancelGeneration() {
+        isCancelled = true
+    }
+    
     /// 为所有未生成题目的笔记生成题目（后台异步执行）
     /// - Parameters:
     ///   - notes: 所有笔记
@@ -152,24 +159,25 @@ final class QuizService {
         notes: [Note],
         config: BailianConfig,
         onProgress: @escaping (Int, Int, String) -> Void,
-        completion: @escaping (Int, Int) -> Void  // (新增题目数, 处理笔记数)
+        completion: @escaping (Int, Int, Bool) -> Void  // (新增题目数, 处理笔记数, 是否被取消)
     ) {
         guard config.isConfigured else {
-            completion(0, 0)
+            completion(0, 0, false)
             return
         }
         guard !isGenerating else {
-            completion(0, 0)
+            completion(0, 0, false)
             return
         }
 
         isGenerating = true
+        isCancelled = false
 
-        // 筛选未生成题目的笔记
+        // 筛选未生成题目的笔记（排除之前失败的，允许重试）
         let pendingNotes = notes.filter { !generatedNoteIds.contains($0.id) }
         guard !pendingNotes.isEmpty else {
             isGenerating = false
-            completion(0, 0)
+            completion(0, 0, false)
             return
         }
 
@@ -177,8 +185,15 @@ final class QuizService {
             guard let self = self else { return }
             var totalNewQuestions = 0
             var processedNotes = 0
+            var wasCancelled = false
 
             for (index, note) in pendingNotes.enumerated() {
+                // 检查是否被取消
+                if self.isCancelled {
+                    wasCancelled = true
+                    break
+                }
+
                 DispatchQueue.main.async {
                     onProgress(index, pendingNotes.count, note.title)
                 }
@@ -188,22 +203,24 @@ final class QuizService {
                 if !newQuestions.isEmpty {
                     self.questions.append(contentsOf: newQuestions)
                     totalNewQuestions += newQuestions.count
+                    // 生成成功，标记该笔记已生成
+                    self.generatedNoteIds.insert(note.id)
+                    self.failedNoteIds.remove(note.id)
+                } else {
+                    // 生成失败，记录到失败集合，不标记为已生成（下次可重试）
+                    self.failedNoteIds.insert(note.id)
                 }
-                // 标记该笔记已生成（即使生成失败也标记，避免重复尝试）
-                self.generatedNoteIds.insert(note.id)
                 processedNotes += 1
 
-                // 每处理 5 篇保存一次
-                if processedNotes % 5 == 0 {
-                    self.save()
-                }
+                // 每完成一个笔记就立即保存，确保中断不丢失已生成题目
+                self.save()
             }
 
-            self.save()
             self.isGenerating = false
+            self.isCancelled = false
 
             DispatchQueue.main.async {
-                completion(totalNewQuestions, processedNotes)
+                completion(totalNewQuestions, processedNotes, wasCancelled)
             }
         }
     }
