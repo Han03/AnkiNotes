@@ -123,6 +123,16 @@ final class FileSystemService {
     func deletePhysicalFolder(at url: URL) throws {
         try cloudFS.removeItem(at: url)
     }
+    
+    /// 移动/重命名物理文件夹（本地 + 云端）
+    func movePhysicalFolder(from sourceURL: URL, to destinationURL: URL) throws {
+        // 确保目标目录的父目录存在
+        try cloudFS.createDirectoryIfNeeded(at: destinationURL.deletingLastPathComponent())
+        // 如果目标已存在，先删除
+        try? cloudFS.removeItem(at: destinationURL)
+        // 移动文件夹
+        try cloudFS.moveItem(at: sourceURL, to: destinationURL)
+    }
 
     // MARK: - JSON 索引读写（转发到 cloudFS；失败打印警告）
 

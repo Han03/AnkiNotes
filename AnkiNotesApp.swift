@@ -16,7 +16,11 @@ struct AnkiNotesApp: App {
                 .environmentObject(appState)
                 // 注入全局文字缩放倍率 → 所有 .textStyle() modifier 自动生效
                 .environment(\.textScale, appState.textScale)
-                .onAppear { appState.bootstrap() }
+                .onAppear {
+                    appState.bootstrap()
+                    // 应用启动时后台静默同步
+                    appState.performSilentSyncOnLaunch()
+                }
         }
     }
 }
@@ -98,6 +102,7 @@ final class AppState: ObservableObject {
     @Published var providerStatus: String? = nil
     @Published var iCloudContainerAvailable: Bool = false
     @Published var isSyncing: Bool = false  // ✅ 正在同步/导入中（UI 显示加载提示）
+    @Published var isSilentSyncing: Bool = false  // 后台静默同步中（不显示 UI 提示）
 
     // MARK: - 全局文字缩放倍率
 
@@ -290,9 +295,11 @@ final class AppState: ObservableObject {
     /// - 加锁防止重复执行
     /// - 后台线程扫描云端 Notes 目录，下载新笔记到本地
     /// - 去重：同文件夹+同标题跳过
-    func syncFromCloud(completion: ((StorageService.ImportReport) -> Void)? = nil) {
+    func syncFromCloud(silent: Bool = false, completion: ((StorageService.ImportReport) -> Void)? = nil) {
         guard webDAVFS != nil else {
-            providerStatus = "⚠️ 未配置 WebDAV，无法同步。请到设置页配置 WebDAV。"
+            if !silent {
+                providerStatus = "⚠️ 未配置 WebDAV，无法同步。请到设置页配置 WebDAV。"
+            }
             completion?(StorageService.ImportReport())
             return
         }
@@ -301,13 +308,18 @@ final class AppState: ObservableObject {
             print("⚠️ 同步正在进行中，跳过重复请求")
             return
         }
-        isSyncing = true
+        if silent {
+            isSilentSyncing = true
+        } else {
+            isSyncing = true
+        }
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
             defer {
                 self.syncLock.unlock()
                 DispatchQueue.main.async {
                     self.isSyncing = false
+                    self.isSilentSyncing = false
                     self.refreshStats()
                     self.storage.triggerRefresh()
                 }
@@ -315,10 +327,12 @@ final class AppState: ObservableObject {
             // 从云端扫描并导入到本地
             let report = self.storage.importFromCloud()
             DispatchQueue.main.async {
-                if report.scannedMarkdownFiles == 0 {
-                    self.providerStatus = "⚠️ 云端 Notes 目录没有发现 .md 文件。请确认笔记放在了坚果云的 Notes/ 目录下。"
-                } else {
-                    self.providerStatus = "✅ 同步完成：新增 \(report.importedCount)，跳过 \(report.skippedCount)，失败 \(report.failedCount)，扫描到 \(report.scannedMarkdownFiles) 个 .md 文件"
+                if !silent {
+                    if report.scannedMarkdownFiles == 0 {
+                        self.providerStatus = "⚠️ 云端 Notes 目录没有发现 .md 文件。请确认笔记放在了坚果云的 Notes/ 目录下。"
+                    } else {
+                        self.providerStatus = "✅ 同步完成：新增 \(report.importedCount)，跳过 \(report.skippedCount)，失败 \(report.failedCount)，扫描到 \(report.scannedMarkdownFiles) 个 .md 文件"
+                    }
                 }
                 completion?(report)
             }
@@ -328,6 +342,50 @@ final class AppState: ObservableObject {
     /// 异步导入 Markdown（保留兼容，内部调用 syncFromCloud）
     func importMarkdownAsync(completion: ((StorageService.ImportReport) -> Void)? = nil) {
         syncFromCloud(completion: completion)
+    }
+
+    /// 从云端同步单个笔记（打开编辑前调用，减少冲突）
+    func syncSingleNote(noteId: UUID, completion: ((Bool) -> Void)? = nil) {
+        guard webDAVFS != nil else {
+            completion?(false)
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            let success = self.storage.syncSingleNoteFromCloud(noteId: noteId)
+            DispatchQueue.main.async {
+                if success {
+                    self.storage.triggerRefresh()
+                }
+                completion?(success)
+            }
+        }
+    }
+
+    /// 上传单个笔记到云端（保存后调用）
+    func uploadSingleNote(noteId: UUID, completion: ((Bool) -> Void)? = nil) {
+        guard webDAVFS != nil else {
+            completion?(false)
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            let success = self.storage.uploadSingleNoteToCloud(noteId: noteId)
+            DispatchQueue.main.async {
+                completion?(success)
+            }
+        }
+    }
+
+    /// 应用启动时后台静默同步（延迟 2 秒执行，不阻塞 UI）
+    func performSilentSyncOnLaunch() {
+        guard webDAVFS != nil else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            guard let self = self else { return }
+            // 如果已经在同步，不重复执行
+            guard !self.isSyncing && !self.isSilentSyncing else { return }
+            self.syncFromCloud(silent: true)
+        }
     }
 
     // MARK: - 题库生成

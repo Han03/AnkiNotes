@@ -15,6 +15,7 @@ struct NoteDetailView: View {
     @State private var note: Note?
     @State private var showEditor = false
     @State private var showMoveFolder = false
+    @State private var isSyncingNote = false  // 正在同步单个笔记
     @State private var selectedFolderId: UUID?
     
     var body: some View {
@@ -40,14 +41,31 @@ struct NoteDetailView: View {
                 .background(Color(.systemGroupedBackground))
                 .navigationTitle(note.title)
                 .navigationBarTitleDisplayMode(.inline)
+                .overlay {
+                    if isSyncingNote {
+                        ProgressView("同步笔记中...")
+                            .padding()
+                            .background(.ultraThinMaterial)
+                            .cornerRadius(12)
+                    }
+                }
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         Menu {
                             Button {
-                                showEditor = true
+                                // 打开编辑前先单独同步该笔记，减少冲突
+                                isSyncingNote = true
+                                appState.syncSingleNote(noteId: noteId) { _ in
+                                    DispatchQueue.main.async {
+                                        loadNote()
+                                        isSyncingNote = false
+                                        showEditor = true
+                                    }
+                                }
                             } label: {
                                 Label("编辑 Markdown", systemImage: "pencil")
                             }
+                            .disabled(isSyncingNote)
                             Button {
                                 showMoveFolder = true
                             } label: {
@@ -63,7 +81,11 @@ struct NoteDetailView: View {
                         }
                     }
                 }
-                .sheet(isPresented: $showEditor) {
+                .sheet(isPresented: $showEditor, onDismiss: {
+                    // 编辑关闭后重新加载笔记，确保详情更新
+                    loadNote()
+                    appState.refreshStats()
+                }) {
                     NavigationStack {
                         NoteEditorView(noteId: noteId)
                     }

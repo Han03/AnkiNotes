@@ -13,6 +13,11 @@ struct FolderBrowserView: View {
     var currentFolderId: UUID?
     
     @State private var showNewFolderAlert = false
+    @State private var showRenameAlert = false
+    @State private var folderToRename: Folder?
+    @State private var renameText = ""
+    @State private var showDeleteConfirm = false
+    @State private var folderToDelete: Folder?
     @State private var showNewNoteAlert = false
     @State private var newFolderName = ""
     @State private var newNoteTitle = ""
@@ -43,7 +48,9 @@ struct FolderBrowserView: View {
                             FolderBrowserView(currentFolderId: folder.id)
                                 .navigationTitle(folder.name)
                         } label: {
-                            FolderRow(folder: folder, storage: storage)
+                            FolderRow(folder: folder, storage: storage,
+                                onRename: { f in renameFolder(f) },
+                                onDelete: { f in deleteFolder(f) })
                         }
                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                             Button(role: .destructive) {
@@ -184,15 +191,32 @@ struct FolderBrowserView: View {
         )
         // 下拉刷新：从云端同步笔记到本地（全局唯一同步入口）
         .refreshable {
-            await withCheckedContinuation { continuation in
-                appState.syncFromCloud { _ in
-                    continuation.resume()
+            // 如果后台正在静默同步，只显示加载状态，不重复执行
+            if appState.isSilentSyncing {
+                // 等待静默同步完成
+                await withCheckedContinuation { continuation in
+                    // 轮询等待静默同步完成（最多等 30 秒）
+                    var waited = 0
+                    Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { timer in
+                        waited += 1
+                        if !appState.isSilentSyncing || waited > 60 {
+                            timer.invalidate()
+                            continuation.resume()
+                        }
+                    }
+                }
+            } else {
+                // 正常执行同步
+                await withCheckedContinuation { continuation in
+                    appState.syncFromCloud { _ in
+                        continuation.resume()
+                    }
                 }
             }
         }
-        // ✅ 正在同步中遮罩提示
+        // ✅ 正在同步中遮罩提示（包括静默同步）
         .overlay {
-            if appState.isSyncing {
+            if appState.isSyncing || appState.isSilentSyncing {
                 ZStack {
                     Color.black.opacity(0.4)
                         .ignoresSafeArea()
@@ -200,10 +224,10 @@ struct FolderBrowserView: View {
                         ProgressView()
                             .scaleEffect(1.5)
                             .tint(.white)
-                        Text("正在同步笔记...")
+                        Text(appState.isSilentSyncing ? "后台同步中..." : "正在同步笔记...")
                             .font(.headline)
                             .foregroundColor(.white)
-                        Text("请稍候，正在从云端扫描并导入笔记")
+                        Text(appState.isSilentSyncing ? "正在后台同步，请稍候" : "请稍候，正在从云端扫描并导入笔记")
                             .font(.subheadline)
                             .foregroundColor(.white.opacity(0.8))
                     }
@@ -246,6 +270,34 @@ struct FolderBrowserView: View {
         } message: {
             Text("输入文件夹名称以创建新的分类。")
         }
+        // 重命名文件夹 Alert
+        .alert("重命名文件夹", isPresented: $showRenameAlert) {
+            TextField("文件夹名称", text: $renameText)
+            Button("取消", role: .cancel) {
+                showRenameAlert = false
+                folderToRename = nil
+            }
+            Button("保存") {
+                confirmRename()
+            }
+        } message: {
+            Text("输入新的文件夹名称")
+        }
+        // 删除文件夹确认 Alert
+        .alert("删除文件夹", isPresented: $showDeleteConfirm) {
+            Button("取消", role: .cancel) {
+                showDeleteConfirm = false
+                folderToDelete = nil
+            }
+            Button("删除", role: .destructive) {
+                confirmDelete()
+            }
+        } message: {
+            if let folder = folderToDelete {
+                let noteCount = storage.countNotesRecursive(in: folder.id)
+                Text("确定要删除文件夹「\(folder.name)」吗？该文件夹下的 \(noteCount) 篇笔记也会被删除，此操作不可恢复。")
+            }
+        }
         // 新建笔记 Alert
         .alert("新建笔记", isPresented: $showNewNoteAlert) {
             TextField("笔记标题", text: $newNoteTitle)
@@ -278,6 +330,9 @@ struct FolderBrowserView: View {
 private struct FolderRow: View {
     let folder: Folder
     let storage: StorageService
+    var onRename: (Folder) -> Void
+    var onDelete: (Folder) -> Void
+    
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: "folder.fill")
@@ -296,8 +351,51 @@ private struct FolderRow: View {
             Spacer()
         }
         .padding(.vertical, 4)
+        .contextMenu {
+            Button {
+                onRename(folder)
+            } label: {
+                Label("重命名", systemImage: "pencil")
+            }
+            Button(role: .destructive) {
+                onDelete(folder)
+            } label: {
+                Label("删除", systemImage: "trash")
+            }
+        }
     }
 }
+
+    // MARK: - 文件夹操作
+    
+    private func renameFolder(_ folder: Folder) {
+        folderToRename = folder
+        renameText = folder.name
+        showRenameAlert = true
+    }
+    
+    private func confirmRename() {
+        guard let folder = folderToRename,
+              !renameText.trimmingCharacters(in: .whitespaces).isEmpty else {
+            return
+        }
+        storage.renameFolder(id: folder.id, newName: renameText.trimmingCharacters(in: .whitespaces))
+        showRenameAlert = false
+        folderToRename = nil
+        renameText = ""
+    }
+    
+    private func deleteFolder(_ folder: Folder) {
+        folderToDelete = folder
+        showDeleteConfirm = true
+    }
+    
+    private func confirmDelete() {
+        guard let folder = folderToDelete else { return }
+        storage.deleteFolder(id: folder.id)
+        showDeleteConfirm = false
+        folderToDelete = nil
+    }
 
 // MARK: - NoteRow
 

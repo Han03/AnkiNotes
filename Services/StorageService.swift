@@ -55,6 +55,49 @@ final class StorageService: ObservableObject {
         persistFolders()
     }
     
+    /// 重命名文件夹（同时重命名物理目录并更新云端）
+    func renameFolder(id: UUID, newName: String) {
+        guard let folder = getFolder(id: id),
+              let idx = folders.firstIndex(where: { $0.id == id }) else { return }
+        let oldName = folder.name
+        guard oldName != newName else { return }
+        
+        // 更新文件夹名称
+        var updated = folder
+        updated.name = newName
+        updated.updatedAt = Date()
+        folders[idx] = updated
+        persistFolders()
+        
+        // 重命名物理目录（本地 + 云端）
+        let oldURL = fileSystem.noteFileURL(
+            noteId: UUID(), folderId: folder.parentId,
+            title: oldName, folders: folders
+        ).deletingLastPathComponent()
+        .appendingPathComponent(fileSystem.sanitizeFileName(oldName), isDirectory: true)
+        let newURL = oldURL.deletingLastPathComponent()
+            .appendingPathComponent(fileSystem.sanitizeFileName(newName), isDirectory: true)
+        try? fileSystem.movePhysicalFolder(from: oldURL, to: newURL)
+        
+        // 更新该文件夹下所有笔记的 updatedAt（触发重新同步）
+        let folderIds = collectDescendantFolderIds(from: id)
+        for i in noteMetas.indices {
+            if let fid = noteMetas[i].folderId, folderIds.contains(fid) {
+                noteMetas[i].updatedAt = Date()
+            }
+        }
+        persistNoteIndex()
+        
+        // 同步到云端
+        syncFolderChangesToCloud()
+    }
+    
+    /// 将文件夹变更同步到云端（简化版：触发全量同步）
+    private func syncFolderChangesToCloud() {
+        // 云端同步由 AppState 触发，这里只标记需要刷新
+        triggerRefresh()
+    }
+    
     func deleteFolder(id: UUID) {
         // 递归获取该文件夹及其子文件夹下的所有笔记并删除
         let folderIdsToDelete = collectDescendantFolderIds(from: id)
@@ -407,6 +450,78 @@ final class StorageService: ObservableObject {
         persistFolders()
         persistNoteIndex()
         return report
+    }
+
+    /// 从云端同步单个笔记（打开编辑前调用，减少冲突）
+    func syncSingleNoteFromCloud(noteId: UUID) -> Bool {
+        guard let cloud = cloudSyncFS,
+              let note = getNote(id: noteId) else {
+            return false
+        }
+        // 找到该笔记在云端的对应文件
+        let folderPath = getFolderPath(for: note.folderId)
+        let cloudRoot = cloud.rootDirectory.appendingPathComponent("Notes", isDirectory: true)
+        var cloudURL = cloudRoot
+        if !folderPath.isEmpty {
+            for component in folderPath.split(separator: "/") {
+                cloudURL.appendPathComponent(String(component), isDirectory: true)
+            }
+        }
+        cloudURL.appendPathComponent("\(note.title).md")
+        
+        // 尝试从云端下载
+        do {
+            let rawBody = try cloud.readData(at: cloudURL)
+            let bodyStr = String(data: rawBody, encoding: .utf8) ?? ""
+            let parsed = MarkdownFrontmatterParser.parse(bodyStr)
+            let bodyToUse = parsed.body.isEmpty ? bodyStr : parsed.body
+            
+            // 更新本地笔记内容（保留 ID 和 SRS 状态）
+            var updatedNote = note
+            updatedNote.markdownContent = bodyToUse
+            if !parsed.tags.isEmpty {
+                updatedNote.tags = parsed.tags
+            }
+            updatedNote.updatedAt = Date()
+            updateNote(updatedNote)
+            return true
+        } catch {
+            // 云端不存在该笔记或下载失败，不更新本地
+            return false
+        }
+    }
+
+    /// 上传单个笔记到云端（保存后调用）
+    func uploadSingleNoteToCloud(noteId: UUID) -> Bool {
+        guard let cloud = cloudSyncFS,
+              let note = getNote(id: noteId) else {
+            return false
+        }
+        // 构建云端路径
+        let folderPath = getFolderPath(for: note.folderId)
+        let cloudRoot = cloud.rootDirectory.appendingPathComponent("Notes", isDirectory: true)
+        var cloudURL = cloudRoot
+        if !folderPath.isEmpty {
+            for component in folderPath.split(separator: "/") {
+                cloudURL.appendPathComponent(String(component), isDirectory: true)
+            }
+        }
+        // 确保目录存在
+        do {
+            try cloud.createDirectoryIfNeeded(at: cloudURL.deletingLastPathComponent())
+        } catch {}
+        cloudURL.appendPathComponent("\(note.title).md")
+        
+        // 生成带 frontmatter 的内容
+        let body = MarkdownFrontmatterParser.build(title: note.title, tags: note.tags, body: note.markdownContent)
+        guard let data = body.data(using: .utf8) else { return false }
+        
+        do {
+            try cloud.writeData(data, to: cloudURL)
+            return true
+        } catch {
+            return false
+        }
     }
 
     /// 从指定 FS 递归扫描 .md 文件

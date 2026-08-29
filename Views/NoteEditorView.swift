@@ -200,10 +200,22 @@ struct NoteEditorView: View {
         note.title = finalTitle
         note.markdownContent = markdownText
         note.tags = tags
+        note.updatedAt = Date()
         
+        // 先更新本地
         appState.storage.updateNote(note)
         appState.refreshStats()
         hasChanges = false
+        
+        // 异步上传到云端（不阻塞 UI）
+        let noteId = note.id
+        appState.uploadSingleNote(noteId: noteId) { _ in
+            // 上传完成后刷新
+            DispatchQueue.main.async {
+                appState.storage.triggerRefresh()
+            }
+        }
+        
         isSaving = false
         dismiss()
     }
