@@ -261,6 +261,11 @@ struct QuizSessionView: View {
 
     // MARK: - 结果视图
 
+    private var accuracyPercent: Int {
+        guard questions.count > 0 else { return 0 }
+        return Int(Double(correctCount) / Double(questions.count) * 100)
+    }
+
     private var resultView: some View {
         ScrollView {
             VStack(spacing: 24) {
@@ -292,7 +297,7 @@ struct QuizSessionView: View {
                 VStack(spacing: 8) {
                     Text("正确率")
                         .font(.headline)
-                    Text("\(questions.count > 0 ? Int(Double(correctCount) / Double(questions.count) * 100) : 0)%")
+                    Text("\(accuracyPercent)%")
                         .font(.system(size: 48, weight: .bold))
                         .foregroundColor(.purple)
                 }
