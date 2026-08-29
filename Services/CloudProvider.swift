@@ -383,10 +383,10 @@ final class WebDAVFS: CloudFileSystem {
         return delegate.items.compactMap { item in
             // 用原始编码的 href 构造 URL（中文路径不会被静默丢弃）
             guard let fullURL = URL(string: item.href, relativeTo: base)?.absoluteURL else { return nil }
-            // 跳过目录自身
-            guard fullURL.path != url.path else { return nil }
+            // 跳过目录自身（规范化路径后比较，避免末尾斜杠差异导致漏过 → 无限递归）
+            let normalizedChild = fullURL.path.hasSuffix("/") ? fullURL.path : fullURL.path + "/"
+            guard normalizedChild != selfPath else { return nil }
             // ✅ 正确的直接子项判断：子项的父路径 == 当前目录路径
-            //    （旧代码用 hasSuffix(url.path)，子文件路径以文件名结尾，永远匹配不上）
             let parentPath = (fullURL.path as NSString).deletingLastPathComponent + "/"
             guard parentPath == selfPath else { return nil }
             return fullURL
@@ -561,8 +561,9 @@ final class WebDAVFS: CloudFileSystem {
         return delegate.items.compactMap { item in
             // 用原始编码的 href 构造 URL（中文路径不会被静默丢弃）
             guard let fullURL = URL(string: item.href, relativeTo: base)?.absoluteURL else { return nil }
-            // 跳过目录自身
-            guard fullURL.path != url.path else { return nil }
+            // 跳过目录自身（规范化路径后比较，避免末尾斜杠差异导致漏过 → 无限递归）
+            let normalizedChild = fullURL.path.hasSuffix("/") ? fullURL.path : fullURL.path + "/"
+            guard normalizedChild != selfPath else { return nil }
             // ✅ 正确的直接子项判断：子项的父路径 == 当前目录路径
             let parentPath = (fullURL.path as NSString).deletingLastPathComponent + "/"
             guard parentPath == selfPath else { return nil }

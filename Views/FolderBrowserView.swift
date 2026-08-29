@@ -132,16 +132,40 @@ struct FolderBrowserView: View {
         .navigationTitle(currentFolder?.name ?? "全部笔记")
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $searchText, prompt: "搜索笔记标题或内容")
+        // ✅ 正在同步中遮罩提示
+        .overlay {
+            if appState.isSyncing {
+                ZStack {
+                    Color.black.opacity(0.4)
+                        .ignoresSafeArea()
+                    VStack(spacing: 16) {
+                        ProgressView()
+                            .scaleEffect(1.5)
+                            .tint(.white)
+                        Text("正在同步笔记...")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                        Text("请稍候，正在从云端扫描并导入笔记")
+                            .font(.subheadline)
+                            .foregroundColor(.white.opacity(0.8))
+                    }
+                    .padding(24)
+                    .background(RoundedRectangle(cornerRadius: 16).fill(Color(.systemGray6).opacity(0.9)))
+                }
+                .transition(.opacity)
+            }
+        }
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Menu {
                     Button {
-                        let report = storage.importMarkdownFromDocuments()
-                        lastImportReport = report
-                        appState.refreshStats()
+                        appState.importMarkdownAsync { report in
+                            lastImportReport = report
+                        }
                     } label: {
                         Label("📥 导入 Markdown 文件夹（本机/云端均可）", systemImage: "square.and.arrow.down")
                     }
+                    .disabled(appState.isSyncing)
                     Button {
                         showNewFolderAlert = true
                     } label: {

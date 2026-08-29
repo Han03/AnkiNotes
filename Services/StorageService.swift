@@ -279,6 +279,13 @@ final class StorageService: ObservableObject {
         if didFix { persistNoteIndex() }
     }
     
+    /// ✅ 主线程触发 UI 刷新（导入在后台线程修改 @Published 属性后调用，确保 UI 更新）
+    func triggerRefresh() {
+        DispatchQueue.main.async { [weak self] in
+            self?.objectWillChange.send()
+        }
+    }
+
     // MARK: - Markdown 批量导入（通过文件共享）
     
     /// 批量导入报告
@@ -300,18 +307,18 @@ final class StorageService: ObservableObject {
     /// - 去重：同路径+同标题已存在时跳过
     @discardableResult
     func importMarkdownFromDocuments() -> ImportReport {
-        let root = fileSystem.rootDirectory
+        let root = fileSystem.notesRootDirectory  // ✅ 只扫描 Notes 目录（笔记都在这里），不扫整个根目录
         var report = ImportReport()
 
         // 1. 递归枚举所有 .md / .markdown 文件（通过 cloudFS 协议，兼容 WebDAV）
-        let skipNames: Set<String> = ["Notes", ".metadata"]
+        let skipNames: Set<String> = [".metadata"]  // 从 Notes 开始扫，不需要跳过 Notes 自身
         var mdFiles: [URL] = []
         collectMarkdownFiles(at: root, skipNames: skipNames, into: &mdFiles)
 
         report.scannedMarkdownFiles = mdFiles.count
 
         guard report.scannedMarkdownFiles > 0 else {
-            report.warningMessages.append("根目录没有发现 .md/.markdown 文件（本机模式：请通过爱思助手/iTunes 文件共享先把 Markdown 文件夹拖入；WebDAV 模式：请确认远端目录里有 .md 文件）")
+            report.warningMessages.append("Notes 目录没有发现 .md/.markdown 文件（请确认笔记放在了远端的 Notes/ 目录下；本机模式：通过爱思助手把 Markdown 文件夹拖入 App 共享目录的 Notes/ 下）")
             return report
         }
 

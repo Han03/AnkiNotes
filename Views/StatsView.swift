@@ -20,7 +20,6 @@ struct StatsView: View {
                 weekSection
                 distributionSection
                 ratingRatioSection
-                settingsShortcutSection
             }
             .padding()
         }
@@ -150,84 +149,6 @@ struct StatsView: View {
             }
             RatingDistributionView()
                 .frame(height: 160)
-        }
-        .padding(18)
-        .background(RoundedRectangle(cornerRadius: 18).fill(Color(.systemBackground)))
-        .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
-    }
-
-    // MARK: - 设置快捷入口
-
-    private var settingsShortcutSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Label("⚙️ 设置 & 存储", systemImage: "gearshape.fill")
-                    .textStyle(.subsectionTitle)
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .foregroundStyle(.secondary)
-                    .textStyle(.miniText)
-            }
-
-            HStack(spacing: 12) {
-                // 存储概览
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        Image(systemName: appState.selectedProvider.systemIcon)
-                            .foregroundStyle(.blue)
-                        Text(appState.selectedProvider.displayName)
-                            .textStyle(.primaryText)
-                    }
-                    Text(appState.activeFS?.displayLocation ?? "—")
-                        .textStyle(.miniText)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
-                Spacer()
-                // 字号概览
-                VStack(alignment: .trailing, spacing: 4) {
-                    Text("字号：\(appState.textScaleLabel)")
-                        .textStyle(.secondaryText)
-                        .foregroundStyle(.primary)
-                    Text("切换「设置」Tab 可修改")
-                        .textStyle(.miniText)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Button {
-                appState.mainTabIndex = 3  // Tab 3 = 设置
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "gearshape.2.fill")
-                    Text("前往「设置」Tab")
-                        .textStyle(.subsectionTitle)
-                    Spacer()
-                    Image(systemName: "rectangle.stack.badge.person.crop")
-                        .opacity(0)   // 占位对齐
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
-                .padding(.horizontal, 14)
-                .background(RoundedRectangle(cornerRadius: 14).fill(Color.blue.opacity(0.1)))
-                .foregroundStyle(.blue)
-            }
-            .buttonStyle(.plain)
-
-            if let msg = appState.providerStatus {
-                HStack(alignment: .top, spacing: 6) {
-                    Image(systemName: "info.circle.fill").foregroundStyle(
-                        msg.contains("失败") ? Color.red :
-                            (msg.contains("迁移") || msg.contains("⏳") || msg.contains("⚠️") ? Color.orange : Color.green)
-                    )
-                    Text(msg)
-                        .textStyle(.miniText)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(3)
-                }
-                .padding(10)
-                .background(RoundedRectangle(cornerRadius: 10).fill(Color(.secondarySystemBackground)))
-            }
         }
         .padding(18)
         .background(RoundedRectangle(cornerRadius: 18).fill(Color(.systemBackground)))

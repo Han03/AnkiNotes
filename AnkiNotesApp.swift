@@ -80,6 +80,7 @@ final class AppState: ObservableObject {
 
     @Published var providerStatus: String? = nil
     @Published var iCloudContainerAvailable: Bool = false
+    @Published var isSyncing: Bool = false  // ✅ 正在同步/导入中（UI 显示加载提示）
 
     // MARK: - 全局文字缩放倍率
 
@@ -225,21 +226,36 @@ final class AppState: ObservableObject {
             suppressProviderDidSet = false
         }
         let ok = applyCurrentProviderSelection(allowWebDAVIncomplete: false)
-        // ✅ 切换到 WebDAV 成功后，自动扫描远端已有笔记并导入（用户不用再手动点导入）
+        // ✅ 切换到 WebDAV 成功后，自动异步扫描远端已有笔记并导入（不阻塞 UI）
         if ok {
-            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                guard let self = self else { return }
-                let report = self.storage.importMarkdownFromDocuments()
-                DispatchQueue.main.async {
-                    self.providerStatus = """
-                    ✅ WebDAV 已连接并完成数据迁移。
-                    📥 自动导入远端笔记：新增 \(report.importedCount)，跳过 \(report.skippedCount)，失败 \(report.failedCount)，扫描到 \(report.scannedMarkdownFiles) 个 .md 文件
-                    """
-                    self.refreshStats()
-                }
+            importMarkdownAsync { report in
+                self.providerStatus = """
+                ✅ WebDAV 已连接并完成数据迁移。
+                📥 自动导入远端笔记：新增 \(report.importedCount)，跳过 \(report.skippedCount)，失败 \(report.failedCount)，扫描到 \(report.scannedMarkdownFiles) 个 .md 文件
+                """
             }
         }
         return ok
+    }
+
+    /// ✅ 异步导入 Markdown（后台线程扫描，主线程更新 UI，避免卡死）
+    /// - Parameter completion: 导入完成回调（返回 ImportReport）
+    func importMarkdownAsync(completion: ((StorageService.ImportReport) -> Void)? = nil) {
+        guard !isSyncing else {
+            print("⚠️ 已有同步任务在执行，跳过")
+            return
+        }
+        isSyncing = true
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            let report = self.storage.importMarkdownFromDocuments()
+            DispatchQueue.main.async {
+                self.isSyncing = false
+                self.refreshStats()
+                self.storage.triggerRefresh()  // ✅ 确保 StorageService 的 @Published 在主线程触发 UI 刷新
+                completion?(report)
+            }
+        }
     }
 
     /// UI 点「🔗 测试连接」按钮（WebDAV）
