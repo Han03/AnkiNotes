@@ -80,6 +80,21 @@ final class AppState: ObservableObject {
     /// 用户设置的 WebDAV 「临时密码」（未保存前 UI 编辑用，保存时通过 KeychainHelper 写入 Keychain）
     @Published var pendingWebDAVPassword: String = ""
 
+    // MARK: - 百炼平台配置
+    @Published var bailianConfig: BailianConfig = BailianConfig() {
+        didSet {
+            if let data = try? JSONEncoder().encode(bailianConfig) {
+                UserDefaults.standard.set(data, forKey: Self.keyBailianConfig)
+            }
+        }
+    }
+    private static let keyBailianConfig = "bailian_config"
+
+    // MARK: - 题库
+    private(set) var quizService: QuizService!
+    @Published var isGeneratingQuestions = false
+    @Published var generationProgress: (current: Int, total: Int, noteTitle: String)?
+
     @Published var providerStatus: String? = nil
     @Published var iCloudContainerAvailable: Bool = false
     @Published var isSyncing: Bool = false  // ✅ 正在同步/导入中（UI 显示加载提示）
@@ -126,6 +141,11 @@ final class AppState: ObservableObject {
         // 2) 恢复 WebDAV 配置 & 密码
         webDAVConfig = Self.loadWebDAVConfigFromDefaults()
         pendingWebDAVPassword = KeychainHelper.webDAVPassword() ?? ""
+        // 加载百炼配置
+        if let data = UserDefaults.standard.data(forKey: Self.keyBailianConfig),
+           let cfg = try? JSONDecoder().decode(BailianConfig.self, from: data) {
+            bailianConfig = cfg
+        }
         // 3) 恢复文字大小
         let storedScale = UserDefaults.standard.double(forKey: Self.keyTextScale)
         textScale = (storedScale > 0.1 && storedScale < 5) ? storedScale : 1.0
@@ -310,6 +330,35 @@ final class AppState: ObservableObject {
         syncFromCloud(completion: completion)
     }
 
+    // MARK: - 题库生成
+
+    /// 为所有未生成题目的笔记生成题目（后台异步）
+    func generateQuestionsForAllNotes(completion: ((Int, Int) -> Void)? = nil) {
+        guard bailianConfig.isConfigured else {
+            print("⚠️ 百炼平台未配置，无法生成题目")
+            completion?(0, 0)
+            return
+        }
+        guard let storage = storage, let quiz = quizService else {
+            completion?(0, 0)
+            return
+        }
+        let allNotes = storage.getAllNotes()
+        isGeneratingQuestions = true
+        quiz.generateQuestionsForAllNotes(
+            notes: allNotes,
+            config: bailianConfig,
+            onProgress: { [weak self] current, total, title in
+                self?.generationProgress = (current, total, title)
+            },
+            completion: { [weak self] newCount, processedCount in
+                self?.isGeneratingQuestions = false
+                self?.generationProgress = nil
+                completion?(newCount, processedCount)
+            }
+        )
+    }
+
     // MARK: - 内部：创建 CloudFileSystem + 迁移 + 重建 Storage/Scheduler
 
     private func applyFileSystem(type: CloudProviderType, webDAVConfig: WebDAVConfig, migrateFromScratch: Bool) {
@@ -336,6 +385,7 @@ final class AppState: ObservableObject {
         webDAVFS = (type == .webDAV) ? (newFS as? WebDAVFS) : nil
         storage.cloudSyncFS = webDAVFS
         scheduler  = SchedulerService(storage: storage)
+        quizService = QuizService(fileSystem: localFileSvc)
         refreshStats()
     }
 

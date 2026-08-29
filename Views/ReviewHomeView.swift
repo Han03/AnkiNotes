@@ -123,23 +123,6 @@ struct ReviewHomeView: View {
                 .background(RoundedRectangle(cornerRadius: 18).fill(Color(.systemBackground)))
                 .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
                 
-                // 卡片状态分布
-                VStack(spacing: 12) {
-                    HStack {
-                        Text("卡片状态分布")
-                            .textStyle(.sectionTitle)
-                        Spacer()
-                        Text("共 \(stats.totalNotes) 张")
-                            .textStyle(.secondaryText)
-                            .foregroundColor(.secondary)
-                    }
-                    StatusDistributionView(stats: stats)
-                        .frame(height: 100)
-                }
-                .padding(18)
-                .background(RoundedRectangle(cornerRadius: 18).fill(Color(.systemBackground)))
-                .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
-                
                 // 按文件夹复习
                 VStack(alignment: .leading, spacing: 10) {
                     Text("按文件夹复习")

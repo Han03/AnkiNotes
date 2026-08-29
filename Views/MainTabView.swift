@@ -46,11 +46,11 @@ struct MainTabView: View {
             .badge(appState.todayDueCount > 0 ? String(appState.todayDueCount) : nil)
 
             NavigationStack {
-                StatsView()
+                QuizHomeView()
             }
             .tabItem {
-                Image(systemName: "chart.bar.fill")
-                Text("统计")
+                Image(systemName: "square.stack.3d.up.fill")
+                Text("刷题")
             }
             .tag(2)
 

@@ -26,11 +26,11 @@ final class StorageService: ObservableObject {
     
     // MARK: - 文件夹 CRUD
     
-    func getAllFolders() -> [Folder] { folders }
+    func getAllFolders() -> [Folder] { folders.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending } }
     
     func getSubFolders(of parentId: UUID?) -> [Folder] {
         return folders.filter { $0.parentId == parentId }
-            .sorted { $0.updatedAt > $1.updatedAt }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
     
     func getFolder(id: UUID) -> Folder? {
@@ -106,7 +106,7 @@ final class StorageService: ObservableObject {
     func getNotes(in folderId: UUID?) -> [Note] {
         return noteMetas
             .filter { $0.folderId == folderId }
-            .sorted { $0.updatedAt > $1.updatedAt }
+            .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
             .compactMap { loadNote(from: $0) }
     }
     
