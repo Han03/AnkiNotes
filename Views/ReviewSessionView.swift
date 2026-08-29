@@ -136,7 +136,6 @@ struct ReviewSessionView: View {
                     note: note,
                     quizService: appState.quizService,
                     onComplete: { rating in
-                        reviewQuizRating = rating
                         showReviewQuiz = false
                         // 延迟应用评级，等 sheet 关闭动画完成
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
