@@ -51,7 +51,7 @@ final class FileSystemService {
     var notesIndexFile:    URL { metadataDirectory.appendingPathComponent("notes_index.json") }
     var reviewLogsFile:    URL { metadataDirectory.appendingPathComponent("review_logs.json") }
 
-    // MARK: - Markdown 文件 URL 派生（根据文件夹层级 → Notes/<folderPath>/<id>_<title>.md）
+    // MARK: - Markdown 文件 URL 派生（根据文件夹层级 → Notes/<folderPath>/<title>.md）
 
     func noteFileURL(noteId: UUID, folderId: UUID?, title: String, folders: [Folder]) -> URL {
         var currentURL = notesRootDirectory
@@ -63,7 +63,7 @@ final class FileSystemService {
         }
         try? cloudFS.createDirectoryIfNeeded(at: currentURL)
         let safeTitle = sanitizeFileName(title)
-        let fileName = "\(noteId.uuidString)_\(safeTitle).md"
+        let fileName = "\(safeTitle).md"
         return currentURL.appendingPathComponent(fileName)
     }
 
