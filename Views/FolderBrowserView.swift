@@ -337,7 +337,7 @@ struct FolderBrowserView: View {
               !renameText.trimmingCharacters(in: .whitespaces).isEmpty else {
             return
         }
-        storage.renameFolder(id: folder.id, newName: renameText.trimmingCharacters(in: .whitespaces))
+        appState.storage!.renameFolder(id: folder.id, newName: renameText.trimmingCharacters(in: .whitespaces))
         showRenameAlert = false
         folderToRename = nil
         renameText = ""
@@ -350,7 +350,7 @@ struct FolderBrowserView: View {
     
     private func confirmDelete() {
         guard let folder = folderToDelete else { return }
-        storage.deleteFolder(id: folder.id)
+        appState.storage!.deleteFolder(id: folder.id)
         showDeleteConfirm = false
         folderToDelete = nil
     }
