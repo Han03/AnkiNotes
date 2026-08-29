@@ -39,8 +39,12 @@ struct MainTabView: View {
                 Text("复习")
             }
             .tag(1)
-            // 真正的数字徽标用系统 badge() API（iOS 15+ 支持，能显示任意数值 10/100/99+）
-            .badge(appState.todayDueCount > 0 ? appState.todayDueCount : nil)
+            // 真正的数字徽标用 badge() API。这里用显式 Int? 作为三目运算的统一类型；
+            // 直接写 count : nil 会触发 "'nil' cannot be used in context expecting type 'Int'" 编译错误。
+            .badge({ () -> Int? in
+                if appState.todayDueCount > 0 { return appState.todayDueCount }
+                return nil
+            }())
 
             NavigationStack {
                 StatsView()
