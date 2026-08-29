@@ -323,6 +323,37 @@ struct FolderBrowserView: View {
             }
         }
     }
+    
+    // MARK: - 文件夹操作
+    
+    private func renameFolder(_ folder: Folder) {
+        folderToRename = folder
+        renameText = folder.name
+        showRenameAlert = true
+    }
+    
+    private func confirmRename() {
+        guard let folder = folderToRename,
+              !renameText.trimmingCharacters(in: .whitespaces).isEmpty else {
+            return
+        }
+        storage.renameFolder(id: folder.id, newName: renameText.trimmingCharacters(in: .whitespaces))
+        showRenameAlert = false
+        folderToRename = nil
+        renameText = ""
+    }
+    
+    private func deleteFolder(_ folder: Folder) {
+        folderToDelete = folder
+        showDeleteConfirm = true
+    }
+    
+    private func confirmDelete() {
+        guard let folder = folderToDelete else { return }
+        storage.deleteFolder(id: folder.id)
+        showDeleteConfirm = false
+        folderToDelete = nil
+    }
 }
 
 // MARK: - FolderRow
@@ -365,37 +396,6 @@ private struct FolderRow: View {
         }
     }
 }
-
-    // MARK: - 文件夹操作
-    
-    private func renameFolder(_ folder: Folder) {
-        folderToRename = folder
-        renameText = folder.name
-        showRenameAlert = true
-    }
-    
-    private func confirmRename() {
-        guard let folder = folderToRename,
-              !renameText.trimmingCharacters(in: .whitespaces).isEmpty else {
-            return
-        }
-        storage.renameFolder(id: folder.id, newName: renameText.trimmingCharacters(in: .whitespaces))
-        showRenameAlert = false
-        folderToRename = nil
-        renameText = ""
-    }
-    
-    private func deleteFolder(_ folder: Folder) {
-        folderToDelete = folder
-        showDeleteConfirm = true
-    }
-    
-    private func confirmDelete() {
-        guard let folder = folderToDelete else { return }
-        storage.deleteFolder(id: folder.id)
-        showDeleteConfirm = false
-        folderToDelete = nil
-    }
 
 // MARK: - NoteRow
 
