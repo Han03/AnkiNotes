@@ -14,20 +14,14 @@ struct NoteDetailView: View {
     
     @State private var note: Note?
     @State private var showEditor = false
-    @State private var showCardFlip = false
     @State private var showMoveFolder = false
     @State private var selectedFolderId: UUID?
-    @State private var selectedRating: ReviewRating?
-    @State private var previewStartTime: Date = Date()
     
     var body: some View {
         Group {
             if let note = note {
                 ScrollView(.vertical) {
                     VStack(alignment: .leading, spacing: 16) {
-                        // 卡片区域（类似 Anki 正反面）
-                        cardPreviewSection(note)
-                        
                         // 完整 Markdown 内容
                         sectionHeader("完整内容")
                         MarkdownView(markdown: note.markdownContent)
@@ -112,102 +106,6 @@ struct NoteDetailView: View {
             .padding(.top, 8)
     }
     
-    // MARK: - 卡片预览区
-    
-    @ViewBuilder
-    private func cardPreviewSection(_ note: Note) -> some View {
-        VStack(spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(Color(.systemBackground))
-                    .shadow(color: .black.opacity(0.08), radius: 8, y: 2)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16)
-                            .stroke(Color(.separator).opacity(0.5), lineWidth: 0.5)
-                    )
-                VStack(spacing: 16) {
-                    Text("卡片预览")
-                        .textStyle(.tertiaryText)
-                        .foregroundColor(.secondary)
-                    
-                    // 正面
-                    VStack {
-                        Text("正面（问题）").textStyle(.subsectionTitle).foregroundColor(.blue)
-                        MarkdownView(markdown: "# \(note.cardFront)")
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding()
-                            .background(Color.blue.opacity(0.06))
-                            .cornerRadius(10)
-                    }
-                    
-                    if showCardFlip {
-                        // 背面
-                        VStack {
-                            Text("背面（答案）").textStyle(.subsectionTitle).foregroundColor(.green)
-                            if note.cardBack.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                Text("（背面暂无内容）")
-                                    .foregroundColor(.secondary)
-                                    .padding()
-                            } else {
-                                MarkdownView(markdown: note.cardBack)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding()
-                                    .background(Color.green.opacity(0.06))
-                                    .cornerRadius(10)
-                            }
-                        }
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                    }
-                    
-                    Button {
-                        withAnimation(.spring()) {
-                            showCardFlip.toggle()
-                        }
-                    } label: {
-                        Label(showCardFlip ? "隐藏答案" : "显示答案",
-                              systemImage: showCardFlip ? "eye.slash.fill" : "eye.fill")
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(Color(.systemBlue))
-                            .foregroundColor(.white)
-                            .cornerRadius(10)
-                            .bold()
-                    }
-                    
-                    if showCardFlip {
-                        quickRatingView(note)
-                    }
-                }
-                .padding(16)
-            }
-        }
-        .onAppear { previewStartTime = Date() }
-    }
-    
-    @ViewBuilder
-    private func quickRatingView(_ note: Note) -> some View {
-        HStack(spacing: 8) {
-            ForEach(ReviewRating.allCases) { rating in
-                Button {
-                    selectedRating = rating
-                    applyQuickRating(rating, to: note)
-                } label: {
-                    VStack(spacing: 4) {
-                        Text(rating.shortLabel).bold()
-                        Text(appState.scheduler.previewNextInterval(note: note, rating: rating))
-                            .textStyle(.tertiaryText)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .background(Color(hex: rating.color).opacity(0.18))
-                    .foregroundColor(Color(hex: rating.color))
-                    .cornerRadius(10)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-    
     // MARK: - SRS 信息
     
     @ViewBuilder
@@ -264,14 +162,6 @@ struct NoteDetailView: View {
     
     private func loadNote() {
         note = appState.storage.getNote(id: noteId)
-    }
-    
-    private func applyQuickRating(_ rating: ReviewRating, to note: Note) {
-        let spent = Date().timeIntervalSince(previewStartTime)
-        _ = appState.scheduler.rate(noteId: note.id, rating: rating, timeSpent: spent)
-        loadNote()
-        showCardFlip = false
-        previewStartTime = Date()
     }
     
     private func moveNoteTo(folderId: UUID?) {

@@ -11,6 +11,19 @@ import SwiftUI
 /// 支持: # ## ### 标题, **粗体**, *斜体*, `行内代码`, ```代码块```, - 列表, > 引用, 链接, 图片占位
 final class MarkdownRenderer {
     
+    /// 解析表格行，返回单元格数组
+    private static func parseTableRow(_ line: String) -> [String] {
+        var trimmed = line.trimmingCharacters(in: .whitespaces)
+        // 移除首尾的 |
+        if trimmed.hasPrefix("|") { trimmed = String(trimmed.dropFirst()) }
+        if trimmed.hasSuffix("|") { trimmed = String(trimmed.dropLast()) }
+        // 按 | 分割
+        let cells = trimmed.components(separatedBy: "|").map { 
+            $0.trimmingCharacters(in: .whitespaces)
+        }
+        return cells
+    }
+    
     /// 将 Markdown 字符串解析为一系列段落块
     static func parse(markdown: String) -> [MarkdownBlock] {
         let lines = markdown.split(whereSeparator: \.isNewline).map(String.init)
@@ -105,6 +118,48 @@ final class MarkdownRenderer {
                 continue
             }
             
+            // 表格（GFM 格式）
+            if line.contains("|") && i + 1 < lines.count {
+                let nextLine = lines[i + 1]
+                // 检查第二行是否是分隔行（|---|---|）
+                let separatorPattern = #"^\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|?$"#
+                if nextLine.range(of: separatorPattern, options: .regularExpression) != nil {
+                    var tableLines: [String] = [line, nextLine]
+                    var j = i + 2
+                    while j < lines.count && lines[j].contains("|") && !lines[j].trimmingCharacters(in: .whitespaces).isEmpty {
+                        tableLines.append(lines[j])
+                        j += 1
+                    }
+                    // 解析表格
+                    let headers = parseTableRow(tableLines[0])
+                    var rows: [[String]] = []
+                    for rowLine in tableLines.dropFirst(2) {
+                        rows.append(parseTableRow(rowLine))
+                    }
+                    blocks.append(.table(headers: headers, rows: rows))
+                    i = j
+                    continue
+                }
+            }
+            
+            // 任务列表
+            if (line.starts(with: "- [") || line.starts(with: "* [")) && line.count > 4 {
+                var items: [(text: String, checked: Bool)] = []
+                while i < lines.count {
+                    let l = lines[i]
+                    if l.starts(with: "- [") || l.starts(with: "* [") {
+                        let checked = l.prefix(5).contains("x") || l.prefix(5).contains("X")
+                        let text = String(l.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+                        items.append((text: text, checked: checked))
+                        i += 1
+                    } else {
+                        break
+                    }
+                }
+                blocks.append(.taskList(items: items))
+                continue
+            }
+            
             // 水平分割线
             if line == "---" || line == "***" || line == "___" {
                 blocks.append(.divider)
@@ -142,6 +197,8 @@ enum MarkdownBlock: Hashable, Identifiable {
     case orderedList([String])
     case codeBlock(String)
     case divider
+    case table(headers: [String], rows: [[String]])
+    case taskList(items: [(text: String, checked: Bool)])
     
     var id: Int { hashValue }
 }
@@ -212,6 +269,19 @@ private struct BlockView: View {
                 .cornerRadius(8)
         case .divider:
             Divider().padding(.vertical, 4)
+        case .table(let headers, let rows):
+            TableView(headers: headers, rows: rows, bodyFont: bodyFont, textColor: textColor)
+        case .taskList(let items):
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: item.checked ? "checkmark.square.fill" : "square")
+                            .foregroundColor(item.checked ? .green : .secondary)
+                            .font(.callout)
+                        InlineMarkdownText(text: item.text, font: bodyFont, color: item.checked ? .secondary : textColor)
+                    }
+                }
+            }
         }
     }
     
@@ -226,6 +296,67 @@ private struct BlockView: View {
             InlineMarkdownText(text: text, font: .title2.bold(), color: textColor)
         default:
             InlineMarkdownText(text: text, font: .title3.bold(), color: textColor)
+        }
+    }
+}
+
+// MARK: - 表格视图
+private struct TableView: View {
+    let headers: [String]
+    let rows: [[String]]
+    var bodyFont: Font
+    var textColor: Color
+    
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 0) {
+                // 表头
+                HStack(spacing: 0) {
+                    ForEach(Array(headers.enumerated()), id: \.offset) { _, header in
+                        Text(header)
+                            .font(bodyFont.bold())
+                            .foregroundColor(textColor)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .frame(minWidth: 80, alignment: .leading)
+                            .background(Color.secondary.opacity(0.15))
+                        if header != headers.last {
+                            Rectangle()
+                                .fill(Color.secondary.opacity(0.3))
+                                .frame(width: 1)
+                        }
+                    }
+                }
+                // 分隔线
+                Rectangle()
+                    .fill(Color.secondary.opacity(0.3))
+                    .frame(height: 1)
+                // 数据行
+                ForEach(Array(rows.enumerated()), id: \.offset) { rowIdx, row in
+                    HStack(spacing: 0) {
+                        ForEach(Array(row.enumerated()), id: \.offset) { colIdx, cell in
+                            InlineMarkdownText(text: cell, font: bodyFont, color: textColor)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .frame(minWidth: 80, alignment: .leading)
+                            if colIdx < row.count - 1 {
+                                Rectangle()
+                                    .fill(Color.secondary.opacity(0.2))
+                                    .frame(width: 1)
+                            }
+                        }
+                    }
+                    .background(rowIdx % 2 == 0 ? Color.clear : Color.secondary.opacity(0.05))
+                    // 行底部分隔线
+                    if rowIdx < rows.count - 1 {
+                        Rectangle()
+                            .fill(Color.secondary.opacity(0.15))
+                            .frame(height: 0.5)
+                    }
+                }
+            }
+            .background(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.3), lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
         }
     }
 }

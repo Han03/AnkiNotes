@@ -277,59 +277,57 @@ struct SettingsView: View {
 
     // MARK: - 百炼平台配置
     private var bailianSection: some View {
-        Section {
-            VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Image(systemName: "brain.head.profile")
+                    .foregroundColor(.purple)
+                    .font(.title2)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("百炼大模型平台")
+                        .textStyle(.subsectionTitle)
+                    Text("配置后可自动为笔记生成选择题和填空题")
+                        .textStyle(.secondaryText)
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("API Key")
+                    .textStyle(.secondaryText)
+                    .foregroundColor(.secondary)
+                SecureField("sk-xxxxxxxxxxxxxxxx", text: $appState.bailianConfig.apiKey)
+                    .textFieldStyle(.roundedBorder)
+                    .autocapitalization(.none)
+                    .disableAutocorrection(true)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("模型编码")
+                    .textStyle(.secondaryText)
+                    .foregroundColor(.secondary)
+                TextField("qwen-plus", text: $appState.bailianConfig.modelCode)
+                    .textFieldStyle(.roundedBorder)
+                    .autocapitalization(.none)
+                    .disableAutocorrection(true)
+                Text("常用模型：qwen-plus、qwen-turbo、qwen-max、qwen-long")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            if appState.bailianConfig.isConfigured {
                 HStack {
-                    Image(systemName: "brain.head.profile")
-                        .foregroundColor(.purple)
-                        .font(.title2)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("百炼大模型平台")
-                            .textStyle(.subsectionTitle)
-                        Text("配置后可自动为笔记生成选择题和问答题")
-                            .textStyle(.secondaryText)
-                            .foregroundColor(.secondary)
-                    }
-                    Spacer()
-                }
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("API Key")
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.green)
+                    Text("已配置，可在刷题页生成题目")
                         .textStyle(.secondaryText)
-                        .foregroundColor(.secondary)
-                    SecureField("sk-xxxxxxxxxxxxxxxx", text: $appState.bailianConfig.apiKey)
-                        .textFieldStyle(.roundedBorder)
-                        .autocapitalization(.none)
-                        .disableAutocorrection(true)
-                }
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("模型编码")
-                        .textStyle(.secondaryText)
-                        .foregroundColor(.secondary)
-                    TextField("qwen-plus", text: $appState.bailianConfig.modelCode)
-                        .textFieldStyle(.roundedBorder)
-                        .autocapitalization(.none)
-                        .disableAutocorrection(true)
-                    Text("常用模型：qwen-plus、qwen-turbo、qwen-max、qwen-long")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-
-                if appState.bailianConfig.isConfigured {
-                    HStack {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.green)
-                        Text("已配置，可在刷题页生成题目")
-                            .textStyle(.secondaryText)
-                            .foregroundColor(.green)
-                    }
+                        .foregroundColor(.green)
                 }
             }
-            .padding(.vertical, 8)
-        } header: {
-            Text("大模型题库")
         }
+        .padding(18)
+        .background(RoundedRectangle(cornerRadius: 18).fill(Color(.systemBackground)))
+        .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
     }
 
     private var textScaleSection: some View {
