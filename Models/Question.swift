@@ -80,7 +80,7 @@ struct Question: Identifiable, Codable, Hashable {
         case .fillBlank:
             // 填空题：忽略大小写和首尾空格，支持多个正确答案（用 / 或 | 分隔）
             let possibleAnswers = normalizedAnswer.components(separatedBy: CharacterSet(charactersIn: "/|"))
-            return possibleAnswers.contains { /bin/bash.trimmingCharacters(in: .whitespaces) == normalizedUser }
+            return possibleAnswers.contains { $0.trimmingCharacters(in: .whitespaces) == normalizedUser }
         }
     }
 
