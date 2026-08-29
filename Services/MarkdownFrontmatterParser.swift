@@ -32,7 +32,7 @@ enum MarkdownFrontmatterParser {
         var lines: [String] = ["---"]
         lines.append("title: \(title)")
         if !tags.isEmpty {
-            let tagsStr = tags.map { ""\($0)"" }.joined(separator: ", ")
+            let tagsStr = tags.map { "\"\($0)\"" }.joined(separator: ", ")
             lines.append("tags: [\(tagsStr)]")
         }
         let dateFormatter = DateFormatter()
