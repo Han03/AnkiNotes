@@ -224,7 +224,22 @@ final class AppState: ObservableObject {
             selectedProvider = .webDAV
             suppressProviderDidSet = false
         }
-        return applyCurrentProviderSelection(allowWebDAVIncomplete: false)
+        let ok = applyCurrentProviderSelection(allowWebDAVIncomplete: false)
+        // ✅ 切换到 WebDAV 成功后，自动扫描远端已有笔记并导入（用户不用再手动点导入）
+        if ok {
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                guard let self = self else { return }
+                let report = self.storage.importMarkdownFromDocuments()
+                DispatchQueue.main.async {
+                    self.providerStatus = """
+                    ✅ WebDAV 已连接并完成数据迁移。
+                    📥 自动导入远端笔记：新增 \(report.importedCount)，跳过 \(report.skippedCount)，失败 \(report.failedCount)，扫描到 \(report.scannedMarkdownFiles) 个 .md 文件
+                    """
+                    self.refreshStats()
+                }
+            }
+        }
+        return ok
     }
 
     /// UI 点「🔗 测试连接」按钮（WebDAV）

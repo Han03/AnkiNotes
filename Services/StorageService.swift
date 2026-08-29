@@ -381,29 +381,36 @@ final class StorageService: ObservableObject {
 
     /// 递归扫描目录树，收集所有 .md/.markdown 文件 URL（通过 cloudFS 协议，兼容 WebDAV/iCloud/本机）
     private func collectMarkdownFiles(at url: URL, skipNames: Set<String>, into result: inout [URL]) {
-        let children: [URL]
+        // ✅ 优先用带类型的列举（WebDAVFS 实现了 contentsOfDirectoryWithTypes），
+        //    不再靠"尝试 PROPFIND 成不成功"来猜是不是文件夹
+        let children: [(url: URL, isDirectory: Bool)]
         do {
-            children = try fileSystem.cloudFS.contentsOfDirectory(at: url)
+            if let webdav = fileSystem.cloudFS as? WebDAVFS {
+                children = try webdav.contentsOfDirectoryWithTypes(at: url)
+            } else {
+                // 本地 / iCloud：FileManager 可以直接拿 isDirectory
+                let urls = try fileSystem.cloudFS.contentsOfDirectory(at: url)
+                children = urls.map { u in
+                    let isDir = (try? u.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+                    return (u, isDir)
+                }
+            }
         } catch {
             return
         }
-        for child in children {
+        for (child, isDirectory) in children {
             let name = child.lastPathComponent
             // 跳过内部目录
             if skipNames.contains(name) { continue }
-            // 尝试列子目录：如果是目录会成功并递归
-            var subChildren: [URL] = []
-            do {
-                subChildren = try fileSystem.cloudFS.contentsOfDirectory(at: child)
-            } catch {
-                // 不是目录或无法列举 → 按文件处理
-            }
-            let ext = child.pathExtension.lowercased()
-            if ext == "md" || ext == "markdown" {
-                result.append(child)
-            } else if !subChildren.isEmpty {
-                // 有子项 → 是目录，递归
+            if isDirectory {
+                // 是文件夹 → 直接递归
                 collectMarkdownFiles(at: child, skipNames: skipNames, into: &result)
+            } else {
+                // 是文件 → 检查扩展名
+                let ext = child.pathExtension.lowercased()
+                if ext == "md" || ext == "markdown" {
+                    result.append(child)
+                }
             }
         }
     }
@@ -412,26 +419,22 @@ final class StorageService: ObservableObject {
     private func relativePathComponents(of url: URL, from root: URL) -> [String] {
         let rootParts = root.pathComponents
         let urlParts = url.pathComponents
-        guard urlParts.count > rootCount(urlParts, rootParts) else { return [] }
-        let rc = rootCount(urlParts, rootParts)
-        return Array(urlParts.dropFirst(rc))
+        let common = rootCount(urlParts, rootParts)
+        guard urlParts.count > common else { return [] }
+        return Array(urlParts.dropFirst(common))
     }
 
     /// 计算共同前缀长度（用于 relativePathComponents）
+    /// ✅ 从头对齐比较共同前缀（旧代码从末尾对齐，导致相对路径算错、文件夹结构丢失）
     private func rootCount(_ urlParts: [String], _ rootParts: [String]) -> Int {
-        // 找到 rootParts 在 urlParts 中的结束位置
-        let rc = rootParts.count
-        guard urlParts.count >= rc else { return urlParts.count }
-        // 简单匹配：从末尾对齐比较（因为 WebDAV URL 可能 host 段不同）
-        var match = 0
-        for i in 0..<rc {
-            let rp = rootParts[rc - 1 - i]
-            let up = urlParts[urlParts.count - 1 - i]
-            if rp == up { match += 1 } else { break }
+        var common = 0
+        let maxLen = min(urlParts.count, rootParts.count)
+        while common < maxLen && urlParts[common] == rootParts[common] {
+            common += 1
         }
-        return urlParts.count - match
+        return common
     }
-    
+
     // MARK: - 导入辅助
     
     /// 按「从根到当前」的路径组件数组，查重创建 Folder 树，返回最终文件夹 ID（nil 表示根）

@@ -373,23 +373,24 @@ final class WebDAVFS: CloudFileSystem {
     func contentsOfDirectory(at url: URL) throws -> [URL] {
         let req = request(url: url, method: "PROPFIND", headers: ["Depth": "1"])
         let data = try sendBlockingRequest(req, allowedStatus: [200, 207])
-        // 解析 multistatus XML，拿所有 <d:href> 条目
         let delegate = DAVPropfindParser()
         let parser = XMLParser(data: data)
         parser.delegate = delegate
         parser.parse()
-        var result: [URL] = []
         guard let base = config.normalizedBaseURL else { return [] }
-        for href in delegate.hrefs {
-            // 去掉目录自己的 href
-            guard let fullURL = URL(string: href, relativeTo: base)?.absoluteURL else { continue }
-            if fullURL == url { continue }
-            if fullURL.path.hasSuffix(url.path) && fullURL.path != url.path {
-                // 直接子项
-                result.append(fullURL)
-            }
+        // 当前目录规范化路径（确保以 / 结尾）
+        let selfPath = url.path.hasSuffix("/") ? url.path : url.path + "/"
+        return delegate.items.compactMap { item in
+            // 用原始编码的 href 构造 URL（中文路径不会被静默丢弃）
+            guard let fullURL = URL(string: item.href, relativeTo: base)?.absoluteURL else { return nil }
+            // 跳过目录自身
+            guard fullURL.path != url.path else { return nil }
+            // ✅ 正确的直接子项判断：子项的父路径 == 当前目录路径
+            //    （旧代码用 hasSuffix(url.path)，子文件路径以文件名结尾，永远匹配不上）
+            let parentPath = (fullURL.path as NSString).deletingLastPathComponent + "/"
+            guard parentPath == selfPath else { return nil }
+            return fullURL
         }
-        return result
     }
 
     func readData(at url: URL) throws -> Data {
@@ -503,31 +504,69 @@ final class WebDAVFS: CloudFileSystem {
         }
     }
 
-    // MARK: - PROPFIND XML 解析器（取所有 dav:href）
-
+    // MARK: - PROPFIND XML 解析器（取 href + 区分 collection 文件夹）
     private final class DAVPropfindParser: NSObject, XMLParserDelegate {
-        var hrefs: [String] = []
+        struct Item { let href: String; let isCollection: Bool }
+        var items: [Item] = []
         private var inHref = false
         private var currentHref = ""
+        private var currentIsCollection = false
 
         func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String: String] = [:]) {
-            if elementName.lowercased().hasSuffix("href") {
+            let lower = elementName.lowercased()
+            if lower.hasSuffix("href") {
                 inHref = true
                 currentHref = ""
+            }
+            // 每个 <d:response> 开始时重置 collection 标记
+            if lower.hasSuffix("response") {
+                currentIsCollection = false
             }
         }
         func parser(_ parser: XMLParser, foundCharacters string: String) {
             if inHref { currentHref.append(string) }
         }
         func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
-            if elementName.lowercased().hasSuffix("href") {
+            let lower = elementName.lowercased()
+            if lower.hasSuffix("href") {
                 inHref = false
-                if !currentHref.isEmpty {
-                    // 百分比解码
-                    let decoded = currentHref.removingPercentEncoding ?? currentHref
-                    hrefs.append(decoded)
-                }
             }
+            // <d:collection/> 出现在 resourcetype 内 → 是文件夹
+            if lower.hasSuffix("collection") {
+                currentIsCollection = true
+            }
+            // 每个 <d:response> 结束时收集一条
+            if lower.hasSuffix("response") {
+                if !currentHref.isEmpty {
+                    // ❗ 保留原始百分号编码，不解码（避免中文路径 URL(string:) 返回 nil）
+                    items.append(Item(href: currentHref, isCollection: currentIsCollection))
+                }
+                currentHref = ""
+                currentIsCollection = false
+            }
+        }
+    }
+
+    /// 列出目录子项，同时返回哪些是文件夹（供 StorageService 递归扫描用，避免靠 hack 判断）
+    func contentsOfDirectoryWithTypes(at url: URL) throws -> [(url: URL, isDirectory: Bool)] {
+        let req = request(url: url, method: "PROPFIND", headers: ["Depth": "1"])
+        let data = try sendBlockingRequest(req, allowedStatus: [200, 207])
+        let delegate = DAVPropfindParser()
+        let parser = XMLParser(data: data)
+        parser.delegate = delegate
+        parser.parse()
+        guard let base = config.normalizedBaseURL else { return [] }
+        // 当前目录规范化路径（确保以 / 结尾）
+        let selfPath = url.path.hasSuffix("/") ? url.path : url.path + "/"
+        return delegate.items.compactMap { item in
+            // 用原始编码的 href 构造 URL（中文路径不会被静默丢弃）
+            guard let fullURL = URL(string: item.href, relativeTo: base)?.absoluteURL else { return nil }
+            // 跳过目录自身
+            guard fullURL.path != url.path else { return nil }
+            // ✅ 正确的直接子项判断：子项的父路径 == 当前目录路径
+            let parentPath = (fullURL.path as NSString).deletingLastPathComponent + "/"
+            guard parentPath == selfPath else { return nil }
+            return (fullURL, item.isCollection)
         }
     }
 }
