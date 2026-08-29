@@ -39,12 +39,11 @@ struct MainTabView: View {
                 Text("复习")
             }
             .tag(1)
-            // 真正的数字徽标用 badge() API。这里用显式 Int? 作为三目运算的统一类型；
-            // 直接写 count : nil 会触发 "'nil' cannot be used in context expecting type 'Int'" 编译错误。
-            .badge({ () -> Int? in
-                if appState.todayDueCount > 0 { return appState.todayDueCount }
-                return nil
-            }())
+            // 真正的数字徽标用 badge() API 的 String 重载（iOS 15+）。
+            // 注：iOS SDK 里 badge(Int?) 存在重载歧义：nil/false 分支会触发 "'nil' cannot be used in context expecting type 'Int'" 或
+            //     "value of optional type 'Int?' must be unwrapped to a value of type 'Int'"。因此这里用 String? 作为返回类型最稳健：
+            //     0 条不传，非 0 条直接转字符串显示（iOS 会在 Tab 右上角绘制红色数字角标）
+            .badge(appState.todayDueCount > 0 ? String(appState.todayDueCount) : nil)
 
             NavigationStack {
                 StatsView()
