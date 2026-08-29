@@ -12,9 +12,9 @@ final class SchedulerService: ObservableObject {
     
     private unowned let storage: StorageService
     
-    // 每日配额（Anki 风格）
-    var dailyNewCardLimit: Int = 20
-    var dailyReviewCardLimit: Int = 200
+    // 每日配额（笔记应用：新卡片不限制，复习卡片限制 500 防止过载）
+    var dailyNewCardLimit: Int = 500
+    var dailyReviewCardLimit: Int = 500
     
     init(storage: StorageService) {
         self.storage = storage
@@ -54,7 +54,9 @@ final class SchedulerService: ObservableObject {
                     dueCards.append(note)
                 }
             case .review:
-                if reviewDueCount < dailyReviewCardLimit || todayReviewedIds.contains(note.id) {
+                // 排除今天已经复习过的卡片（避免重复出现）
+                if todayReviewedIds.contains(note.id) { continue }
+                if reviewDueCount < dailyReviewCardLimit {
                     dueCards.append(note)
                     reviewDueCount += 1
                 }
@@ -72,7 +74,7 @@ final class SchedulerService: ObservableObject {
         
         // 排序：先学（短间隔到期）-> 到期复习 -> 新卡片；内部按到期时间升序
         dueCards.sort { $0.srs.dueDate < $1.srs.dueDate }
-        newCards.sort { $0.createdAt > $1.createdAt }  // 最近创建的新卡片先学
+        newCards.sort { $0.createdAt < $1.createdAt }  // 先创建的新卡片先学
         
         return dueCards + newCards
     }
