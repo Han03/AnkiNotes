@@ -54,20 +54,18 @@ final class AppState: ObservableObject {
 
     // MARK: - Provider 选择 & 配置（持久化）
 
-    /// 内部回退保护标志：当 applyCurrentProviderSelection() 因配置不完整
-    /// 而强制把 selectedProvider 写回旧值时，临时关闭 didSet 逻辑，
-    /// 避免再次触发异步 applyCurrentProviderSelection 导致 UI "选完 WebDAV → 立刻跳回本机" 的 bug。
-    private var isRollingBackProviderSelection = false
+    /// 内部回退保护标志：当同步修改 selectedProvider 但不代表"切换 Provider" 时（如仅占位选中
+    /// WebDAV 以便显示表单），阻止 didSet 再次触发切换逻辑。
+    private var suppressProviderDidSet = false
 
     @Published var selectedProvider: CloudProviderType = .local {
         didSet {
+            // 先判"保护性切换"：占位选 WebDAV（为显示表单）/ UI 手动撤回时不切实际后端
+            guard !suppressProviderDidSet else { return }
             guard isBootstrapped else { return }
-            guard !isRollingBackProviderSelection else { return }
             guard oldValue != selectedProvider else { return }
-            // 切换时：把当前配置用起来，执行迁移
-            Task { @MainActor in
-                await applyCurrentProviderSelection()
-            }
+            // 切换同步：Local/iCloud 立即生效；WebDAV 只占位 + 警示，等填好表单点 💾保存再真生效
+            applyCurrentProviderSelection(allowWebDAVIncomplete: true)
         }
     }
 
@@ -145,46 +143,88 @@ final class AppState: ObservableObject {
 
     // MARK: - Provider 切换（UI 交互主入口）
 
-    /// UI 点击「保存并切换 Provider」时调用：选择 + （可选）迁移 + 重建索引
-    func applyCurrentProviderSelection() async {
+    /// UI 通过 Picker 选择 / 或者 💾保存按钮点下时调用。
+    /// - 参数 allowWebDAVIncomplete：
+    ///   * true = 用户刚从 Picker 选到 WebDAV（只是占位显示表单），密码/地址不完整也允许
+    ///            "选中" WebDAV，只是 providerStatus 给红字警示，不真正重写 activeFS 与索引服务；
+    ///            这样就能做到"先切 Picker → 立刻显示配置表单 → 再填密码 → 最后点保存应用"的 UX。
+    ///   * false= 来自「💾保存并应用 WebDAV 配置」按钮点下，此时要求地址/用户名/密码齐全；
+    ///            任何缺失都直接返回 false，给 UI 红字。
+    /// - 返回：应用是否真正成功把 activeFS 写为用户选择的后端（Local/iCloud 直接 true；
+    ///          WebDAV 只有 allowWebDAVIncomplete=false 且通过校验时才 true）。
+    @discardableResult
+    func applyCurrentProviderSelection(allowWebDAVIncomplete: Bool) -> Bool {
         let type = selectedProvider
-        // 保存选择
+        // 保存选择（始终持久化，用户下次打开就知道选的是什么）
         UserDefaults.standard.set(type.rawValue, forKey: Self.keyProviderType)
 
         switch type {
         case .local, .iCloud:
             applyFileSystem(type: type, webDAVConfig: webDAVConfig, migrateFromScratch: true)
+            iCloudContainerAvailable = (activeFS as? ICloudFS)?.isAvailable ?? false
+            providerStatus = summarizeStatus()
+            return true
 
         case .webDAV:
-            // 先保存密码到 Keychain（如果 pending 有值就写；如果 pending 为空但 Keychain 已有密码，
-            // 复用旧密码——避免用户只是改了 provider 选择器而被判定为"密码缺失"直接回退）
+            // 1) 如果 pending 有密码就写 Keychain（允许用户填完后直接点保存 / 也可以先写密码再保存）
             let pendingPwd = pendingWebDAVPassword.trimmingCharacters(in: .whitespacesAndNewlines)
             if !pendingPwd.isEmpty {
                 do {
                     try KeychainHelper.setWebDAVPassword(pendingPwd)
                 } catch {
                     providerStatus = "❌ WebDAV 密码保存到 Keychain 失败：\(error.localizedDescription)"
-                    return
+                    return false
                 }
             }
-            // 如果配置不完整，就不能切（密码：pending 或 Keychain 任一非空即视为有）
+
+            // 2) 判断配置 & 密码是否齐全
             let finalPwd = (pendingPwd.isEmpty ? KeychainHelper.webDAVPassword() : pendingPwd) ?? ""
-            guard webDAVConfig.isComplete, !finalPwd.isEmpty else {
-                providerStatus = "⚠️ WebDAV 配置不完整（地址/用户名/密码缺一不可），请在下方表单填好后再把 Picker 选回 WebDAV。"
-                // 弹回去（使用保护标志防止 didSet 再次触发异步切换 → 形成"一选就跳回本机"的假象）
-                if selectedProvider == .webDAV {
-                    isRollingBackProviderSelection = true
-                    selectedProvider = activeFS.providerType
-                    isRollingBackProviderSelection = false
+            let complete = webDAVConfig.isComplete && !finalPwd.isEmpty
+
+            guard complete else {
+                // 选先占位：让 Picker 留在 WebDAV，显示表单 + 红警示文字，提醒用户填完点 💾保存。
+                // 重要：绝对不要把 selectedProvider 改回旧值！
+                //        也不要重写 activeFS（storage/scheduler 仍指向旧后端，直到用户真正保存为止）。
+                let missing: [String] = [
+                    webDAVConfig.serverURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "服务器地址" : nil,
+                    webDAVConfig.username.isEmpty ? "用户名" : nil,
+                    finalPwd.isEmpty ? "密码（应用专用密码）" : nil
+                ].compactMap { $0 }
+                if allowWebDAVIncomplete {
+                    // Picker 占位模式：只给警示，返回 false（没真正切到 WebDAV 后端）
+                    providerStatus = """
+                    ⚠️ WebDAV 配置还没写完（缺：\(missing.joined(separator: "、"))）。
+                    🆕 先把 Picker 留在 WebDAV → 请在下方把缺少的项填好 → 再点「💾保存并应用 WebDAV 配置」按钮即可生效并开始迁移。
+                    提示：密码推荐点「🔗测试连接」先确认能连通，通过后再点保存，万无一失。
+                    """
+                    // **不做任何回退**：保持 selectedProvider==.webDAV，让表单显示出来。
+                    return false
+                } else {
+                    // 用户强制点了 💾保存：明确缺失项
+                    providerStatus = "❌ 还不能保存：缺少 \(missing.joined(separator: "、"))，请补齐后重试。"
+                    return false
                 }
-                return
             }
-            // 保存配置
+
+            // 3) 齐全 → 持久化配置 + 真正做后端迁移 + 重建 Storage/Scheduler 服务
             Self.saveWebDAVConfigToDefaults(webDAVConfig)
             applyFileSystem(type: .webDAV, webDAVConfig: webDAVConfig, migrateFromScratch: true)
+            iCloudContainerAvailable = false
+            providerStatus = summarizeStatus()
+            return true
         }
-        iCloudContainerAvailable = (activeFS as? ICloudFS)?.isAvailable ?? false
-        providerStatus = summarizeStatus()
+    }
+
+    /// UI 快速入口：用户在 Settings 表单下方点「💾保存并应用 WebDAV 配置」时调用。
+    /// 等同于 allowWebDAVIncomplete=false，且要求一定是用户在 UI 侧已经把 Picker 选到了 WebDAV。
+    @discardableResult
+    func saveAndApplyWebDAV() -> Bool {
+        if selectedProvider != .webDAV {
+            suppressProviderDidSet = true
+            selectedProvider = .webDAV
+            suppressProviderDidSet = false
+        }
+        return applyCurrentProviderSelection(allowWebDAVIncomplete: false)
     }
 
     /// UI 点「🔗 测试连接」按钮（WebDAV）

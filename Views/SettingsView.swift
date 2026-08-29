@@ -93,17 +93,26 @@ struct SettingsView: View {
                     .foregroundStyle(.primary)
                 Spacer()
             }
+            // 新 UX：先占位显示表单 → 填完地址/用户/密码 → 点 💾保存并应用 才真的把 activeFS 重写为 WebDAV 后端
+            Text("👇 先把下面 5 项填完 → 点底部紫色「💾保存并应用 WebDAV 配置」按钮完成切换（期间可随时点🔗测试连接先确认连通性）。")
+                .textStyle(.miniText)
+                .foregroundStyle(.secondary)
+                .padding(.top, -2)
 
             GroupBox {
                 VStack(alignment: .leading, spacing: 10) {
-                    field(label: "服务器地址", placeholder: "https://dav.jianguoyun.com/dav/",
+                    field(label: "服务器地址（必填）", placeholder: "https://dav.jianguoyun.com/dav/",
                           text: $appState.webDAVConfig.serverURL)
-                    field(label: "用户名", placeholder: "your@mail.com",
+                    field(label: "用户名（必填）", placeholder: "your@mail.com",
                           text: $appState.webDAVConfig.username)
-                    SecureField("密码（应用专用密码，Keychain 加密保存）", text: $appState.pendingWebDAVPassword)
-                        .textStyle(.body)
-                        .padding(10)
-                        .background(RoundedRectangle(cornerRadius: 10).fill(Color(.secondarySystemBackground)))
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("密码（必填，Keychain 加密保存）").textStyle(.miniText).foregroundStyle(.secondary)
+                        SecureField("应用专用密码：如坚果云「安全选项 → 添加应用 → 生成」",
+                                    text: $appState.pendingWebDAVPassword)
+                            .textStyle(.body)
+                            .padding(10)
+                            .background(RoundedRectangle(cornerRadius: 10).fill(Color(.secondarySystemBackground)))
+                    }
                     field(label: "远端根路径", placeholder: "/AnkiNotes",
                           text: $appState.webDAVConfig.rootPath)
                     Toggle("允许自签名证书（NAS/内网场景）",
@@ -113,6 +122,23 @@ struct SettingsView: View {
                 }
             }
 
+            // 主操作：保存+应用 WebDAV（真正的后端切换在这里做）
+            Button {
+                runSaveAndApplyWebDAV()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "square.and.arrow.down.fill")
+                    Text("💾 保存并应用 WebDAV 配置")
+                        .fontWeight(.semibold)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .background(RoundedRectangle(cornerRadius: 14).fill(Color.purple.gradient))
+                .foregroundStyle(.white)
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 2)
+
             HStack(spacing: 10) {
                 Button {
                     Task { await runTestWebDAV() }
@@ -120,7 +146,7 @@ struct SettingsView: View {
                     HStack(spacing: 6) {
                         if isTesting { ProgressView() }
                         Image(systemName: "link.circle.fill")
-                        Text("🔗 测试连接")
+                        Text("🔗 测试连接（先不点保存也能试）")
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
@@ -155,7 +181,7 @@ struct SettingsView: View {
                 }
                 Text("• 推荐：🥜**坚果云**（免费版即可，个人设置 → 安全选项 → 添加应用 → 复制生成的应用专用密码，服务器填 `https://dav.jianguoyun.com/dav/`）").textStyle(.miniText).foregroundStyle(.secondary)
                 Text("• 或：群晖 DSM「WebDAV Server」、Nextcloud、AList（可挂载百度/阿里云盘后对外暴露 WebDAV）。").textStyle(.miniText).foregroundStyle(.secondary)
-                Text("• 切换到 WebDAV 并保存时，自动把本机 Notes + .metadata 迁移到远端（冲突时备份为 _backup_时间戳），数据双保险。").textStyle(.miniText).foregroundStyle(.secondary)
+                Text("• 点 💾保存并应用 成功后，自动把本机 Notes + .metadata 迁移到远端（冲突时备份为 _backup_时间戳），数据双保险。").textStyle(.miniText).foregroundStyle(.secondary)
             }
             .padding(.top, 4)
         }
@@ -227,6 +253,23 @@ struct SettingsView: View {
         defer { isTesting = false }
         let r = await appState.testCurrentWebDAVConnection()
         testResult = r
+    }
+
+    /// 主按钮动作：同步调用 AppState.saveAndApplyWebDAV()，
+    /// 真正完成 Keychain 密码写 + 校验 + 迁移 + activeFS 重建。
+    private func runSaveAndApplyWebDAV() {
+        // 先给个临时状态避免重复点
+        isTesting = true
+        defer { isTesting = false }
+        let ok = appState.saveAndApplyWebDAV()
+        // 把 providerStatus 直接渲染到 testResult 区域作为强提示
+        if let msg = appState.providerStatus {
+            testResult = (ok, msg)
+        } else if ok {
+            testResult = (true, "✅ 已成功切换为 🥇 WebDAV 并完成数据迁移。")
+        } else {
+            testResult = (false, "❌ 切换失败，请查看状态区提示。")
+        }
     }
 
     // MARK: - 文字大小调节
