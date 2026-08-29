@@ -414,8 +414,9 @@ private struct NoteRow: View {
                         .textStyle(.sectionTitle)
                         .lineLimit(1)
                     if hasQuestions {
-                        Image(systemName: "questionmark.circle.fill")
-                            .foregroundColor(.purple)
+                        // 已生成题目标识：绿色对勾印章，表示该笔记已生成题目
+                        Image(systemName: "checkmark.seal.fill")
+                            .foregroundColor(.green)
                             .font(.caption)
                     }
                 }

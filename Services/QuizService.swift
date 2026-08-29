@@ -176,6 +176,19 @@ final class QuizService {
         isGenerating = true
         isCancelled = false
 
+        // 二次检查：若所有笔记都被标记为已生成，通过 questions 重新计算 generatedNoteIds
+        // 修复 generatedNoteIds 与 questions 状态不一致的问题（题目丢失但标记仍在）
+        let allNoteIds = Set(notes.map { $0.id })
+        if generatedNoteIds.isSuperset(of: allNoteIds) {
+            let notesWithQuestions = Set(questions.map { $0.noteId })
+            let missingNotes = allNoteIds.subtracting(notesWithQuestions)
+            if !missingNotes.isEmpty {
+                // 移除没有题目的笔记的标记，允许重新生成
+                generatedNoteIds.subtract(missingNotes)
+                save()
+            }
+        }
+
         // 筛选未生成题目的笔记（排除之前失败的，允许重试）
         let pendingNotes = notes.filter { !generatedNoteIds.contains($0.id) }
         guard !pendingNotes.isEmpty else {
