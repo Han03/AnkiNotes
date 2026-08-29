@@ -73,7 +73,7 @@ final class QuizService {
         stats.correctCount = questions.filter { $0.status == .correct }.count
         stats.wrongCount = questions.filter { $0.status == .wrong }.count
         stats.singleChoiceCount = questions.filter { $0.type == .singleChoice }.count
-        stats.essayCount = questions.filter { $0.type == .essay }.count
+        stats.fillBlankCount = questions.filter { $0.type == .fillBlank }.count
         stats.totalAnswerCount = questions.reduce(0) { $0 + $1.answerCount }
         stats.totalCorrectCount = questions.reduce(0) { $0 + $1.correctCount }
         stats.coveredNoteCount = Set(questions.map { $0.noteId }).count
@@ -228,13 +228,15 @@ final class QuizService {
         \(note.markdownContent)
 
         要求：
-        1. 仔细阅读笔记的全部内容，不要遗漏任何知识点。
-        2. 生成 3-5 道选择题（单选），覆盖笔记中的关键概念、定义、原理、区别等。
-        3. 生成 2-3 道问答题，需要综合理解和阐述的题目。
+        1. 仔细阅读笔记的全部内容，不要遗漏任何知识点，尽可能完整地覆盖笔记内容。
+        2. 根据知识点的性质自动判断题目的合适类型：
+           - 对于概念辨析、定义判断、原理选择等，使用选择题（single_choice），提供4个选项
+           - 对于关键术语、定义填空、数值记忆等，使用填空题（fill_blank），题干中用____表示空缺
+        3. 不限制题目数量，笔记内容越多，生成的题目也应该越多，确保每个重要知识点都有对应的题目。
         4. 每道题都要有明确的参考答案和简要解析。
         5. 选择题的选项要合理，干扰项要有迷惑性。
-        6. 题目难度适中，既能检验理解，又不会过于偏门。
-        7. 尽可能完整地覆盖笔记内容，不要只关注开头部分。
+        6. 填空题的答案要唯一且明确，如果有多个可接受的答案，用 / 分隔。
+        7. 题目难度适中，既能检验理解，又不会过于偏门。
 
         请严格按照以下 JSON 格式输出，不要输出任何其他内容：
 
@@ -253,10 +255,10 @@ final class QuizService {
               "explanation": "答案解析"
             },
             {
-              "type": "essay",
-              "question": "问答题内容",
-              "answer": "参考答案",
-              "explanation": "答题要点解析"
+              "type": "fill_blank",
+              "question": "Swift中，声明可选类型使用____符号。",
+              "answer": "?",
+              "explanation": "答案解析"
             }
           ]
         }
@@ -337,7 +339,7 @@ final class QuizService {
                 continue
             }
 
-            let type: QuestionType = typeStr == "single_choice" ? .singleChoice : .essay
+            let type: QuestionType = typeStr == "single_choice" ? .singleChoice : .fillBlank
             let explanation = qData["explanation"] as? String
 
             var options: [ChoiceOption]? = nil

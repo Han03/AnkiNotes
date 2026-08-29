@@ -95,7 +95,7 @@ struct QuizHomeView: View {
                     .fontWeight(.semibold)
                 Spacer()
             }
-            Text("配置百炼大模型平台后，系统会自动为每篇笔记生成选择题和问答题，帮助你高效复习。")
+            Text("配置百炼大模型平台后，系统会自动为每篇笔记生成选择题和填空题，帮助你高效复习。")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
             Button {
@@ -135,7 +135,7 @@ struct QuizHomeView: View {
             // 题型分布
             HStack(spacing: 12) {
                 StatBox(title: "选择题", value: "\(stats.singleChoiceCount)", color: .blue)
-                StatBox(title: "问答题", value: "\(stats.essayCount)", color: .orange)
+                StatBox(title: "填空题", value: "\(stats.fillBlankCount)", color: .orange)
                 StatBox(title: "正确率", value: "\(Int(stats.accuracy * 100))%", color: .purple)
             }
 
@@ -225,7 +225,7 @@ struct QuizHomeView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("AI 生成题目")
                         .font(.headline)
-                    Text(appState.bailianConfig.isConfigured ? "为未生成题目的笔记生成选择题和问答题" : "请先在设置页配置百炼平台")
+                    Text(appState.bailianConfig.isConfigured ? "为未生成题目的笔记生成选择题和填空题" : "请先在设置页配置百炼平台")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }

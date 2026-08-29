@@ -114,6 +114,50 @@ final class StorageService: ObservableObject {
         guard let meta = noteMetas.first(where: { $0.id == id }) else { return nil }
         return loadNote(from: meta)
     }
+
+    /// 递归获取指定文件夹及其所有子文件夹中的笔记
+    func getAllNotesRecursive(in folderId: UUID?) -> [Note] {
+        var result: [Note] = []
+        // 当前文件夹的笔记
+        result.append(contentsOf: getNotes(in: folderId))
+        // 递归子文件夹
+        let subFolders = getSubFolders(of: folderId)
+        for sub in subFolders {
+            result.append(contentsOf: getAllNotesRecursive(in: sub.id))
+        }
+        return result.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+    }
+
+    /// 递归统计指定文件夹及其所有子文件夹中的笔记数量
+    func countNotesRecursive(in folderId: UUID?) -> Int {
+        var count = getNotes(in: folderId).count
+        let subFolders = getSubFolders(of: folderId)
+        for sub in subFolders {
+            count += countNotesRecursive(in: sub.id)
+        }
+        return count
+    }
+
+    /// 获取指定文件夹的完整路径（从根目录开始）
+    func getFolderPath(for folderId: UUID?) -> String {
+        guard let folderId = folderId else { return "根目录" }
+        var components: [String] = []
+        var currentId: UUID? = folderId
+        while let fid = currentId {
+            if let folder = getFolder(id: fid) {
+                components.insert(folder.name, at: 0)
+                currentId = folder.parentId
+            } else {
+                break
+            }
+        }
+        return components.joined(separator: "/")
+    }
+
+    /// 获取笔记所在文件夹的路径
+    func getNoteFolderPath(for note: Note) -> String {
+        return getFolderPath(for: note.folderId)
+    }
     
     @discardableResult
     func createNote(title: String, folderId: UUID?, markdownContent: String = "", tags: [String] = [], skipCloudSync: Bool = false) -> Note {

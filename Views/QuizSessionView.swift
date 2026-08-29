@@ -17,7 +17,7 @@ struct QuizSessionView: View {
     @State private var questions: [Question] = []
     @State private var currentIndex = 0
     @State private var selectedAnswer: String? = nil  // 选择题选中的选项
-    @State private var essayAnswer: String = ""        // 问答题用户答案
+    @State private var essayAnswer: String = ""        // 填空题用户答案
     @State private var showAnswer = false              // 是否显示答案
     @State private var isCorrect: Bool? = nil          // 本次作答是否正确
     @State private var correctCount = 0
@@ -82,7 +82,7 @@ struct QuizSessionView: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
                     Spacer()
-                    Text(q.type == .singleChoice ? "选择题" : "问答题")
+                    Text(q.type == .singleChoice ? "选择题" : "填空题")
                         .font(.caption)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
@@ -106,16 +106,16 @@ struct QuizSessionView: View {
                     }
                 }
 
-                // 问答题输入
-                if q.type == .essay {
+                // 填空题输入
+                if q.type == .fillBlank {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("你的答案")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
-                        TextEditor(text: $essayAnswer)
-                            .frame(minHeight: 120)
-                            .padding(8)
-                            .background(RoundedRectangle(cornerRadius: 8).fill(Color(.secondarySystemBackground)))
+                        TextField("请输入答案", text: $essayAnswer)
+                            .textFieldStyle(.roundedBorder)
+                            .autocapitalization(.none)
+                            .disableAutocorrection(true)
                             .disabled(showAnswer)
                     }
                 }
@@ -363,9 +363,11 @@ struct QuizSessionView: View {
             if correct { correctCount += 1 }
             appState.quizService?.recordAnswer(questionId: q.id, isCorrect: correct)
         } else {
-            // 问答题不自动判分，由用户自行判断，默认标记为已作答
-            isCorrect = nil
-            appState.quizService?.recordAnswer(questionId: q.id, isCorrect: false)
+            // 填空题：自动判分
+            let correct = q.isCorrect(userAnswer: essayAnswer)
+            isCorrect = correct
+            if correct { correctCount += 1 }
+            appState.quizService?.recordAnswer(questionId: q.id, isCorrect: correct)
         }
 
         showAnswer = true

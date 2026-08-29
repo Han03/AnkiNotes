@@ -10,7 +10,7 @@ import Foundation
 /// 题目类型
 enum QuestionType: String, Codable {
     case singleChoice = "single_choice"  // 选择题（单选）
-    case essay = "essay"                   // 问答题
+    case fillBlank = "fill_blank"         // 填空题
 }
 
 /// 题目作答状态
@@ -72,12 +72,15 @@ struct Question: Identifiable, Codable, Hashable {
 
     /// 判断用户答案是否正确
     func isCorrect(userAnswer: String) -> Bool {
+        let normalizedUser = userAnswer.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let normalizedAnswer = answer.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         switch type {
         case .singleChoice:
-            return userAnswer.uppercased().trimmingCharacters(in: .whitespaces) == answer.uppercased().trimmingCharacters(in: .whitespaces)
-        case .essay:
-            // 问答题不自动判分，由用户自行判断
-            return false
+            return normalizedUser == normalizedAnswer
+        case .fillBlank:
+            // 填空题：忽略大小写和首尾空格，支持多个正确答案（用 / 或 | 分隔）
+            let possibleAnswers = normalizedAnswer.components(separatedBy: CharacterSet(charactersIn: "/|"))
+            return possibleAnswers.contains { /bin/bash.trimmingCharacters(in: .whitespaces) == normalizedUser }
         }
     }
 
@@ -101,7 +104,7 @@ struct QuizStats: Codable {
     var correctCount: Int = 0
     var wrongCount: Int = 0
     var singleChoiceCount: Int = 0
-    var essayCount: Int = 0
+    var fillBlankCount: Int = 0
     var totalAnswerCount: Int = 0
     var totalCorrectCount: Int = 0
     var coveredNoteCount: Int = 0  // 已生成题目的笔记数

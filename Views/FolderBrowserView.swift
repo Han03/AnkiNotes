@@ -19,55 +19,23 @@ struct FolderBrowserView: View {
     @State private var newNoteTags = ""
     @State private var searchText = ""
     @State private var editingNoteId: UUID?
-    @State private var showingReviewSession = false
-    @State private var reviewFolderId: UUID? = nil
+    @State private var displayCount = 10  // 分页加载，默认显示10条
     
     var body: some View {
         let storage = appState.storage!
         let subFolders = storage.getSubFolders(of: currentFolderId)
-        let notes = storage.getNotes(in: currentFolderId)
+        // 递归获取当前文件夹及所有子文件夹的笔记
+        let allNotes = storage.getAllNotesRecursive(in: currentFolderId)
         let filteredNotes = searchText.isEmpty
-            ? notes
-            : notes.filter { $0.title.localizedCaseInsensitiveContains(searchText) ||
+            ? allNotes
+            : allNotes.filter { $0.title.localizedCaseInsensitiveContains(searchText) ||
                 $0.markdownContent.localizedCaseInsensitiveContains(searchText) }
+        // 分页显示
+        let displayedNotes = Array(filteredNotes.prefix(displayCount))
         
         let currentFolder = currentFolderId.flatMap { storage.getFolder(id: $0) }
-        let reviewCount = appState.scheduler.getTodayDueCount(in: currentFolderId)
         
         List {
-            Section {
-                // 复习按钮
-                if reviewCount > 0 {
-                    Button {
-                        reviewFolderId = currentFolderId
-                        showingReviewSession = true
-                    } label: {
-                        HStack(spacing: 12) {
-                            ZStack {
-                                Circle()
-                                    .fill(Color.blue.opacity(0.15))
-                                    .frame(width: 44, height: 44)
-                                Image(systemName: "play.fill")
-                                    .foregroundColor(.blue)
-                                    .textStyle(.subsectionTitle)
-                            }
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("开始复习")
-                                    .textStyle(.sectionTitle)
-                                Text("\(reviewCount) 张卡片待复习")
-                                    .textStyle(.secondaryText)
-                                    .foregroundColor(.secondary)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .listRowBackground(Color.blue.opacity(0.05))
-                }
-            }
-            
             if !subFolders.isEmpty {
                 Section {
                     ForEach(subFolders) { folder in
@@ -99,11 +67,11 @@ struct FolderBrowserView: View {
                 } else if filteredNotes.isEmpty {
                     EmptyStateView("无搜索结果", systemImage: "magnifyingglass")
                 } else {
-                    ForEach(filteredNotes) { note in
+                    ForEach(displayedNotes) { note in
                         NavigationLink {
                             NoteDetailView(noteId: note.id)
                         } label: {
-                            NoteRow(note: note)
+                            NoteRow(note: note, folderPath: storage.getNoteFolderPath(for: note))
                         }
                         .swipeActions(edge: .leading) {
                             Button {
@@ -125,6 +93,23 @@ struct FolderBrowserView: View {
                 }
             } header: {
                 Text("笔记 · \(filteredNotes.count)")
+            }
+            
+            // 加载更多
+            if displayedNotes.count < filteredNotes.count {
+                Section {
+                    Button {
+                        displayCount += 10
+                    } label: {
+                        HStack {
+                            Spacer()
+                            Text("加载更多（\(filteredNotes.count - displayedNotes.count) 条）")
+                                .foregroundColor(.blue)
+                            Spacer()
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
             }
         }
         .listStyle(.insetGrouped)
@@ -219,13 +204,6 @@ struct FolderBrowserView: View {
                 NoteEditorView(noteId: noteId)
             }
         }
-        // 复习模式
-        .sheet(isPresented: $showingReviewSession) {
-            NavigationStack {
-                ReviewSessionView(folderId: reviewFolderId)
-            }
-            .interactiveDismissDisabled()
-        }
     }
 }
 
@@ -244,7 +222,7 @@ private struct FolderRow: View {
                 Text(folder.name)
                     .textStyle(.sectionTitle)
                 let subCount = storage.getSubFolders(of: folder.id).count
-                let noteCount = storage.getNotes(in: folder.id).count
+                let noteCount = storage.countNotesRecursive(in: folder.id)
                 Text("\(subCount) 文件夹 · \(noteCount) 笔记")
                     .textStyle(.secondaryText)
                     .foregroundColor(.secondary)
@@ -259,6 +237,7 @@ private struct FolderRow: View {
 
 private struct NoteRow: View {
     let note: Note
+    let folderPath: String
     
     var body: some View {
         HStack(spacing: 12) {
@@ -267,6 +246,11 @@ private struct NoteRow: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(note.title)
                     .textStyle(.sectionTitle)
+                    .lineLimit(1)
+                // 文件夹路径小字标识
+                Text(folderPath)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
                     .lineLimit(1)
                 let snippet = note.cardBack
                     .trimmingCharacters(in: .whitespacesAndNewlines)
