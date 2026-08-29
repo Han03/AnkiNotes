@@ -293,79 +293,46 @@ final class StorageService: ObservableObject {
         var warningMessages: [String] = [] // 警告（如空文件）
     }
     
-    /// 从 App Documents 目录（文件共享拖入）递归扫描 Markdown 并导入笔记库
+    /// 从存储根目录递归扫描 Markdown 并导入笔记库（支持本机/iCloud/WebDAV 全部 Provider）
     /// - 跳过内部目录 Notes/ 和 .metadata/
     /// - 按物理相对路径自动创建 Folder 层级
     /// - 解析 YAML Frontmatter（title/tags/date）
     /// - 去重：同路径+同标题已存在时跳过
     @discardableResult
     func importMarkdownFromDocuments() -> ImportReport {
-        let fm = FileManager.default
         let root = fileSystem.rootDirectory
         var report = ImportReport()
-        
-        // 1. 递归枚举所有 .md / .markdown 文件，跳过 Notes 和 .metadata
+
+        // 1. 递归枚举所有 .md / .markdown 文件（通过 cloudFS 协议，兼容 WebDAV）
         let skipNames: Set<String> = ["Notes", ".metadata"]
-        let keys: [URLResourceKey] = [.isDirectoryKey, .nameKey, .pathKey]
-        guard let enumerator = fm.enumerator(
-            at: root,
-            includingPropertiesForKeys: keys,
-            options: [.skipsHiddenFiles, .skipsPackageDescendants],
-            errorHandler: { _, _ in true }
-        ) else {
-            report.warningMessages.append("无法创建 Documents 目录枚举器")
-            return report
-        }
-        
         var mdFiles: [URL] = []
-        for case let url as URL in enumerator {
-            guard let rv = try? url.resourceValues(forKeys: Set(keys)) else { continue }
-            if rv.isDirectory ?? false {
-                if let name = rv.name, skipNames.contains(name) {
-                    enumerator.skipDescendants()
-                }
-                continue
-            }
-            let ext = url.pathExtension.lowercased()
-            if ext == "md" || ext == "markdown" {
-                mdFiles.append(url)
-            }
-        }
+        collectMarkdownFiles(at: root, skipNames: skipNames, into: &mdFiles)
+
         report.scannedMarkdownFiles = mdFiles.count
-        
+
         guard report.scannedMarkdownFiles > 0 else {
-            report.warningMessages.append("Documents 目录没有发现 .md/.markdown 文件（请通过爱思助手/iTunes 文件共享先把 Markdown 文件夹拖入）")
+            report.warningMessages.append("根目录没有发现 .md/.markdown 文件（本机模式：请通过爱思助手/iTunes 文件共享先把 Markdown 文件夹拖入；WebDAV 模式：请确认远端目录里有 .md 文件）")
             return report
         }
-        
+
         // 2. 逐个导入
         for (idx, srcURL) in mdFiles.enumerated() {
-            // 防止重复（按标题+folder 路径粗略查重）
-            // 显式声明 [String] + Array(dropFirst) 避免 Swift 在
-            // Sequence.dropFirst / Array.dropFirst 两重载间类型推断 ambiguous
-            let paths: [String] = srcURL.pathComponents
-            let rootCount = root.pathComponents.count
-            let relativePathComponents: [String]
-            if paths.count > rootCount {
-                relativePathComponents = Array(paths.dropFirst(rootCount))
-            } else {
-                relativePathComponents = []
-            }
+            let relativePathComponents = relativePathComponents(of: srcURL, from: root)
             let folderComponents = Array(relativePathComponents.dropLast()) // 去掉文件名
             let fileName = srcURL.lastPathComponent
-            
+
             do {
                 let rawBody = try fileSystem.readNoteContent(from: srcURL)
                 let parsed = MarkdownFrontmatterParser.parse(rawBody)
-                
+
                 // 标题：Frontmatter.title → 文件名去掉 .md → 默认 "未命名"
                 var title = (parsed.title?.isEmpty == false) ? parsed.title! : parseTitleFromFileName(fileName)
                 if title.isEmpty { title = "未命名-\(UUID().uuidString.prefix(6))" }
-                
+
                 // 文件夹：按相对路径创建层级
                 let folderId = try getOrCreateFolder(pathComponents: folderComponents,
                                                      createdCount: &report.folderCreatedCount)
-                
+
                 // 粗略查重（同 folder + 同 title → 跳过）
                 let exists = noteMetas.contains { m in
                     m.folderId == folderId && m.title.lowercased() == title.lowercased()
@@ -377,7 +344,7 @@ final class StorageService: ObservableObject {
                     }
                     continue
                 }
-                
+
                 // 创建笔记（调用现有 createNote 自动生成 SRS 默认值、写 Notes/ 目录、索引）
                 let bodyToUse = parsed.body.isEmpty ? rawBody : parsed.body
                 createNote(
@@ -387,7 +354,7 @@ final class StorageService: ObservableObject {
                     tags: parsed.tags
                 )
                 report.importedCount += 1
-                
+
                 if report.messages.count < 10 {
                     let prefix = folderComponents.isEmpty ? "" : folderComponents.joined(separator: "/") + "/"
                     report.messages.append("✅ \(prefix)\(title)")
@@ -398,18 +365,71 @@ final class StorageService: ObservableObject {
                     report.warningMessages.append("❌ 导入失败 \(fileName): \(error.localizedDescription)")
                 }
             }
-            
+
             // 每 50 条持久化一次，避免丢数据
             if idx % 50 == 0 {
                 persistFolders()
                 persistNoteIndex()
             }
         }
-        
+
         persistFolders()
         persistNoteIndex()
-        
+
         return report
+    }
+
+    /// 递归扫描目录树，收集所有 .md/.markdown 文件 URL（通过 cloudFS 协议，兼容 WebDAV/iCloud/本机）
+    private func collectMarkdownFiles(at url: URL, skipNames: Set<String>, into result: inout [URL]) {
+        let children: [URL]
+        do {
+            children = try fileSystem.cloudFS.contentsOfDirectory(at: url)
+        } catch {
+            return
+        }
+        for child in children {
+            let name = child.lastPathComponent
+            // 跳过内部目录
+            if skipNames.contains(name) { continue }
+            // 尝试列子目录：如果是目录会成功并递归
+            var subChildren: [URL] = []
+            do {
+                subChildren = try fileSystem.cloudFS.contentsOfDirectory(at: child)
+            } catch {
+                // 不是目录或无法列举 → 按文件处理
+            }
+            let ext = child.pathExtension.lowercased()
+            if ext == "md" || ext == "markdown" {
+                result.append(child)
+            } else if !subChildren.isEmpty {
+                // 有子项 → 是目录，递归
+                collectMarkdownFiles(at: child, skipNames: skipNames, into: &result)
+            }
+        }
+    }
+
+    /// 计算 URL 相对于 root 的路径组件（兼容 WebDAV https:// URL 和本地 file:// URL）
+    private func relativePathComponents(of url: URL, from root: URL) -> [String] {
+        let rootParts = root.pathComponents
+        let urlParts = url.pathComponents
+        guard urlParts.count > rootCount(urlParts, rootParts) else { return [] }
+        let rc = rootCount(urlParts, rootParts)
+        return Array(urlParts.dropFirst(rc))
+    }
+
+    /// 计算共同前缀长度（用于 relativePathComponents）
+    private func rootCount(_ urlParts: [String], _ rootParts: [String]) -> Int {
+        // 找到 rootParts 在 urlParts 中的结束位置
+        let rc = rootParts.count
+        guard urlParts.count >= rc else { return urlParts.count }
+        // 简单匹配：从末尾对齐比较（因为 WebDAV URL 可能 host 段不同）
+        var match = 0
+        for i in 0..<rc {
+            let rp = rootParts[rc - 1 - i]
+            let up = urlParts[urlParts.count - 1 - i]
+            if rp == up { match += 1 } else { break }
+        }
+        return urlParts.count - match
     }
     
     // MARK: - 导入辅助

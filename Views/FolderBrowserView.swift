@@ -140,7 +140,7 @@ struct FolderBrowserView: View {
                         lastImportReport = report
                         appState.refreshStats()
                     } label: {
-                        Label("📥 导入 Markdown 文件夹", systemImage: "square.and.arrow.down")
+                        Label("📥 导入 Markdown 文件夹（本机/云端均可）", systemImage: "square.and.arrow.down")
                     }
                     Button {
                         showNewFolderAlert = true
