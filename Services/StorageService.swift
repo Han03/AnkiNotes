@@ -458,16 +458,9 @@ final class StorageService: ObservableObject {
               let note = getNote(id: noteId) else {
             return false
         }
-        // 找到该笔记在云端的对应文件
-        let folderPath = getFolderPath(for: note.folderId)
-        let cloudRoot = cloud.rootDirectory.appendingPathComponent("Notes", isDirectory: true)
-        var cloudURL = cloudRoot
-        if !folderPath.isEmpty {
-            for component in folderPath.split(separator: "/") {
-                cloudURL.appendPathComponent(String(component), isDirectory: true)
-            }
-        }
-        cloudURL.appendPathComponent("\(note.title).md")
+        // 使用与本地一致的文件名规则（带 noteId），通过 cloudNoteURL 映射到云端
+        let localFileURL = fileSystem.noteFileURL(noteId: note.id, folderId: note.folderId, title: note.title, folders: folders)
+        let cloudURL = cloudNoteURL(for: localFileURL, cloudFS: cloud)
         
         // 尝试从云端下载
         do {
@@ -483,7 +476,16 @@ final class StorageService: ObservableObject {
                 updatedNote.tags = parsed.tags
             }
             updatedNote.updatedAt = Date()
-            updateNote(updatedNote)
+            // 只更新本地内容，不触发云端上传（避免循环）
+            guard let idx = noteMetas.firstIndex(where: { $0.id == noteId }) else { return false }
+            let meta = NoteMeta(
+                id: updatedNote.id, title: updatedNote.title, folderId: updatedNote.folderId,
+                fileName: localFileURL.lastPathComponent, srs: updatedNote.srs,
+                createdAt: updatedNote.createdAt, updatedAt: updatedNote.updatedAt, tags: updatedNote.tags
+            )
+            noteMetas[idx] = meta
+            try? fileSystem.writeNoteContent(updatedNote.markdownContent, to: localFileURL)
+            persistNoteIndex()
             return true
         } catch {
             // 云端不存在该笔记或下载失败，不更新本地

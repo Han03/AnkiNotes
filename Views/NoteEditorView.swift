@@ -202,19 +202,11 @@ struct NoteEditorView: View {
         note.tags = tags
         note.updatedAt = Date()
         
-        // 先更新本地
+        // 更新本地（updateNote 内部已包含云端同步，不会生成重复文件）
         appState.storage.updateNote(note)
         appState.refreshStats()
+        appState.storage.triggerRefresh()
         hasChanges = false
-        
-        // 异步上传到云端（不阻塞 UI）
-        let noteId = note.id
-        appState.uploadSingleNote(noteId: noteId) { _ in
-            // 上传完成后刷新
-            DispatchQueue.main.async {
-                appState.storage.triggerRefresh()
-            }
-        }
         
         isSaving = false
         dismiss()
