@@ -150,7 +150,7 @@ final class MarkdownRenderer {
                     if l.starts(with: "- [") || l.starts(with: "* [") {
                         let checked = l.prefix(5).contains("x") || l.prefix(5).contains("X")
                         let text = String(l.dropFirst(5)).trimmingCharacters(in: .whitespaces)
-                        items.append((text: text, checked: checked))
+                        items.append(TaskItem(text: text, checked: checked))
                         i += 1
                     } else {
                         break
@@ -187,6 +187,13 @@ final class MarkdownRenderer {
     }
 }
 
+/// 任务列表项
+struct TaskItem: Hashable, Identifiable {
+    let id = UUID()
+    var text: String
+    var checked: Bool
+}
+
 /// Markdown 段落块类型
 enum MarkdownBlock: Hashable, Identifiable {
     case empty
@@ -198,7 +205,7 @@ enum MarkdownBlock: Hashable, Identifiable {
     case codeBlock(String)
     case divider
     case table(headers: [String], rows: [[String]])
-    case taskList(items: [(text: String, checked: Bool)])
+    case taskList(items: [TaskItem])
     
     var id: Int { hashValue }
 }
@@ -273,7 +280,7 @@ private struct BlockView: View {
             TableView(headers: headers, rows: rows, bodyFont: bodyFont, textColor: textColor)
         case .taskList(let items):
             VStack(alignment: .leading, spacing: 6) {
-                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                ForEach(items) { item in
                     HStack(alignment: .top, spacing: 8) {
                         Image(systemName: item.checked ? "checkmark.square.fill" : "square")
                             .foregroundColor(item.checked ? .green : .secondary)
