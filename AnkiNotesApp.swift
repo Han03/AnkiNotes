@@ -235,6 +235,37 @@ final class AppState: ObservableObject {
         return ok
     }
 
+    /// UI 点「🔗 测试连接」按钮（WebDAV）
+    func testCurrentWebDAVConnection() async -> (success: Bool, message: String) {
+        let cfg = webDAVConfig
+        var usePassword = pendingWebDAVPassword.trimmingCharacters(in: .whitespacesAndNewlines)
+        if usePassword.isEmpty { usePassword = KeychainHelper.webDAVPassword() ?? "" }
+        guard !cfg.serverURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !cfg.username.isEmpty, !usePassword.isEmpty else {
+            return (false, "地址/用户名/密码不能为空")
+        }
+        do { try KeychainHelper.setWebDAVPassword(usePassword) }
+        catch { return (false, "Keychain 临时密码失败：\(error.localizedDescription)") }
+
+        let fs = CloudProviderFactory.makeFileSystem(for: .webDAV, webDAVConfig: cfg)
+        let root = fs.rootDirectory
+        do {
+            let exists: Bool = try fs.fileExists(at: root)
+            if exists {
+                return (true, "✅ 连接成功，根目录可访问：\(fs.displayLocation)")
+            } else {
+                do {
+                    try fs.createDirectoryIfNeeded(at: root)
+                    return (true, "✅ 连接成功，根目录不存在已自动创建：\(fs.displayLocation)")
+                } catch {
+                    return (false, "❌ 连接成功但根目录创建失败：\(error.localizedDescription)。请检查路径是否有写入权限，或手动在坚果云创建对应目录")
+                }
+            }
+        } catch {
+            return (false, "❌ 连接失败：\(error.localizedDescription)")
+        }
+    }
+
     /// 从云端同步笔记到本地（下拉刷新触发，全局唯一同步入口）
     /// - 加锁防止重复执行
     /// - 后台线程扫描云端 Notes 目录，下载新笔记到本地

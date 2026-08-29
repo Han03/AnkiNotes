@@ -139,7 +139,7 @@ final class StorageService: ObservableObject {
             DispatchQueue.global(qos: .background).async {
                 do {
                     let cloudURL = self.cloudNoteURL(for: fileURL, cloudFS: cloud)
-                    try cloud.writeData(Data(bodyToUse.utf8), to: cloudURL)
+                    try cloud.writeData(Data(note.markdownContent.utf8), to: cloudURL)
                 } catch { print("⚠️ 云端同步笔记失败: \(error.localizedDescription)") }
             }
         }
@@ -208,15 +208,6 @@ final class StorageService: ObservableObject {
         meta.updatedAt = Date()
         noteMetas[idx] = meta
         persistNoteIndex()
-        // 后台同步到云端
-        if let cloud = cloudSyncFS {
-            DispatchQueue.global(qos: .background).async {
-                do {
-                    let cloudURL = self.cloudNoteURL(for: fileURL, cloudFS: cloud)
-                    try cloud.writeData(Data(note.markdownContent.utf8), to: cloudURL)
-                } catch { print("⚠️ 云端更新笔记失败: \(error.localizedDescription)") }
-            }
-        }
     }
     
     func deleteNote(id: UUID) {
