@@ -95,6 +95,7 @@
 				ANSRSRef /* SRSData.swift */,
 				ANNoteRef /* Note.swift */,
 				ANLogRef /* ReviewLog.swift */,
+			ANQuestionRef /* Question.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -108,6 +109,7 @@
 				ANSchedRef /* SchedulerService.swift */,
 				ANFrontMatRef /* MarkdownFrontmatterParser.swift */,
 				ANCloudProviderRef /* CloudProvider.swift */,
+			ANQuizServiceRef /* QuizService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -125,6 +127,8 @@
 				ANReviewSessionRef /* ReviewSessionView.swift */,
 				ANStatsRef /* StatsView.swift */,
 				ANSettRef /* SettingsView.swift */,
+			ANQuizHomeRef /* QuizHomeView.swift */,
+			ANQuizSessionRef /* QuizSessionView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -236,6 +240,10 @@
 				ANSett /* SettingsView.swift in Sources */,
 				ANFrontMat /* MarkdownFrontmatterParser.swift in Sources */,
 				ANCloudProvider /* CloudProvider.swift in Sources */,
+			ANQuestion /* Question.swift in Sources */,
+			ANQuizService /* QuizService.swift in Sources */,
+			ANQuizHome /* QuizHomeView.swift in Sources */,
+			ANQuizSession /* QuizSessionView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
