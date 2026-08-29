@@ -154,7 +154,7 @@ enum KeychainHelper {
     }
 
     static func webDAVPassword() -> String? {
-        var query: [CFString: Any] = [
+        let query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
             kSecAttrAccount: webDAVPasswordAccount,
@@ -237,11 +237,11 @@ final class ICloudFS: CloudFileSystem {
     private let containerID: String? = nil // nil = 用 entitlements 声明的第一个 container
 
     var isAvailable: Bool {
-        fm.url(forUbiquityContainerIdentifier: containerID as NSString?) != nil
+        fm.url(forUbiquityContainerIdentifier: containerID) != nil
     }
 
     var rootDirectory: URL {
-        if let container = fm.url(forUbiquityContainerIdentifier: containerID as NSString?) {
+        if let container = fm.url(forUbiquityContainerIdentifier: containerID) {
             // 统一子路径：<Container>/Documents/AnkiNotes  →  在文件 App 显示为 iCloud ▸ AnkiNotes
             let dir = container
                 .appendingPathComponent("Documents", isDirectory: true)

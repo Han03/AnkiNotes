@@ -185,9 +185,14 @@ final class AppState: ObservableObject {
 
         let fs = CloudProviderFactory.makeFileSystem(for: .webDAV, webDAVConfig: cfg)
         let root = fs.rootDirectory
+        // 同步测连接：WebDAVFS.fileExists 内部走 URLSession.synchronousData，HTTP 状态失败会抛 NSError
         do {
-            _ = try await Task.detached { @Sendable in fs.fileExists(at: root) }.value
-            return (true, "✅ 连接成功，根目录可访问：\(fs.displayLocation)")
+            let ok: Bool = try fs.fileExists(at: root)
+            if ok {
+                return (true, "✅ 连接成功，根目录可访问：\(fs.displayLocation)")
+            } else {
+                return (false, "❌ 连接失败：根目录不存在或 404，请检查远端路径配置")
+            }
         } catch {
             return (false, "❌ 连接失败：\(error.localizedDescription)")
         }
@@ -294,7 +299,7 @@ final class AppState: ObservableObject {
 
     private func summarizeStatus() -> String {
         let fs = activeFS!
-        if fs is ICloudFS, !(fs is ICloudFS).unsafelyUnwrapped.isAvailable {
+        if let icloud = fs as? ICloudFS, !icloud.isAvailable {
             return "⚠️ iCloud 容器不可用（需要 ¥688 开发者账号 + entitlements + Portal 配置 iCloud Container，已回退到本地 Documents）"
         }
         if fs is WebDAVFS {
@@ -302,9 +307,4 @@ final class AppState: ObservableObject {
         }
         return "📁 使用本机 Documents 存储（App 更新/覆盖安装不会丢失 Documents 中的数据，删除 App 会删除）"
     }
-}
-
-// 小工具：让 ICloudFS 的 isAvailable 取值在 summarizeStatus 里更安全（避免过度强制解包）
-private extension ICloudFS {
-    var unsafelyUnwrapped: ICloudFS { self }
 }

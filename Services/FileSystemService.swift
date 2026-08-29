@@ -36,7 +36,7 @@ final class FileSystemService {
     /// JSON 索引目录（root/.metadata，iCloud 下也会被自动同步，因为不是点开头会上传；
     /// 但我们在设置 URLResourceValues 隐藏仅是为了文件 App 不显示它）
     var metadataDirectory: URL {
-        let dir = rootDirectory.appendingPathComponent(".metadata", isDirectory: true)
+        var dir = rootDirectory.appendingPathComponent(".metadata", isDirectory: true)
         try? cloudFS.createDirectoryIfNeeded(at: dir)
         // 仅本地沙盒 / iCloud（URL 对象是 file://）时尝试隐藏属性
         if dir.isFileURL {
