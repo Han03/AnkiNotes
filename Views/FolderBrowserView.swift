@@ -21,7 +21,6 @@ struct FolderBrowserView: View {
     @State private var editingNoteId: UUID?
     @State private var showingReviewSession = false
     @State private var reviewFolderId: UUID? = nil
-    @State private var lastImportReport: StorageService.ImportReport?
     
     var body: some View {
         let storage = appState.storage!
@@ -132,6 +131,14 @@ struct FolderBrowserView: View {
         .navigationTitle(currentFolder?.name ?? "全部笔记")
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $searchText, prompt: "搜索笔记标题或内容")
+        // 下拉刷新：从云端同步笔记到本地（全局唯一同步入口）
+        .refreshable {
+            await withCheckedContinuation { continuation in
+                appState.syncFromCloud { _ in
+                    continuation.resume()
+                }
+            }
+        }
         // ✅ 正在同步中遮罩提示
         .overlay {
             if appState.isSyncing {
@@ -158,14 +165,6 @@ struct FolderBrowserView: View {
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Menu {
-                    Button {
-                        appState.importMarkdownAsync { report in
-                            lastImportReport = report
-                        }
-                    } label: {
-                        Label("📥 导入 Markdown 文件夹（本机/云端均可）", systemImage: "square.and.arrow.down")
-                    }
-                    .disabled(appState.isSyncing)
                     Button {
                         showNewFolderAlert = true
                     } label: {
@@ -226,99 +225,6 @@ struct FolderBrowserView: View {
                 ReviewSessionView(folderId: reviewFolderId)
             }
             .interactiveDismissDisabled()
-        }
-        // 导入结果
-        .sheet(item: $lastImportReport) { report in
-            NavigationStack {
-                ImportReportView(report: report)
-                    .navigationTitle("📥 导入结果")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .topBarTrailing) {
-                            Button("完成") { lastImportReport = nil }
-                                .bold()
-                        }
-                    }
-            }
-        }
-    }
-}
-
-// MARK: - 导入结果弹窗
-
-private struct ImportReportView: View {
-    let report: StorageService.ImportReport
-    
-    var body: some View {
-        List {
-            Section {
-                StatRow(icon: "doc.text.magnifyingglass", title: "扫描发现 Markdown",
-                        value: "\(report.scannedMarkdownFiles) 个", color: .gray)
-                StatRow(icon: "checkmark.circle.fill", title: "✅ 成功导入",
-                        value: "\(report.importedCount) 个", color: .green)
-                StatRow(icon: "folder.fill.badge.plus", title: "📁 自动新建文件夹",
-                        value: "\(report.folderCreatedCount) 个", color: .orange)
-                StatRow(icon: "arrow.triangle.2.circlepath", title: "⏭️ 重复跳过",
-                        value: "\(report.skippedCount) 个", color: .secondary)
-                if report.failedCount > 0 {
-                    StatRow(icon: "xmark.circle.fill", title: "❌ 导入失败",
-                            value: "\(report.failedCount) 个", color: .red)
-                }
-            } header: {
-                Text("导入汇总")
-            } footer: {
-                if report.scannedMarkdownFiles == 0 {
-                    Text("提示：请通过爱思助手 →「我的设备」→「应用」→ 找到 Anki 笔记 → 浏览文件 → 把整个 Markdown 文件夹拖入 App 共享目录，再回到本页点导入。")
-                }
-            }
-            
-            if !report.messages.isEmpty {
-                Section {
-                    ForEach(report.messages, id: \.self) { line in
-                        Label(line, systemImage: "doc.plaintext")
-                            .textStyle(.tertiaryText)
-                            .lineLimit(2)
-                    }
-                    if report.importedCount + report.skippedCount > report.messages.count {
-                        Text("...其余 \(report.importedCount + report.skippedCount - report.messages.count) 条未显示")
-                            .textStyle(.tertiaryText)
-                            .foregroundColor(.secondary)
-                    }
-                } header: {
-                    Text("明细样例（前 \(report.messages.count) 条）")
-                }
-            }
-            
-            if !report.warningMessages.isEmpty {
-                Section {
-                    ForEach(report.warningMessages, id: \.self) { line in
-                        Label(line, systemImage: "exclamationmark.triangle.fill")
-                            .textStyle(.tertiaryText)
-                            .foregroundColor(.orange)
-                    }
-                } header: {
-                    Text("警告")
-                }
-            }
-        }
-        .listStyle(.insetGrouped)
-    }
-}
-
-private struct StatRow: View {
-    let icon: String
-    let title: String
-    let value: String
-    let color: Color
-    
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .foregroundStyle(color)
-                .frame(width: 28)
-            Text(title).foregroundColor(.primary)
-            Spacer()
-            Text(value).bold().foregroundStyle(color)
         }
     }
 }

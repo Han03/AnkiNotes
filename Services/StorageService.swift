@@ -11,6 +11,7 @@ import Foundation
 final class StorageService: ObservableObject {
     
     private let fileSystem: FileSystemService
+    var cloudSyncFS: CloudFileSystem?  // 云端同步实例（WebDAV），增删改后后台双写
     @Published private(set) var folders: [Folder] = []
     @Published private(set) var noteMetas: [NoteMeta] = []
     @Published private(set) var reviewLogs: [ReviewLog] = []
@@ -115,7 +116,7 @@ final class StorageService: ObservableObject {
     }
     
     @discardableResult
-    func createNote(title: String, folderId: UUID?, markdownContent: String = "", tags: [String] = []) -> Note {
+    func createNote(title: String, folderId: UUID?, markdownContent: String = "", tags: [String] = [], skipCloudSync: Bool = false) -> Note {
         let note = Note(
             title: title,
             folderId: folderId,
@@ -133,6 +134,15 @@ final class StorageService: ObservableObject {
         )
         noteMetas.append(meta)
         persistNoteIndex()
+        // 后台同步到云端
+        if !skipCloudSync, let cloud = cloudSyncFS {
+            DispatchQueue.global(qos: .background).async {
+                do {
+                    let cloudURL = self.cloudNoteURL(for: fileURL, cloudFS: cloud)
+                    try cloud.writeData(Data(bodyToUse.utf8), to: cloudURL)
+                } catch { print("⚠️ 云端同步笔记失败: \(error.localizedDescription)") }
+            }
+        }
         return note
     }
     
@@ -179,6 +189,15 @@ final class StorageService: ObservableObject {
         )
         noteMetas[idx] = meta
         persistNoteIndex()
+        // 后台同步到云端
+        if let cloud = cloudSyncFS {
+            DispatchQueue.global(qos: .background).async {
+                do {
+                    let cloudURL = self.cloudNoteURL(for: fileURL, cloudFS: cloud)
+                    try cloud.writeData(Data(note.markdownContent.utf8), to: cloudURL)
+                } catch { print("⚠️ 云端更新笔记失败: \(error.localizedDescription)") }
+            }
+        }
     }
     
     /// 只更新 SRS 数据，不重写 Markdown 文件
@@ -189,13 +208,32 @@ final class StorageService: ObservableObject {
         meta.updatedAt = Date()
         noteMetas[idx] = meta
         persistNoteIndex()
+        // 后台同步到云端
+        if let cloud = cloudSyncFS {
+            DispatchQueue.global(qos: .background).async {
+                do {
+                    let cloudURL = self.cloudNoteURL(for: fileURL, cloudFS: cloud)
+                    try cloud.writeData(Data(note.markdownContent.utf8), to: cloudURL)
+                } catch { print("⚠️ 云端更新笔记失败: \(error.localizedDescription)") }
+            }
+        }
     }
     
     func deleteNote(id: UUID) {
         guard let meta = noteMetas.first(where: { $0.id == id }) else { return }
+        let localURL = buildOldFileURL(meta: meta)
         deleteNoteFileOnly(meta: meta)
         noteMetas.removeAll { $0.id == id }
         persistNoteIndex()
+        // 后台从云端删除
+        if let cloud = cloudSyncFS {
+            DispatchQueue.global(qos: .background).async {
+                do {
+                    let cloudURL = self.cloudNoteURL(for: localURL, cloudFS: cloud)
+                    try cloud.removeItem(at: cloudURL)
+                } catch { print("⚠️ 云端删除笔记失败: \(error.localizedDescription)") }
+            }
+        }
     }
     
     // MARK: - 复习日志
@@ -257,6 +295,97 @@ final class StorageService: ObservableObject {
     
     private func persistReviewLogs() {
         fileSystem.saveReviewLogs(reviewLogs)
+    }
+
+    // MARK: - 云端同步
+
+    /// 从云端同步笔记到本地（下拉刷新调用）
+    func importFromCloud() -> ImportReport {
+        var report = ImportReport()
+        guard let cloud = cloudSyncFS else {
+            report.warningMessages.append("未配置云端同步")
+            return report
+        }
+        let cloudRoot = cloud.rootDirectory.appendingPathComponent("Notes", isDirectory: true)
+        let skipNames: Set<String> = [".metadata"]
+        var cloudFiles: [URL] = []
+        collectMarkdownFilesFromFS(cloud, at: cloudRoot, skipNames: skipNames, into: &cloudFiles)
+        report.scannedMarkdownFiles = cloudFiles.count
+        guard report.scannedMarkdownFiles > 0 else {
+            report.warningMessages.append("云端 Notes 目录没有发现 .md 文件")
+            return report
+        }
+        for (idx, srcURL) in cloudFiles.enumerated() {
+            do {
+                let relativeComponents = relativePathComponents(of: srcURL, from: cloudRoot)
+                let folderComponents = Array(relativeComponents.dropLast())
+                let fileName = srcURL.lastPathComponent
+                let rawBody = try cloud.readData(at: srcURL)
+                let bodyStr = String(data: rawBody, encoding: .utf8) ?? ""
+                let parsed = MarkdownFrontmatterParser.parse(bodyStr)
+                var title = (parsed.title?.isEmpty == false) ? parsed.title! : parseTitleFromFileName(fileName)
+                if title.isEmpty { title = "未命名-\(UUID().uuidString.prefix(6))" }
+                let folderId = try getOrCreateFolder(pathComponents: folderComponents, createdCount: &report.folderCreatedCount)
+                let exists = noteMetas.contains { m in
+                    m.folderId == folderId && m.title.lowercased() == title.lowercased()
+                }
+                if exists {
+                    report.skippedCount += 1
+                    if report.messages.count < 10 {
+                        report.messages.append("⏭️ 跳过重复：\(folderComponents.joined(separator: "/"))/\(title)")
+                    }
+                    continue
+                }
+                let bodyToUse = parsed.body.isEmpty ? bodyStr : parsed.body
+                createNote(title: title, folderId: folderId, markdownContent: bodyToUse, tags: parsed.tags, skipCloudSync: true)
+                report.importedCount += 1
+                if report.messages.count < 10 {
+                    let prefix = folderComponents.isEmpty ? "" : folderComponents.joined(separator: "/") + "/"
+                    report.messages.append("✅ \(prefix)\(title)")
+                }
+            } catch {
+                report.failedCount += 1
+                if report.warningMessages.count < 5 {
+                    report.warningMessages.append("❌ 导入失败 \(srcURL.lastPathComponent): \(error.localizedDescription)")
+                }
+            }
+            if idx % 50 == 0 {
+                persistFolders()
+                persistNoteIndex()
+            }
+        }
+        persistFolders()
+        persistNoteIndex()
+        return report
+    }
+
+    /// 从指定 FS 递归扫描 .md 文件
+    private func collectMarkdownFilesFromFS(_ fs: CloudFileSystem, at url: URL, skipNames: Set<String>, into result: inout [URL]) {
+        let children: [URL]
+        do { children = try fs.contentsOfDirectory(at: url) } catch { return }
+        for child in children {
+            let name = child.lastPathComponent
+            if skipNames.contains(name) { continue }
+            var subChildren: [URL] = []
+            do { subChildren = try fs.contentsOfDirectory(at: child) } catch {}
+            let ext = child.pathExtension.lowercased()
+            if ext == "md" || ext == "markdown" {
+                result.append(child)
+            } else if !subChildren.isEmpty {
+                collectMarkdownFilesFromFS(fs, at: child, skipNames: skipNames, into: &result)
+            }
+        }
+    }
+
+    /// 把本地文件 URL 映射到云端对应路径
+    private func cloudNoteURL(for localURL: URL, cloudFS: CloudFileSystem) -> URL {
+        let localRoot = fileSystem.notesRootDirectory
+        let relative = relativePathComponents(of: localURL, from: localRoot)
+        var cloudURL = cloudFS.rootDirectory.appendingPathComponent("Notes", isDirectory: true)
+        for comp in relative {
+            cloudURL = cloudURL.appendingPathComponent(comp)
+        }
+        return cloudURL
     }
     
     // MARK: - 一致性校验
@@ -422,6 +551,7 @@ final class StorageService: ObservableObject {
         }
     }
 
+    /// 计算 URL 相对于 root 的路径组件（兼容 WebDAV https:// URL 和本地 file:// URL）
     /// 计算 URL 相对于 root 的路径组件（兼容 WebDAV https:// URL 和本地 file:// URL）
     private func relativePathComponents(of url: URL, from root: URL) -> [String] {
         let rootParts = root.pathComponents

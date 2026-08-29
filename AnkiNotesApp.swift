@@ -38,7 +38,9 @@ final class AppState: ObservableObject {
 
     // MARK: - 核心服务
 
-    private(set) var activeFS: CloudFileSystem!    // 当前生效的 Provider 后端
+    private(set) var activeFS: CloudFileSystem!    // 当前生效的 Provider 后端（用于显示位置）
+    private(set) var webDAVFS: WebDAVFS?          // WebDAV 同步实例（仅用于云端同步）
+    private let syncLock = NSLock()                 // 同步锁，防止重复执行同步操作
     private(set) var fileSystem: FileSystemService!
     @Published var storage: StorageService!
     @Published var scheduler: SchedulerService!
@@ -226,70 +228,55 @@ final class AppState: ObservableObject {
             suppressProviderDidSet = false
         }
         let ok = applyCurrentProviderSelection(allowWebDAVIncomplete: false)
-        // ✅ 切换到 WebDAV 成功后，自动异步扫描远端已有笔记并导入（不阻塞 UI）
+        // 保存配置后不自动同步，用户在笔记页下拉才触发同步
         if ok {
-            importMarkdownAsync { report in
-                self.providerStatus = """
-                ✅ WebDAV 已连接并完成数据迁移。
-                📥 自动导入远端笔记：新增 \(report.importedCount)，跳过 \(report.skippedCount)，失败 \(report.failedCount)，扫描到 \(report.scannedMarkdownFiles) 个 .md 文件
-                """
-            }
+            providerStatus = "✅ WebDAV 配置已保存。请到笔记页下拉同步，从云端拉取笔记。"
         }
         return ok
     }
 
-    /// ✅ 异步导入 Markdown（后台线程扫描，主线程更新 UI，避免卡死）
-    /// - Parameter completion: 导入完成回调（返回 ImportReport）
-    func importMarkdownAsync(completion: ((StorageService.ImportReport) -> Void)? = nil) {
-        guard !isSyncing else {
-            print("⚠️ 已有同步任务在执行，跳过")
+    /// 从云端同步笔记到本地（下拉刷新触发，全局唯一同步入口）
+    /// - 加锁防止重复执行
+    /// - 后台线程扫描云端 Notes 目录，下载新笔记到本地
+    /// - 去重：同文件夹+同标题跳过
+    func syncFromCloud(completion: ((StorageService.ImportReport) -> Void)? = nil) {
+        guard webDAVFS != nil else {
+            providerStatus = "⚠️ 未配置 WebDAV，无法同步。请到设置页配置 WebDAV。"
+            completion?(StorageService.ImportReport())
+            return
+        }
+        // 加锁：同步操作进行中时拒绝重复执行
+        guard syncLock.try() else {
+            print("⚠️ 同步正在进行中，跳过重复请求")
             return
         }
         isSyncing = true
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
-            let report = self.storage.importMarkdownFromDocuments()
+            defer {
+                self.syncLock.unlock()
+                DispatchQueue.main.async {
+                    self.isSyncing = false
+                    self.refreshStats()
+                    self.storage.triggerRefresh()
+                }
+            }
+            // 从云端扫描并导入到本地
+            let report = self.storage.importFromCloud()
             DispatchQueue.main.async {
-                self.isSyncing = false
-                self.refreshStats()
-                self.storage.triggerRefresh()  // ✅ 确保 StorageService 的 @Published 在主线程触发 UI 刷新
+                if report.scannedMarkdownFiles == 0 {
+                    self.providerStatus = "⚠️ 云端 Notes 目录没有发现 .md 文件。请确认笔记放在了坚果云的 Notes/ 目录下。"
+                } else {
+                    self.providerStatus = "✅ 同步完成：新增 \(report.importedCount)，跳过 \(report.skippedCount)，失败 \(report.failedCount)，扫描到 \(report.scannedMarkdownFiles) 个 .md 文件"
+                }
                 completion?(report)
             }
         }
     }
 
-    /// UI 点「🔗 测试连接」按钮（WebDAV）
-    func testCurrentWebDAVConnection() async -> (success: Bool, message: String) {
-        let cfg = webDAVConfig
-        var usePassword = pendingWebDAVPassword.trimmingCharacters(in: .whitespacesAndNewlines)
-        if usePassword.isEmpty { usePassword = KeychainHelper.webDAVPassword() ?? "" }
-        guard !cfg.serverURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              !cfg.username.isEmpty, !usePassword.isEmpty else {
-            return (false, "地址/用户名/密码不能为空")
-        }
-        // 临时写入 Keychain 以便 WebDAVFS 取 Authorization 头
-        do { try KeychainHelper.setWebDAVPassword(usePassword) }
-        catch { return (false, "Keychain 临时密码失败：\(error.localizedDescription)") }
-
-        let fs = CloudProviderFactory.makeFileSystem(for: .webDAV, webDAVConfig: cfg)
-        let root = fs.rootDirectory
-        // 同步测连接：先检查根目录是否存在，不存在则自动创建（认证成功即可，目录会自动建）
-        do {
-            let exists: Bool = try fs.fileExists(at: root)
-            if exists {
-                return (true, "✅ 连接成功，根目录可访问：\(fs.displayLocation)")
-            } else {
-                // ✅ 根目录不存在 → 自动尝试创建（坚果云等 WebDAV 服务允许 MKCOL 创建目录）
-                do {
-                    try fs.createDirectoryIfNeeded(at: root)
-                    return (true, "✅ 连接成功，根目录不存在已自动创建：\(fs.displayLocation)")
-                } catch {
-                    return (false, "❌ 连接成功但根目录创建失败：\(error.localizedDescription)。请检查路径是否有写入权限，或手动在坚果云创建对应目录")
-                }
-            }
-        } catch {
-            return (false, "❌ 连接失败：\(error.localizedDescription)")
-        }
+    /// 异步导入 Markdown（保留兼容，内部调用 syncFromCloud）
+    func importMarkdownAsync(completion: ((StorageService.ImportReport) -> Void)? = nil) {
+        syncFromCloud(completion: completion)
     }
 
     // MARK: - 内部：创建 CloudFileSystem + 迁移 + 重建 Storage/Scheduler
@@ -308,9 +295,15 @@ final class AppState: ObservableObject {
             }
         }
         activeFS = newFS
-        let newFileSvc = FileSystemService(cloudFS: newFS)
-        fileSystem = newFileSvc
-        storage    = StorageService(fileSystem: newFileSvc)
+        // 本地优先：StorageService 始终用 LocalFS（快速访问、离线可用）
+        // WebDAV 仅作为同步目标（增删改后台双写、下拉同步从云端拉取）
+        let localFS = LocalFS()
+        let localFileSvc = FileSystemService(cloudFS: localFS)
+        fileSystem = localFileSvc
+        storage    = StorageService(fileSystem: localFileSvc)
+        // 如果选择了 WebDAV，保存实例用于同步；StorageService 持有引用用于双写
+        webDAVFS = (type == .webDAV) ? (newFS as? WebDAVFS) : nil
+        storage.cloudSyncFS = webDAVFS
         scheduler  = SchedulerService(storage: storage)
         refreshStats()
     }
