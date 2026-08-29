@@ -23,6 +23,9 @@ struct ReviewSessionView: View {
     @State private var cardDegrees: Double = 0
     @State private var offsetX: CGFloat = 0
     
+    // 测评
+    @State private var showReviewQuiz = false  // 是否显示测评界面
+    
     var body: some View {
         Group {
             if queue.isEmpty {
@@ -126,6 +129,23 @@ struct ReviewSessionView: View {
                 .padding(.bottom, 20)
         }
         .background(Color(.systemGroupedBackground))
+        // 测评界面
+        .sheet(isPresented: $showReviewQuiz) {
+            if let note = currentIndex < queue.count ? queue[currentIndex] : nil {
+                ReviewQuizView(
+                    note: note,
+                    quizService: appState.quizService,
+                    onComplete: { rating in
+                        reviewQuizRating = rating
+                        showReviewQuiz = false
+                        // 延迟应用评级，等 sheet 关闭动画完成
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            applyRating(rating)
+                        }
+                    }
+                )
+            }
+        }
     }
     
     private func stateLabel(_ state: SRSData.CardState) -> some View {
@@ -197,6 +217,31 @@ struct ReviewSessionView: View {
                     }
                     .buttonStyle(.plain)
                 }
+            }
+            
+            // 测评按钮：仅当该笔记已生成题目时显示
+            if appState.quizService.generatedNoteIds.contains(note.id) {
+                let questionCount = appState.quizService.questions.filter { $0.noteId == note.id }.count
+                Button {
+                    showReviewQuiz = true
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "doc.questionmark")
+                            .font(.subheadline)
+                        Text("通过做题测评掌握程度（最多\(min(10, questionCount))题）")
+                            .textStyle(.secondaryText)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(Color.purple.opacity(0.12))
+                    .foregroundColor(.purple)
+                    .cornerRadius(12)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color.purple.opacity(0.35), lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
             }
         }
     }
