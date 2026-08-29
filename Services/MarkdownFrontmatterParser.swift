@@ -27,6 +27,23 @@ struct FrontmatterParseResult {
 enum MarkdownFrontmatterParser {
     
     /// 解析一个 Markdown 字符串，返回 Frontmatter 解析结果 + 正文
+    /// 构建带 frontmatter 的 Markdown 内容
+    static func build(title: String, tags: [String], body: String) -> String {
+        var lines: [String] = ["---"]
+        lines.append("title: \(title)")
+        if !tags.isEmpty {
+            let tagsStr = tags.map { ""\($0)"" }.joined(separator: ", ")
+            lines.append("tags: [\(tagsStr)]")
+        }
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd"
+        lines.append("date: \(dateFormatter.string(from: Date()))")
+        lines.append("---")
+        lines.append("")
+        lines.append(body)
+        return lines.joined(separator: "\n")
+    }
+    
     static func parse(_ content: String) -> FrontmatterParseResult {
         let trimmed = content
         guard trimmed.hasPrefix("---\n") || trimmed.hasPrefix("---\r\n") else {

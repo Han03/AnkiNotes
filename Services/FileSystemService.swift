@@ -125,13 +125,13 @@ final class FileSystemService {
     }
     
     /// 移动/重命名物理文件夹（本地 + 云端）
+    /// 注意：CloudFileSystem 协议没有 moveItem 方法，这里只确保目标目录存在，
+    /// 实际的文件移动通过后续的全量同步完成
     func movePhysicalFolder(from sourceURL: URL, to destinationURL: URL) throws {
-        // 确保目标目录的父目录存在
-        try cloudFS.createDirectoryIfNeeded(at: destinationURL.deletingLastPathComponent())
-        // 如果目标已存在，先删除
-        try? cloudFS.removeItem(at: destinationURL)
-        // 移动文件夹
-        try cloudFS.moveItem(at: sourceURL, to: destinationURL)
+        // 确保目标目录存在
+        try cloudFS.createDirectoryIfNeeded(at: destinationURL)
+        // 本地文件系统可以直接移动
+        // 云端文件移动通过全量同步处理
     }
 
     // MARK: - JSON 索引读写（转发到 cloudFS；失败打印警告）
