@@ -409,17 +409,9 @@ private struct NoteRow: View {
             statusIcon
                 .frame(width: 32)
             VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text(note.title)
-                        .textStyle(.sectionTitle)
-                        .lineLimit(1)
-                    if hasQuestions {
-                        // 已生成题目标识：绿色对勾印章，表示该笔记已生成题目
-                        Image(systemName: "checkmark.seal.fill")
-                            .foregroundColor(.green)
-                            .font(.caption)
-                    }
-                }
+                Text(note.title)
+                    .textStyle(.sectionTitle)
+                    .lineLimit(1)
                 // 文件夹路径小字标识
                 Text(folderPath)
                     .font(.caption2)
@@ -436,6 +428,15 @@ private struct NoteRow: View {
                 }
                 HStack(spacing: 8) {
                     stateChip
+                    // 已生成题目标识：紫色"题"字，与状态标签风格一致
+                    if hasQuestions {
+                        Text("题")
+                            .textStyle(.subsectionTitle)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Color.purple.opacity(0.15))
+                            .foregroundColor(.purple)
+                            .cornerRadius(4)
+                    }
                     Text(dueText)
                         .textStyle(.tertiaryText)
                         .foregroundColor(.secondary)

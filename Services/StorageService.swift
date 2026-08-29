@@ -12,6 +12,7 @@ final class StorageService: ObservableObject {
     
     private let fileSystem: FileSystemService
     var cloudSyncFS: CloudFileSystem?  // 云端同步实例（WebDAV），增删改后后台双写
+    weak var quizService: QuizService?  // 用于删除笔记时同时删除相关题目
     @Published private(set) var folders: [Folder] = []
     @Published private(set) var noteMetas: [NoteMeta] = []
     @Published private(set) var reviewLogs: [ReviewLog] = []
@@ -105,6 +106,21 @@ final class StorageService: ObservableObject {
             if let fid = meta.folderId { return folderIdsToDelete.contains(fid) }
             return false
         }
+        
+        // 收集需要删除的笔记 ID（用于删除相关题目）
+        let deletedNoteIds = notesToDelete.map { $0.id }
+        
+        // 收集云端文件 URL（用于后台删除）
+        var cloudURLsToDelete: [URL] = []
+        if let cloud = cloudSyncFS {
+            for meta in notesToDelete {
+                let localURL = buildOldFileURL(meta: meta)
+                let cloudURL = cloudNoteURL(for: localURL, cloudFS: cloud)
+                cloudURLsToDelete.append(cloudURL)
+            }
+        }
+        
+        // 删除本地笔记文件
         notesToDelete.forEach { meta in
             deleteNoteFileOnly(meta: meta)
         }
@@ -121,11 +137,36 @@ final class StorageService: ObservableObject {
             ).deletingLastPathComponent()
             let target = url.appendingPathComponent(fileSystem.sanitizeFileName(folder.name), isDirectory: true)
             try? fileSystem.deletePhysicalFolder(at: target)
+            
+            // 后台删除云端文件夹
+            if let cloud = cloudSyncFS {
+                let cloudFolderURL = cloudNoteURL(for: target, cloudFS: cloud)
+                DispatchQueue.global(qos: .background).async {
+                    try? cloud.removeItem(at: cloudFolderURL)
+                    print("☁️ 云端删除文件夹: \(folder.name)")
+                }
+            }
+        }
+        
+        // 后台删除云端笔记文件
+        if !cloudURLsToDelete.isEmpty {
+            DispatchQueue.global(qos: .background).async { [weak self] in
+                guard let cloud = self?.cloudSyncFS else { return }
+                for url in cloudURLsToDelete {
+                    try? cloud.removeItem(at: url)
+                }
+                print("☁️ 云端删除 \(cloudURLsToDelete.count) 个笔记文件")
+            }
         }
         
         folders.removeAll { folderIdsToDelete.contains($0.id) }
         persistFolders()
         persistNoteIndex()
+        
+        // 删除相关题目
+        if !deletedNoteIds.isEmpty {
+            quizService?.deleteQuestions(for: deletedNoteIds)
+        }
     }
     
     private func collectDescendantFolderIds(from rootId: UUID) -> Set<UUID> {
@@ -318,6 +359,8 @@ final class StorageService: ObservableObject {
         deleteNoteFileOnly(meta: meta)
         noteMetas.removeAll { $0.id == id }
         persistNoteIndex()
+        // 删除相关题目
+        quizService?.deleteQuestions(for: id)
         // 后台从云端删除
         if let cloud = cloudSyncFS {
             DispatchQueue.global(qos: .background).async {
@@ -353,7 +396,14 @@ final class StorageService: ObservableObject {
     }
     
     private func buildOldFileURL(meta: NoteMeta) -> URL {
-        fileSystem.noteFileURL(noteId: meta.id, folderId: meta.folderId, title: meta.title, folders: folders)
+        // 优先使用 meta.fileName 中保存的文件名（兼容旧的带 uuid 文件名）
+        // 如果该文件不存在，则使用新的不带 uuid 的文件名
+        let newURL = fileSystem.noteFileURL(noteId: meta.id, folderId: meta.folderId, title: meta.title, folders: folders)
+        let oldURL = newURL.deletingLastPathComponent().appendingPathComponent(meta.fileName)
+        if FileManager.default.fileExists(atPath: oldURL.path) {
+            return oldURL
+        }
+        return newURL
     }
     
     private func loadNote(from meta: NoteMeta) -> Note? {
@@ -561,16 +611,43 @@ final class StorageService: ObservableObject {
     private func consistencyCheck() {
         var didFix = false
         for (idx, meta) in noteMetas.enumerated() {
-            let url = buildOldFileURL(meta: meta)
-            if !FileManager.default.fileExists(atPath: url.path) {
-                // 文件丢失：重新写入
-                let content = defaultMarkdown(for: meta.title)
-                try? fileSystem.writeNoteContent(content, to: url)
-                didFix = true
-                var newMeta = meta
-                newMeta.fileName = url.lastPathComponent
-                noteMetas[idx] = newMeta
+            let newURL = fileSystem.noteFileURL(noteId: meta.id, folderId: meta.folderId, title: meta.title, folders: folders)
+            let oldURL = newURL.deletingLastPathComponent().appendingPathComponent(meta.fileName)
+            
+            // 情况1：新文件名存在，正常
+            if FileManager.default.fileExists(atPath: newURL.path) {
+                if meta.fileName != newURL.lastPathComponent {
+                    var newMeta = meta
+                    newMeta.fileName = newURL.lastPathComponent
+                    noteMetas[idx] = newMeta
+                    didFix = true
+                }
+                continue
             }
+            
+            // 情况2：旧文件名（带 uuid）存在，迁移到新文件名
+            if FileManager.default.fileExists(atPath: oldURL.path) && oldURL.path != newURL.path {
+                do {
+                    try FileManager.default.moveItem(at: oldURL, to: newURL)
+                    var newMeta = meta
+                    newMeta.fileName = newURL.lastPathComponent
+                    noteMetas[idx] = newMeta
+                    didFix = true
+                    print("✅ 迁移旧文件: \(meta.fileName) -> \(newURL.lastPathComponent)")
+                } catch {
+                    print("⚠️ 迁移文件失败: \(error.localizedDescription)")
+                }
+                continue
+            }
+            
+            // 情况3：文件确实丢失，重新写入空内容
+            let content = defaultMarkdown(for: meta.title)
+            try? fileSystem.writeNoteContent(content, to: newURL)
+            var newMeta = meta
+            newMeta.fileName = newURL.lastPathComponent
+            noteMetas[idx] = newMeta
+            didFix = true
+            print("⚠️ 文件丢失，重新创建: \(meta.title)")
         }
         if didFix { persistNoteIndex() }
     }

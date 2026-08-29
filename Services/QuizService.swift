@@ -69,6 +69,31 @@ final class QuizService {
 
     // MARK: - 题库统计
 
+    /// 删除指定笔记的所有题目
+    func deleteQuestions(for noteId: UUID) {
+        let before = questions.count
+        questions.removeAll { $0.noteId == noteId }
+        generatedNoteIds.remove(noteId)
+        failedNoteIds.remove(noteId)
+        if questions.count != before {
+            save()
+            print("🗑️ 删除笔记 \(noteId) 的题目: \(before - questions.count) 道")
+        }
+    }
+    
+    /// 删除多个笔记的所有题目
+    func deleteQuestions(for noteIds: [UUID]) {
+        let before = questions.count
+        let idSet = Set(noteIds)
+        questions.removeAll { idSet.contains($0.noteId) }
+        noteIds.forEach { generatedNoteIds.remove($0) }
+        noteIds.forEach { failedNoteIds.remove($0) }
+        if questions.count != before {
+            save()
+            print("🗑️ 删除多个笔记的题目: \(before - questions.count) 道")
+        }
+    }
+    
     func getStats() -> QuizStats {
         var stats = QuizStats()
         stats.totalQuestions = questions.count
@@ -176,17 +201,33 @@ final class QuizService {
         isGenerating = true
         isCancelled = false
 
-        // 二次检查：若所有笔记都被标记为已生成，通过 questions 重新计算 generatedNoteIds
-        // 修复 generatedNoteIds 与 questions 状态不一致的问题（题目丢失但标记仍在）
+        // 二次检查：修复 generatedNoteIds 与 questions 状态不一致的问题
         let allNoteIds = Set(notes.map { $0.id })
+        
+        // 1. 删除关联笔记已被删除的题目
+        let orphanQuestions = questions.filter { !allNoteIds.contains($0.noteId) }
+        if !orphanQuestions.isEmpty {
+            questions.removeAll { !allNoteIds.contains($0.noteId) }
+            print("🗑️ 清理已删除笔记的题目: \(orphanQuestions.count) 道")
+        }
+        
+        // 2. 若所有笔记都被标记为已生成，通过 questions 重新计算 generatedNoteIds
         if generatedNoteIds.isSuperset(of: allNoteIds) {
             let notesWithQuestions = Set(questions.map { $0.noteId })
             let missingNotes = allNoteIds.subtracting(notesWithQuestions)
             if !missingNotes.isEmpty {
                 // 移除没有题目的笔记的标记，允许重新生成
                 generatedNoteIds.subtract(missingNotes)
+                print("🔄 修复 generatedNoteIds: 移除 \(missingNotes.count) 个没有题目的笔记标记")
                 save()
             }
+        }
+        
+        // 3. 清理 generatedNoteIds 中已删除笔记的标记
+        let orphanGeneratedIds = generatedNoteIds.subtracting(allNoteIds)
+        if !orphanGeneratedIds.isEmpty {
+            generatedNoteIds.subtract(orphanGeneratedIds)
+            save()
         }
 
         // 筛选未生成题目的笔记（排除之前失败的，允许重试）

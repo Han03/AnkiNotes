@@ -457,6 +457,7 @@ final class AppState: ObservableObject {
         storage.cloudSyncFS = webDAVFS
         scheduler  = SchedulerService(storage: storage)
         quizService = QuizService(fileSystem: localFileSvc)
+        storage.quizService = quizService  // 让删除笔记时能联动删除相关题目
         refreshStats()
     }
 
