@@ -273,13 +273,19 @@ final class AppState: ObservableObject {
 
         let fs = CloudProviderFactory.makeFileSystem(for: .webDAV, webDAVConfig: cfg)
         let root = fs.rootDirectory
-        // 同步测连接：WebDAVFS.fileExists 内部走 URLSession.synchronousData，HTTP 状态失败会抛 NSError
+        // 同步测连接：先检查根目录是否存在，不存在则自动创建（认证成功即可，目录会自动建）
         do {
-            let ok: Bool = try fs.fileExists(at: root)
-            if ok {
+            let exists: Bool = try fs.fileExists(at: root)
+            if exists {
                 return (true, "✅ 连接成功，根目录可访问：\(fs.displayLocation)")
             } else {
-                return (false, "❌ 连接失败：根目录不存在或 404，请检查远端路径配置")
+                // ✅ 根目录不存在 → 自动尝试创建（坚果云等 WebDAV 服务允许 MKCOL 创建目录）
+                do {
+                    try fs.createDirectoryIfNeeded(at: root)
+                    return (true, "✅ 连接成功，根目录不存在已自动创建：\(fs.displayLocation)")
+                } catch {
+                    return (false, "❌ 连接成功但根目录创建失败：\(error.localizedDescription)。请检查路径是否有写入权限，或手动在坚果云创建对应目录")
+                }
             }
         } catch {
             return (false, "❌ 连接失败：\(error.localizedDescription)")
