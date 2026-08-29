@@ -71,16 +71,16 @@ struct ReviewSessionView: View {
                     dismiss()
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.title2)
+                        .textStyle(.screenTitle)
                         .foregroundColor(.secondary)
                 }
                 Spacer()
                 Text("\(reviewedCount) / \(queue.count)")
-                    .font(.subheadline.bold())
+                    .textStyle(.primaryText)
                     .foregroundColor(.secondary)
                 Spacer()
                 Text("已学 \(Int(progress * 100))%")
-                    .font(.caption2)
+                    .textStyle(.tertiaryText)
                     .foregroundColor(.secondary)
             }
             .padding(.horizontal, 16)
@@ -140,7 +140,7 @@ struct ReviewSessionView: View {
                     VStack {
                         Spacer()
                         Text("点击卡片显示答案")
-                            .font(.caption)
+                            .textStyle(.secondaryText)
                             .foregroundColor(.secondary)
                             .padding(.bottom, 20)
                     }
@@ -188,7 +188,7 @@ struct ReviewSessionView: View {
             // 顶部标签
             HStack(spacing: 8) {
                 Text(front ? "正面" : "背面")
-                    .font(.caption.bold())
+                    .textStyle(.subsectionTitle)
                     .padding(.horizontal, 8).padding(.vertical, 3)
                     .background(color.opacity(0.18))
                     .foregroundColor(color)
@@ -197,7 +197,7 @@ struct ReviewSessionView: View {
                 Spacer()
                 let sched = SM2Algorithm.dueDescription(note.srs.dueDate)
                 Text(sched)
-                    .font(.caption2)
+                    .textStyle(.miniText)
                     .foregroundColor(.secondary)
             }
             
@@ -231,7 +231,7 @@ struct ReviewSessionView: View {
         ]
         let result = mapping.first(where: { $0.0 == state }) ?? (.new, "新", .blue)
         return Text(result.1)
-            .font(.caption2.bold())
+            .textStyle(.tertiaryText)
             .padding(.horizontal, 6).padding(.vertical, 3)
             .background(result.2.opacity(0.15))
             .foregroundColor(result.2)
@@ -248,7 +248,7 @@ struct ReviewSessionView: View {
     private func ratingButtons(note: Note, scheduler: SchedulerService) -> some View {
         VStack(spacing: 10) {
             Text("你还记得这张卡片吗？")
-                .font(.subheadline)
+                .textStyle(.secondaryText)
                 .foregroundColor(.secondary)
             
             HStack(spacing: 10) {
@@ -258,9 +258,9 @@ struct ReviewSessionView: View {
                     } label: {
                         VStack(spacing: 4) {
                             Text(rating.description)
-                                .font(.headline.bold())
+                                .textStyle(.subsectionTitle)
                             Text(scheduler.previewNextInterval(note: note, rating: rating))
-                                .font(.caption2)
+                                .textStyle(.miniText)
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
@@ -282,7 +282,7 @@ struct ReviewSessionView: View {
                         applyRating(info.rating)
                     } label: {
                         Text(info.key)
-                            .font(.caption2)
+                            .textStyle(.miniText)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 6)
                             .background(Color(.secondarySystemBackground))
@@ -336,7 +336,7 @@ struct ReviewSessionView: View {
         return VStack(spacing: 24) {
             Spacer()
             Image(systemName: "trophy.fill")
-                .font(.system(size: 72))
+                .font(.system(size: 72, weight: .bold, design: .rounded))
                 .foregroundStyle(
                     LinearGradient(
                         colors: [.yellow, .orange],
@@ -345,7 +345,7 @@ struct ReviewSessionView: View {
                 .padding()
             
             Text("本次复习完成！")
-                .font(.title.bold())
+                .textStyle(.screenTitle)
             
             VStack(spacing: 16) {
                 SummaryRow(label: "复习卡片", value: "\(reviewedCount) 张", systemImage: "doc.richtext.fill", color: .blue)
@@ -404,7 +404,7 @@ private struct SummaryRow: View {
                 .foregroundColor(.secondary)
             Spacer()
             Text(value)
-                .font(.headline.bold())
+                .textStyle(.subsectionTitle)
         }
     }
 }

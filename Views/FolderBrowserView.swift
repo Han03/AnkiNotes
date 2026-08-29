@@ -50,13 +50,13 @@ struct FolderBrowserView: View {
                                     .frame(width: 44, height: 44)
                                 Image(systemName: "play.fill")
                                     .foregroundColor(.blue)
-                                    .font(.title3)
+                                    .textStyle(.subsectionTitle)
                             }
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("开始复习")
-                                    .font(.headline)
+                                    .textStyle(.sectionTitle)
                                 Text("\(reviewCount) 张卡片待复习")
-                                    .font(.caption)
+                                    .textStyle(.secondaryText)
                                     .foregroundColor(.secondary)
                             }
                             Spacer()
@@ -252,12 +252,12 @@ private struct ImportReportView: View {
                 Section {
                     ForEach(report.messages, id: \.self) { line in
                         Label(line, systemImage: "doc.plaintext")
-                            .font(.footnote)
+                            .textStyle(.tertiaryText)
                             .lineLimit(2)
                     }
                     if report.importedCount + report.skippedCount > report.messages.count {
                         Text("...其余 \(report.importedCount + report.skippedCount - report.messages.count) 条未显示")
-                            .font(.caption2)
+                            .textStyle(.tertiaryText)
                             .foregroundColor(.secondary)
                     }
                 } header: {
@@ -269,7 +269,7 @@ private struct ImportReportView: View {
                 Section {
                     ForEach(report.warningMessages, id: \.self) { line in
                         Label(line, systemImage: "exclamationmark.triangle.fill")
-                            .font(.footnote)
+                            .textStyle(.tertiaryText)
                             .foregroundColor(.orange)
                     }
                 } header: {
@@ -308,15 +308,15 @@ private struct FolderRow: View {
         HStack(spacing: 12) {
             Image(systemName: "folder.fill")
                 .foregroundColor(.yellow)
-                .font(.title3)
+                .textStyle(.subsectionTitle)
                 .frame(width: 32)
             VStack(alignment: .leading, spacing: 3) {
                 Text(folder.name)
-                    .font(.headline)
+                    .textStyle(.sectionTitle)
                 let subCount = storage.getSubFolders(of: folder.id).count
                 let noteCount = storage.getNotes(in: folder.id).count
                 Text("\(subCount) 文件夹 · \(noteCount) 笔记")
-                    .font(.caption)
+                    .textStyle(.secondaryText)
                     .foregroundColor(.secondary)
             }
             Spacer()
@@ -336,21 +336,21 @@ private struct NoteRow: View {
                 .frame(width: 32)
             VStack(alignment: .leading, spacing: 4) {
                 Text(note.title)
-                    .font(.headline)
+                    .textStyle(.sectionTitle)
                     .lineLimit(1)
                 let snippet = note.cardBack
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                     .replacingOccurrences(of: "\n", with: " ")
                 if !snippet.isEmpty {
                     Text(snippet)
-                        .font(.caption)
+                        .textStyle(.secondaryText)
                         .foregroundColor(.secondary)
                         .lineLimit(2)
                 }
                 HStack(spacing: 8) {
                     stateChip
                     Text(dueText)
-                        .font(.caption2)
+                        .textStyle(.tertiaryText)
                         .foregroundColor(.secondary)
                 }
             }
@@ -372,7 +372,7 @@ private struct NoteRow: View {
         }
         return Image(systemName: imageName)
             .foregroundColor(color)
-            .font(.title3)
+            .textStyle(.subsectionTitle)
     }
     
     private var stateChip: some View {
@@ -385,7 +385,7 @@ private struct NoteRow: View {
         case .review: text = "复"; color = .green
         }
         return Text(text)
-            .font(.caption2.bold())
+            .textStyle(.subsectionTitle)
             .padding(.horizontal, 6).padding(.vertical, 2)
             .background(color.opacity(0.15))
             .foregroundColor(color)

@@ -2,121 +2,57 @@
 //  FileSystemService.swift
 //  AnkiNotes
 //
+//  重构版：通过 CloudFileSystem 协议调度（📁本地 / ☁️iCloud / 🥇WebDAV）
+//  上层业务代码完全不感知底层 Provider 差异。
+//
 //  Created by AI Assistant on 2026/8/29.
 //
 
 import Foundation
 
-/// 存储位置：本地 Documents / iCloud Drive
-enum StorageMode: String, Codable, CaseIterable, Identifiable {
-    case local      // 本机 Documents（免费侧载默认、离线模式）
-    case iCloud     // iCloud Drive ▸ AnkiNotes（需付费 Dev 账号配置 iCloud Container）
-    var id: String { rawValue }
-    var displayName: String {
-        switch self {
-        case .local:  return "📁 本机存储"
-        case .iCloud: return "☁️ iCloud 同步"
-        }
-    }
-}
-
-/// 文件系统服务 - 处理实际的 Markdown 文件读写、文件夹创建
-/// 支持「本地 Documents」与「iCloud Drive ▸ AnkiNotes」两种根目录模式切换
+/// 文件系统服务（StorageService 用它做文件/目录的 URL 派生 & 实际 IO 转发）
 final class FileSystemService {
 
-    // MARK: - 存储模式（持久化 + 切换时回调）
+    // MARK: - 后端 Provider（由 AppState 在 bootstrap/applyProvider 时注入）
 
-    /// 当前存储模式（持久化到 UserDefaults，下次启动自动恢复）
-    private(set) var storageMode: StorageMode {
-        get {
-            let raw = UserDefaults.standard.string(forKey: Self.storageModeKey) ?? StorageMode.local.rawValue
-            return StorageMode(rawValue: raw) ?? .local
-        }
-        set {
-            UserDefaults.standard.set(newValue.rawValue, forKey: Self.storageModeKey)
-        }
-    }
-    private static let storageModeKey = "AnkiNotes.StorageMode"
+    let cloudFS: CloudFileSystem
 
-    // MARK: - 路径
-
-    /// **真实根目录**（根据 storageMode + iCloud 是否可用动态决定）
-    /// - 如果是 iCloud 模式但 iCloud 容器不可用（未买 Dev、未登录 Apple ID、entitlements 未生效）
-    ///   → 自动 fallback 到本地（保证数据不丢）
-    var rootDirectory: URL {
-        switch storageMode {
-        case .local:
-            return Self.localDocumentsDirectory
-        case .iCloud:
-            if let iCloudRoot = ubiquityContainerDocumentsDirectory {
-                return iCloudRoot
-            }
-            // iCloud 不可用时自动回退本地
-            return Self.localDocumentsDirectory
-        }
+    init(cloudFS: CloudFileSystem) {
+        self.cloudFS = cloudFS
     }
 
-    /// 笔记物理存放目录（root/Notes）
+    // MARK: - 路径（URL 语义保持不变：root/Notes 和 root/.metadata）
+
+    /// 根目录：本地 = Documents；iCloud = Container/Documents/AnkiNotes；WebDAV = 服务器+根路径
+    var rootDirectory: URL { cloudFS.rootDirectory }
+
+    /// Markdown 物理文件总目录（root/Notes）
     var notesRootDirectory: URL {
         let dir = rootDirectory.appendingPathComponent("Notes", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? cloudFS.createDirectoryIfNeeded(at: dir)
         return dir
     }
 
-    /// 元数据索引目录（root/.metadata，隐藏）
+    /// JSON 索引目录（root/.metadata，iCloud 下也会被自动同步，因为不是点开头会上传；
+    /// 但我们在设置 URLResourceValues 隐藏仅是为了文件 App 不显示它）
     var metadataDirectory: URL {
-        var dir = rootDirectory.appendingPathComponent(".metadata", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        var values = URLResourceValues()
-        values.isHidden = true
-        try? dir.setResourceValues(values)
+        let dir = rootDirectory.appendingPathComponent(".metadata", isDirectory: true)
+        try? cloudFS.createDirectoryIfNeeded(at: dir)
+        // 仅本地沙盒 / iCloud（URL 对象是 file://）时尝试隐藏属性
+        if dir.isFileURL {
+            var values = URLResourceValues()
+            values.isHidden = true
+            try? dir.setResourceValues(values)
+        }
         return dir
     }
 
-    /// 文件夹索引文件
-    var foldersIndexFile: URL { metadataDirectory.appendingPathComponent("folders.json") }
-    /// 笔记索引文件（SRS数据 + 标题 + folderId 映射）
-    var notesIndexFile:   URL { metadataDirectory.appendingPathComponent("notes_index.json") }
-    /// 复习日志索引文件
-    var reviewLogsFile:   URL { metadataDirectory.appendingPathComponent("review_logs.json") }
+    var foldersIndexFile: URL  { metadataDirectory.appendingPathComponent("folders.json") }
+    var notesIndexFile:    URL { metadataDirectory.appendingPathComponent("notes_index.json") }
+    var reviewLogsFile:    URL { metadataDirectory.appendingPathComponent("review_logs.json") }
 
-    // MARK: - iCloud 可用性 / 真实路径
+    // MARK: - Markdown 文件 URL 派生（根据文件夹层级 → Notes/<folderPath>/<id>_<title>.md）
 
-    /// 付费 Dev + entitlements + 登录 iCloud 三者皆满足时返回 true（可真实生效）
-    var iCloudContainerAvailable: Bool {
-        FileManager.default.url(forUbiquityContainerIdentifier: nil) != nil
-    }
-
-    /// iCloud「文件 App」中实际显示的路径字符串（用于 UI 提示）
-    /// Apple 的 iCloud Drive 实际容器名是 NSUbiquitousContainerName，一般在文件 App 显示为「AnkiNotes」
-    var iCloudDisplayPath: String? {
-        guard storageMode == .iCloud || iCloudContainerAvailable else { return nil }
-        return "iCloud Drive ▸ AnkiNotes ▸ Notes  /  .metadata"
-    }
-
-    // MARK: - 存储模式切换 + 数据迁移
-
-    /// 切换存储模式（默认迁移现有数据）。
-    /// - migrate:  true  → 把旧目录 Notes/.metadata 复制到新目录（冲突自动备份旧版避免覆盖）
-    ///             false → 直接切到新目录（常用于重置 / 强制切换）
-    func setStorageMode(_ newMode: StorageMode, migrate: Bool = true) throws {
-        let oldMode = storageMode
-        guard newMode != oldMode else { return }
-
-        if newMode == .iCloud && !iCloudContainerAvailable {
-            throw FileSystemError.iCloudNotAvailable
-        }
-
-        if migrate {
-            try migrateData(from: rootDirectory(of: oldMode), to: rootDirectory(of: newMode))
-        }
-
-        storageMode = newMode
-    }
-
-    // MARK: - Markdown 文件操作
-
-    /// 根据文件夹层级生成一个笔记的完整文件 URL
     func noteFileURL(noteId: UUID, folderId: UUID?, title: String, folders: [Folder]) -> URL {
         var currentURL = notesRootDirectory
         if let folderId = folderId {
@@ -125,13 +61,12 @@ final class FileSystemService {
                 currentURL = currentURL.appendingPathComponent(folderName, isDirectory: true)
             }
         }
-        try? FileManager.default.createDirectory(at: currentURL, withIntermediateDirectories: true)
+        try? cloudFS.createDirectoryIfNeeded(at: currentURL)
         let safeTitle = sanitizeFileName(title)
         let fileName = "\(noteId.uuidString)_\(safeTitle).md"
         return currentURL.appendingPathComponent(fileName)
     }
 
-    /// 根据 folderId 递归获取从根到父文件夹的名称数组（倒序，从当前文件夹往上）
     private func buildFolderPath(folderId: UUID, folders: [Folder]) -> [String] {
         var result: [String] = []
         var currentId: UUID? = folderId
@@ -143,7 +78,6 @@ final class FileSystemService {
         return result
     }
 
-    /// 文件名安全处理（去除非法字符，限制长度）
     func sanitizeFileName(_ name: String) -> String {
         let invalidChars = CharacterSet(charactersIn: "/\\:*?\"<>|\n\r\t")
         var safe = name.components(separatedBy: invalidChars).joined(separator: "_")
@@ -152,24 +86,27 @@ final class FileSystemService {
         return safe
     }
 
-    /// 写入 Markdown 内容到文件
+    // MARK: - Markdown IO（转发到 cloudFS）
+
     func writeNoteContent(_ content: String, to url: URL) throws {
-        try content.write(to: url, atomically: true, encoding: .utf8)
-    }
-
-    /// 读取 Markdown 文件内容
-    func readNoteContent(from url: URL) throws -> String {
-        return try String(contentsOf: url, encoding: .utf8)
-    }
-
-    /// 删除 Markdown 文件
-    func deleteNoteFile(at url: URL) throws {
-        if FileManager.default.fileExists(atPath: url.path) {
-            try FileManager.default.removeItem(at: url)
+        guard let data = content.data(using: .utf8) else {
+            throw NSError(domain: "FileSystemService", code: -2, userInfo: [NSLocalizedDescriptionKey: "Markdown 内容转 UTF-8 失败"])
         }
+        try cloudFS.writeData(data, to: url)
     }
 
-    /// 创建物理文件夹（在 Notes 目录下）
+    func readNoteContent(from url: URL) throws -> String {
+        let data = try cloudFS.readData(at: url)
+        guard let str = String(data: data, encoding: .utf8) else {
+            throw NSError(domain: "FileSystemService", code: -3, userInfo: [NSLocalizedDescriptionKey: "Markdown 文件不是有效的 UTF-8 编码"])
+        }
+        return str
+    }
+
+    func deleteNoteFile(at url: URL) throws {
+        try cloudFS.removeItem(at: url)
+    }
+
     func createPhysicalFolder(named name: String, parentFolderId: UUID?, folders: [Folder]) throws -> URL {
         var currentURL = notesRootDirectory
         if let parentId = parentFolderId {
@@ -179,97 +116,47 @@ final class FileSystemService {
             }
         }
         let dirURL = currentURL.appendingPathComponent(sanitizeFileName(name), isDirectory: true)
-        try FileManager.default.createDirectory(at: dirURL, withIntermediateDirectories: true)
+        try cloudFS.createDirectoryIfNeeded(at: dirURL)
         return dirURL
     }
 
-    /// 删除物理文件夹（连同内部的 md 文件）
     func deletePhysicalFolder(at url: URL) throws {
-        if FileManager.default.fileExists(atPath: url.path) {
-            try FileManager.default.removeItem(at: url)
-        }
+        try cloudFS.removeItem(at: url)
     }
 
-    // MARK: - JSON 索引读写
+    // MARK: - JSON 索引读写（转发到 cloudFS；失败打印警告）
 
-    func loadFolders() -> [Folder] { loadJSON(from: foldersIndexFile, defaultValue: []) }
-    func saveFolders(_ folders: [Folder]) { saveJSON(folders, to: foldersIndexFile) }
-    func loadNoteIndex() -> [NoteMeta] { loadJSON(from: notesIndexFile, defaultValue: []) }
-    func saveNoteIndex(_ meta: [NoteMeta]) { saveJSON(meta, to: notesIndexFile) }
-    func loadReviewLogs() -> [ReviewLog] { loadJSON(from: reviewLogsFile, defaultValue: []) }
-    func saveReviewLogs(_ logs: [ReviewLog]) { saveJSON(logs, to: reviewLogsFile) }
-
-    // MARK: - 错误类型
-
-    enum FileSystemError: LocalizedError {
-        case iCloudNotAvailable
-        case migrationFailed(String)
-
-        var errorDescription: String? {
-            switch self {
-            case .iCloudNotAvailable:
-                return "iCloud 不可用，请先在系统登录 Apple ID 并确认已在 Apple Developer Portal 为该 App 配置 iCloud Container（需付费 Developer 账号）。"
-            case .migrationFailed(let detail):
-                return "数据迁移失败：\(detail)"
-            }
-        }
+    func loadFolders() -> [Folder] {
+        loadJSON(from: foldersIndexFile, defaultValue: [])
     }
 
-    // MARK: - 内部工具
-
-    private static var localDocumentsDirectory: URL {
-        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+    func saveFolders(_ folders: [Folder]) {
+        saveJSON(folders, to: foldersIndexFile)
     }
 
-    /// iCloud 容器的 Documents/AnkiNotes 路径（不可用时返回 nil）
-    private var ubiquityContainerDocumentsDirectory: URL? {
-        guard let container = FileManager.default.url(forUbiquityContainerIdentifier: nil) else { return nil }
-        let dir = container
-            .appendingPathComponent("Documents", isDirectory: true)
-            .appendingPathComponent("AnkiNotes", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
+    func loadNoteIndex() -> [NoteMeta] {
+        loadJSON(from: notesIndexFile, defaultValue: [])
     }
 
-    /// 获取指定存储模式的根目录（不触发 fallback，纯用于迁移时拿到旧模式真实路径）
-    private func rootDirectory(of mode: StorageMode) -> URL {
-        switch mode {
-        case .local: return Self.localDocumentsDirectory
-        case .iCloud:
-            if let d = ubiquityContainerDocumentsDirectory { return d }
-            // 如果是新切 iCloud 模式但是还没迁移时就不可用，就用本地（不会发生）
-            return Self.localDocumentsDirectory
-        }
+    func saveNoteIndex(_ meta: [NoteMeta]) {
+        saveJSON(meta, to: notesIndexFile)
     }
 
-    /// 迁移 Notes/ + .metadata/ 两个目录到新位置；
-    /// 冲突策略：目标若已存在该目录 → 先把目标目录备份为 xxx_backup_时间戳，再复制源目录过去（防止互相覆盖丢数据）
-    private func migrateData(from oldRoot: URL, to newRoot: URL) throws {
-        guard oldRoot != newRoot else { return }
-        let fm = FileManager.default
-        try fm.createDirectory(at: newRoot, withIntermediateDirectories: true)
-
-        let dirs = ["Notes", ".metadata"]
-        let ts = Int(Date().timeIntervalSince1970)
-        for dir in dirs {
-            let src = oldRoot.appendingPathComponent(dir, isDirectory: true)
-            let dst = newRoot.appendingPathComponent(dir, isDirectory: true)
-            guard fm.fileExists(atPath: src.path) else { continue }
-            if fm.fileExists(atPath: dst.path) {
-                let backup = newRoot.appendingPathComponent("\(dir)_backup_\(ts)", isDirectory: true)
-                try fm.moveItem(at: dst, to: backup)
-            }
-            do {
-                try fm.copyItem(at: src, to: dst)
-            } catch {
-                throw FileSystemError.migrationFailed("复制 \(dir) 失败：\(error.localizedDescription)")
-            }
-        }
+    func loadReviewLogs() -> [ReviewLog] {
+        loadJSON(from: reviewLogsFile, defaultValue: [])
     }
+
+    func saveReviewLogs(_ logs: [ReviewLog]) {
+        saveJSON(logs, to: reviewLogsFile)
+    }
+
+    // MARK: - 通用 JSON 工具
 
     private func loadJSON<T: Decodable>(from url: URL, defaultValue: T) -> T {
-        guard FileManager.default.fileExists(atPath: url.path),
-              let data = try? Data(contentsOf: url) else { return defaultValue }
+        guard cloudFS.fileExists(at: url),
+              let data = try? cloudFS.readData(at: url) else {
+            return defaultValue
+        }
         do {
             return try JSONDecoder().decode(T.self, from: data)
         } catch {
@@ -281,21 +168,9 @@ final class FileSystemService {
     private func saveJSON<T: Encodable>(_ value: T, to url: URL) {
         do {
             let data = try JSONEncoder().encode(value)
-            try data.write(to: url, options: .atomic)
+            try cloudFS.writeData(data, to: url)
         } catch {
             print("⚠️ JSON 写入失败 \(url.lastPathComponent): \(error)")
         }
     }
-}
-
-/// NoteMeta: Note 的轻量索引记录，对应 JSON 索引文件
-struct NoteMeta: Codable, Hashable {
-    let id: UUID
-    var title: String
-    var folderId: UUID?
-    var fileName: String      // 实际文件名（含 id_ 前缀）
-    var srs: SRSData
-    var createdAt: Date
-    var updatedAt: Date
-    var tags: [String]
 }

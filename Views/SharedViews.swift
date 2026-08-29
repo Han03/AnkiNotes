@@ -28,7 +28,7 @@ struct WeeklyChartView: View {
                 ForEach(0..<7) { idx in
                     VStack(spacing: 4) {
                         Text("\(counts[idx])")
-                            .font(.caption2)
+                            .textStyle(.tertiaryText)
                             .foregroundColor(.secondary)
                         RoundedRectangle(cornerRadius: 6)
                             .fill(
@@ -40,7 +40,7 @@ struct WeeklyChartView: View {
                             )
                             .frame(height: geo.size.height * 0.65 * CGFloat(counts[idx]) / CGFloat(max))
                         Text(labels[idx])
-                            .font(.caption2)
+                            .textStyle(.tertiaryText)
                             .foregroundColor(.secondary)
                     }
                     .frame(maxWidth: .infinity)
@@ -93,7 +93,7 @@ struct StatusDistributionView: View {
                     HStack(spacing: 4) {
                         Circle().fill(d.color).frame(width: 8, height: 8)
                         Text("\(d.label) \(d.value)")
-                            .font(.caption2)
+                            .textStyle(.tertiaryText)
                             .foregroundColor(.secondary)
                     }
                 }
@@ -118,10 +118,10 @@ struct BigStat: View {
                     .foregroundColor(color)
                 Spacer()
                 Text(value)
-                    .font(.title.bold())
+                    .textStyle(.screenTitle)
             }
             Text(title)
-                .font(.caption)
+                .textStyle(.secondaryText)
                 .foregroundColor(.secondary)
         }
         .padding(14)
@@ -148,19 +148,19 @@ struct DistributionCard: View {
             HStack {
                 Image(systemName: systemImage)
                     .foregroundColor(color)
-                    .font(.system(size: 14, weight: .bold))
+                    .textStyle(.subsectionTitle)
                 Spacer()
                 Text("\(value)")
-                    .font(.headline.bold())
+                    .textStyle(.primaryText)
             }
             Text(title)
-                .font(.caption2)
+                .textStyle(.tertiaryText)
                 .foregroundColor(.secondary)
             ProgressView(value: ratio)
                 .tint(color)
                 .scaleEffect(x: 1, y: 1.5)
             Text(String(format: "%.0f%%", ratio * 100))
-                .font(.caption2)
+                .textStyle(.tertiaryText)
                 .foregroundColor(.secondary)
         }
         .padding(12)
@@ -188,12 +188,12 @@ struct StatCard: View {
                     .frame(width: 38, height: 38)
                 Image(systemName: systemImage)
                     .foregroundColor(color)
-                    .font(.system(size: 16, weight: .bold))
+                    .textStyle(.subsectionTitle)
             }
             Text(value)
-                .font(.title3.bold())
+                .textStyle(.subsectionTitle)
             Text(title)
-                .font(.caption2)
+                .textStyle(.tertiaryText)
                 .foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity)
@@ -239,15 +239,15 @@ struct EmptyStateView: View {
             // iOS 16 Fallback（视觉上尽量对齐 iOS 17 原生样式）
             VStack(spacing: 14) {
                 Image(systemName: systemImage)
-                    .font(.system(size: 56, weight: .thin))
+                    .textStyle(.screenTitle)
                     .foregroundStyle(.secondary)
                     .symbolRenderingMode(.hierarchical)
                 Text(title)
-                    .font(.title2.weight(.semibold))
+                    .textStyle(.sectionTitle)
                     .multilineTextAlignment(.center)
                 if let description = description {
                     description
-                        .font(.subheadline)
+                        .textStyle(.secondaryText)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 20)
@@ -256,5 +256,59 @@ struct EmptyStateView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(.vertical, 40)
         }
+    }
+}
+
+// MARK: - 全局 TextStyle 语义字号系统（比 iOS 默认大 1-2 档，配合 AppState.textScale 全局缩放）
+
+/// 统一的语义化文字大小（避免直接写 .font(.caption/.caption2) 导致整体偏小不协调）
+/// 默认已比 iOS 同语义系统字号大 1-2pt；再通过 Environment(\.textScale) 实现 4 档全局放大缩小
+enum TextStyle {
+    case screenTitle        // 30 pt semibold → 主页面大数字（连续打卡天数等）
+    case sectionTitle       // 20 pt semibold → Section 标题（"近7天复习"/"卡片预览"）
+    case subsectionTitle    // 18 pt semibold → 子区块标题（正面/背面）
+    case primaryText        // 17 pt semibold → 列表项大标题 / 重要数值
+    case body               // 17 pt regular   → 正文
+    case secondaryText      // 15 pt regular   → 辅助说明（原来的 caption/subheadline）
+    case tertiaryText       // 13 pt regular   → 次要说明（原来的 caption2）
+    case miniText           // 12 pt regular   → 日期/小标签/评分间隔
+
+    /// 默认 size pt（不缩放时）
+    var baseSize: CGFloat {
+        switch self {
+        case .screenTitle:     return 30
+        case .sectionTitle:    return 20
+        case .subsectionTitle: return 18
+        case .primaryText, .body: return 17
+        case .secondaryText:   return 15
+        case .tertiaryText:    return 13
+        case .miniText:        return 12
+        }
+    }
+
+    /// 默认字重
+    var weight: Font.Weight {
+        switch self {
+        case .screenTitle, .sectionTitle, .subsectionTitle, .primaryText: return .semibold
+        case .body, .secondaryText, .tertiaryText, .miniText: return .regular
+        }
+    }
+}
+
+/// 缩放修饰器：读取 Environment 的 textScale（从 AppState 注入），对 size 线性缩放
+struct TextStyleModifier: ViewModifier {
+    let style: TextStyle
+    @Environment(\.textScale) private var scale
+
+    func body(content: Content) -> some View {
+        let size = style.baseSize * CGFloat(scale)
+        return content.font(.system(size: size, weight: style.weight, design: .rounded))
+    }
+}
+
+/// 便捷用法：`.textStyle(.sectionTitle)`
+extension View {
+    func textStyle(_ style: TextStyle) -> some View {
+        modifier(TextStyleModifier(style: style))
     }
 }

@@ -77,14 +77,14 @@ struct NoteEditorView: View {
     private var editorHeader: some View {
         VStack(spacing: 8) {
             TextField("标题", text: $title)
-                .font(.title3.bold())
+                .textStyle(.sectionTitle)
                 .padding(.horizontal, 12).padding(.vertical, 8)
                 .background(Color(.secondarySystemBackground))
                 .cornerRadius(8)
                 .onChange(of: title) { _ in hasChanges = true }
             
             TextField("标签（用逗号分隔）", text: $tagsText)
-                .font(.subheadline)
+                .textStyle(.body)
                 .padding(.horizontal, 12).padding(.vertical, 6)
                 .background(Color(.secondarySystemBackground))
                 .cornerRadius(8)
@@ -138,7 +138,7 @@ struct NoteEditorView: View {
         var body: some View {
             Button(action: action) {
                 Text(label)
-                    .font(.system(size: 13, weight: .bold, design: .monospaced))
+                    .textStyle(.tertiaryText)
                     .frame(width: 34, height: 30)
                     .background(Color(.secondarySystemBackground))
                     .cornerRadius(6)
@@ -154,7 +154,7 @@ struct NoteEditorView: View {
             VStack(alignment: .leading, spacing: 12) {
                 if !title.trimmingCharacters(in: .whitespaces).isEmpty {
                     Text(title)
-                        .font(.title.bold())
+                        .textStyle(.screenTitle)
                         .padding(.bottom, 4)
                 }
                 let md = markdownText.isEmpty ? "（内容为空）" : markdownText

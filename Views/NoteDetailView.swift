@@ -107,7 +107,7 @@ struct NoteDetailView: View {
     @ViewBuilder
     private func sectionHeader(_ title: String) -> some View {
         Text(title)
-            .font(.headline)
+            .textStyle(.sectionTitle)
             .foregroundColor(.secondary)
             .padding(.top, 8)
     }
@@ -127,12 +127,12 @@ struct NoteDetailView: View {
                     )
                 VStack(spacing: 16) {
                     Text("卡片预览")
-                        .font(.caption)
+                        .textStyle(.tertiaryText)
                         .foregroundColor(.secondary)
                     
                     // 正面
                     VStack {
-                        Text("正面（问题）").font(.subheadline.bold()).foregroundColor(.blue)
+                        Text("正面（问题）").textStyle(.subsectionTitle).foregroundColor(.blue)
                         MarkdownView(markdown: "# \(note.cardFront)")
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding()
@@ -143,7 +143,7 @@ struct NoteDetailView: View {
                     if showCardFlip {
                         // 背面
                         VStack {
-                            Text("背面（答案）").font(.subheadline.bold()).foregroundColor(.green)
+                            Text("背面（答案）").textStyle(.subsectionTitle).foregroundColor(.green)
                             if note.cardBack.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                                 Text("（背面暂无内容）")
                                     .foregroundColor(.secondary)
@@ -195,7 +195,7 @@ struct NoteDetailView: View {
                     VStack(spacing: 4) {
                         Text(rating.shortLabel).bold()
                         Text(appState.scheduler.previewNextInterval(note: note, rating: rating))
-                            .font(.caption2)
+                            .textStyle(.tertiaryText)
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 10)
@@ -232,7 +232,7 @@ struct NoteDetailView: View {
         if logs.isEmpty {
             Text("（尚无复习记录）")
                 .foregroundColor(.secondary)
-                .font(.callout)
+                .textStyle(.secondaryText)
         } else {
             VStack(spacing: 0) {
                 ForEach(Array(logs.prefix(10).enumerated()), id: \.element.id) { idx, log in
@@ -241,13 +241,13 @@ struct NoteDetailView: View {
                             .fill(Color(hex: log.rating.color))
                             .frame(width: 10, height: 10)
                         Text(log.rating.description)
-                            .font(.subheadline.bold())
+                            .textStyle(.subsectionTitle)
                         Spacer()
                         Text("\(log.oldInterval)d → \(log.newInterval)d")
-                            .font(.caption)
+                            .textStyle(.tertiaryText)
                             .foregroundColor(.secondary)
                         Text(log.reviewDate.formatted(date: .abbreviated, time: .shortened))
-                            .font(.caption2)
+                            .textStyle(.tertiaryText)
                             .foregroundColor(.secondary)
                             .frame(width: 110, alignment: .trailing)
                     }
@@ -296,10 +296,10 @@ private struct InfoChip: View {
     var body: some View {
         VStack(spacing: 4) {
             Text(label)
-                .font(.caption2)
+                .textStyle(.tertiaryText)
                 .foregroundStyle(.secondary)
             Text(value)
-                .font(.subheadline.bold())
+                .textStyle(.subsectionTitle)
                 .foregroundStyle(.primary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)

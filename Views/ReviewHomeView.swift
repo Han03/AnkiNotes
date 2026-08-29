@@ -27,15 +27,15 @@ struct ReviewHomeView: View {
                     HStack {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("今日概览")
-                                .font(.headline)
+                                .textStyle(.sectionTitle)
                                 .foregroundColor(.secondary)
                             Text("\(stats.streakDays) 天连续打卡")
-                                .font(.title2.bold())
+                                .textStyle(.screenTitle)
                                 .foregroundColor(.orange)
                         }
                         Spacer()
                         Image(systemName: "flame.fill")
-                            .font(.system(size: 36))
+                            .textStyle(.screenTitle)
                             .foregroundColor(.orange)
                     }
                     
@@ -65,14 +65,14 @@ struct ReviewHomeView: View {
                     HStack(spacing: 14) {
                         if queue.isEmpty {
                             Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 38))
+                                .textStyle(.screenTitle)
                                 .foregroundColor(.green)
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("今日已完成")
-                                    .font(.title3.bold())
+                                    .textStyle(.subsectionTitle)
                                     .foregroundColor(.green)
                                 Text("明天再来巩固记忆吧！")
-                                    .font(.subheadline)
+                                    .textStyle(.secondaryText)
                                     .foregroundColor(.secondary)
                             }
                         } else {
@@ -85,14 +85,14 @@ struct ReviewHomeView: View {
                                     )
                                     .frame(width: 52, height: 52)
                                 Image(systemName: "play.fill")
-                                    .font(.title.bold())
+                                    .textStyle(.screenTitle)
                                     .foregroundColor(.white)
                             }
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("开始复习")
-                                    .font(.title3.bold())
+                                    .textStyle(.subsectionTitle)
                                 Text("共 \(queue.count) 张卡片待复习 · 预计用时 \(estimatedTime(for: queue.count)) 分钟")
-                                    .font(.subheadline)
+                                    .textStyle(.secondaryText)
                                     .foregroundColor(.secondary)
                             }
                         }
@@ -113,7 +113,7 @@ struct ReviewHomeView: View {
                 VStack(spacing: 12) {
                     HStack {
                         Text("近 7 天复习量")
-                            .font(.headline)
+                            .textStyle(.sectionTitle)
                         Spacer()
                     }
                     WeeklyChartView(counts: stats.weeklyReviewCounts)
@@ -127,10 +127,10 @@ struct ReviewHomeView: View {
                 VStack(spacing: 12) {
                     HStack {
                         Text("卡片状态分布")
-                            .font(.headline)
+                            .textStyle(.sectionTitle)
                         Spacer()
                         Text("共 \(stats.totalNotes) 张")
-                            .font(.subheadline)
+                            .textStyle(.secondaryText)
                             .foregroundColor(.secondary)
                     }
                     StatusDistributionView(stats: stats)
@@ -143,12 +143,12 @@ struct ReviewHomeView: View {
                 // 按文件夹复习
                 VStack(alignment: .leading, spacing: 10) {
                     Text("按文件夹复习")
-                        .font(.headline)
+                        .textStyle(.sectionTitle)
                     let folders = storage.getAllFolders()
                     if folders.isEmpty {
                         Text("尚未创建文件夹")
                             .foregroundColor(.secondary)
-                            .font(.callout)
+                            .textStyle(.secondaryText)
                     }
                     ForEach(folders) { folder in
                         let count = scheduler.getTodayDueCount(in: folder.id)
@@ -160,11 +160,11 @@ struct ReviewHomeView: View {
                                     .foregroundColor(.yellow)
                                     .frame(width: 24)
                                 Text(folder.name)
-                                    .font(.subheadline)
+                                    .textStyle(.secondaryText)
                                 Spacer()
                                 if count > 0 {
                                     Text("\(count)")
-                                        .font(.caption.bold())
+                                        .textStyle(.subsectionTitle)
                                         .padding(.horizontal, 8).padding(.vertical, 3)
                                         .background(Color.red)
                                         .foregroundColor(.white)
