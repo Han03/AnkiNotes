@@ -165,10 +165,6 @@ struct ReviewSessionView: View {
     
     // MARK: - 评级按钮
     
-    private var shortcutButtons: [(key: String, rating: ReviewRating)] {
-        [("1 极难", .again), ("2 困难", .hard), ("3 良好", .good), ("4 简单", .easy)]
-    }
-    
     @ViewBuilder
     private func ratingButtons(note: Note, scheduler: SchedulerService) -> some View {
         VStack(spacing: 10) {
@@ -176,7 +172,7 @@ struct ReviewSessionView: View {
                 .textStyle(.secondaryText)
                 .foregroundColor(.secondary)
             
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 ForEach(ReviewRating.allCases) { rating in
                     Button {
                         applyRating(rating)
@@ -199,48 +195,30 @@ struct ReviewSessionView: View {
                     }
                     .buttonStyle(.plain)
                 }
-            }
-            
-            HStack(spacing: 10) {
-                ForEach(shortcutButtons, id: \.key) { info in
+                
+                // 测评按钮：仅当该笔记已生成题目时显示，放在右侧
+                if appState.quizService.generatedNoteIds.contains(note.id) {
                     Button {
-                        applyRating(info.rating)
+                        showReviewQuiz = true
                     } label: {
-                        Text(info.key)
-                            .textStyle(.miniText)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 6)
-                            .background(Color(.secondarySystemBackground))
-                            .foregroundColor(.secondary)
-                            .cornerRadius(8)
+                        VStack(spacing: 4) {
+                            Image(systemName: "doc.questionmark")
+                                .font(.subheadline)
+                            Text("测评")
+                                .textStyle(.subsectionTitle)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(Color.purple.opacity(0.14))
+                        .foregroundColor(.purple)
+                        .cornerRadius(12)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color.purple.opacity(0.35), lineWidth: 1)
+                        )
                     }
                     .buttonStyle(.plain)
                 }
-            }
-            
-            // 测评按钮：仅当该笔记已生成题目时显示
-            if appState.quizService.generatedNoteIds.contains(note.id) {
-                let questionCount = appState.quizService.questions.filter { $0.noteId == note.id }.count
-                Button {
-                    showReviewQuiz = true
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "doc.questionmark")
-                            .font(.subheadline)
-                        Text("通过做题测评掌握程度（最多\(min(10, questionCount))题）")
-                            .textStyle(.secondaryText)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(Color.purple.opacity(0.12))
-                    .foregroundColor(.purple)
-                    .cornerRadius(12)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(Color.purple.opacity(0.35), lineWidth: 1)
-                    )
-                }
-                .buttonStyle(.plain)
             }
         }
     }
