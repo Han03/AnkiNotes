@@ -351,7 +351,7 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("效果预览 · 标题示例")
                     .textStyle(.sectionTitle)
-                Text("正文示例：调整这个分段控件可让整个 App 的标题、卡片、按钮、辅助说明同步放大 1~3 档。记忆卡片内的 Markdown 字号也会跟随环境缩放一起变化。")
+                Text("正文示例：调整这个分段控件可让整个 App 的标题、笔记、按钮、辅助说明同步放大 1~3 档。记忆笔记内的 Markdown 字号也会跟随环境缩放一起变化。")
                     .textStyle(.body)
                     .foregroundStyle(.primary)
                 Text("辅助说明字号示例（原 caption2）")

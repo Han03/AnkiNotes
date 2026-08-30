@@ -68,7 +68,7 @@ struct StatusDistributionView: View {
     var body: some View {
         let total = max(stats.totalNotes, 1)
         let data: [(label: String, value: Int, color: Color)] = [
-            ("新卡片", stats.newCount, .blue),
+            ("新笔记", stats.newCount, .blue),
             ("学习中", stats.learningCount, .orange),
             ("已掌握", stats.masteredCount, .green),
             ("复习中", max(0, stats.totalNotes - stats.newCount - stats.learningCount - stats.masteredCount), .purple)

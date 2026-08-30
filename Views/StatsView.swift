@@ -114,7 +114,7 @@ struct StatsView: View {
     private var distributionSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Label("卡片状态分布", systemImage: "square.stack.3d.up.fill")
+                Label("笔记状态分布", systemImage: "square.stack.3d.up.fill")
                     .textStyle(.subsectionTitle)
                 Spacer()
             }
@@ -122,7 +122,7 @@ struct StatsView: View {
                 .frame(height: 120)
 
             HStack(spacing: 12) {
-                DistributionCard(title: "新卡片", value: stats.newCount,
+                DistributionCard(title: "新笔记", value: stats.newCount,
                                  total: stats.totalNotes, color: .blue, systemImage: "sparkles")
                 DistributionCard(title: "学习中", value: stats.learningCount,
                                  total: stats.totalNotes, color: .orange, systemImage: "book.fill")
@@ -205,7 +205,7 @@ private struct RatingDistributionView: View {
                     .cornerRadius(8)
                 }
             }
-            Text("记忆状态越好，Good/Easy 的比例越高；Again 太多，说明需要简化卡片内容")
+            Text("记忆状态越好，Good/Easy 的比例越高；Again 太多，说明需要简化笔记内容")
                 .textStyle(.miniText)
                 .foregroundColor(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)

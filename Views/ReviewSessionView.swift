@@ -30,7 +30,7 @@ struct ReviewSessionView: View {
         Group {
             if queue.isEmpty {
                 EmptyStateView(
-                    "没有需要复习的卡片",
+                    "没有需要复习的笔记",
                     systemImage: "checkmark.circle.fill",
                     description: Text("所有内容已到期复习完毕！")
                 )
@@ -269,7 +269,7 @@ struct ReviewSessionView: View {
                 .textStyle(.screenTitle)
             
             VStack(spacing: 16) {
-                SummaryRow(label: "复习卡片", value: "\(reviewedCount) 张", systemImage: "doc.richtext.fill", color: .blue)
+                SummaryRow(label: "复习笔记", value: "\(reviewedCount) 篇", systemImage: "doc.richtext.fill", color: .blue)
                 SummaryRow(label: "今日累计", value: "\(stats.reviewedToday) 张", systemImage: "checkmark.seal.fill", color: .green)
                 SummaryRow(label: "连续打卡", value: "\(stats.streakDays) 天", systemImage: "flame.fill", color: .orange)
                 SummaryRow(label: "剩余待复习", value: "\(appState.scheduler.getTodayDueCount()) 张", systemImage: "clock.fill", color: .purple)

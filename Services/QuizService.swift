@@ -33,6 +33,7 @@ final class QuizService {
     private(set) var isCancelled = false    // 是否被用户取消
     private(set) var failedNoteIds: Set<UUID> = []  // 生成失败的笔记ID（可重试）
     private var currentAPITask: URLSessionDataTask?  // 当前正在进行的 API 请求任务
+    var onError: ((String) -> Void)?  // 生成题目报错回调
 
     private let fileURL: URL
     private let generatedIdsURL: URL
@@ -286,9 +287,20 @@ final class QuizService {
     private func generateQuestionsForNote(note: Note, config: BailianConfig) -> [Question] {
         let prompt = buildPrompt(for: note)
         guard let response = callBailianAPI(prompt: prompt, config: config) else {
+            let errorMsg = "笔记「\(note.title)」生成题目失败：API 请求失败或超时，请检查网络连接和 API Key 是否正确"
+            DispatchQueue.main.async {
+                self.onError?(errorMsg)
+            }
             return []
         }
-        return parseQuestions(from: response, note: note)
+        let questions = parseQuestions(from: response, note: note)
+        if questions.isEmpty {
+            let errorMsg = "笔记「\(note.title)」生成题目失败：返回内容解析为空，可能是 JSON 格式错误或被截断（当前 max_tokens=20000），返回内容前200字：\(response.prefix(200))"
+            DispatchQueue.main.async {
+                self.onError?(errorMsg)
+            }
+        }
+        return questions
     }
 
     /// 构建生成题目的 Prompt
@@ -357,7 +369,7 @@ final class QuizService {
                 ["role": "user", "content": prompt]
             ],
             "temperature": 0.7,
-            "max_tokens": 4000
+            "max_tokens": 20000
         ]
 
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)

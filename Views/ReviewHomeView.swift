@@ -20,8 +20,9 @@ struct ReviewHomeView: View {
         let storage = appState.storage!
         let scheduler = appState.scheduler!
         let queue = scheduler.getTodayReviewQueue()
-        let newCount = queue.filter { $0.srs.cardState == .new }.count
-        let learningCount = queue.filter { $0.srs.cardState == .learning || $0.srs.cardState == .relearning }.count
+        // 使用全局统计，而不是从今日队列中计算（学习中的笔记通常 dueDate 在几小时后，不在今日队列中）
+        let newCount = stats.newCount
+        let learningCount = stats.learningCount
         
         ScrollView {
             VStack(spacing: 18) {
@@ -46,7 +47,7 @@ struct ReviewHomeView: View {
                         StatCard(title: "待复习", value: "\(queue.count)",
                                  systemImage: "doc.richtext.fill",
                                  color: .blue, highlight: queue.count > 0)
-                        StatCard(title: "新卡片", value: "\(newCount)",
+                        StatCard(title: "新笔记", value: "\(newCount)",
                                  systemImage: "sparkles",
                                  color: .purple)
                         StatCard(title: "学习中", value: "\(learningCount)",
@@ -94,7 +95,7 @@ struct ReviewHomeView: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("开始复习")
                                     .textStyle(.subsectionTitle)
-                                Text("共 \(queue.count) 张卡片待复习 · 预计用时 \(estimatedTime(for: queue))")
+                                Text("共 \(queue.count) 篇笔记待复习 · 预计用时 \(estimatedTime(for: queue))")
                                     .textStyle(.secondaryText)
                                     .foregroundColor(.secondary)
                             }

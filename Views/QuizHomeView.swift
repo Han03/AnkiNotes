@@ -62,6 +62,21 @@ struct QuizHomeView: View {
                 QuizSessionView(questionCount: selectedCount)
             }
         }
+        // 生成题目报错提示
+        .alert(
+            "生成题目报错",
+            isPresented: Binding(
+                get: { appState.quizError != nil },
+                set: { if !$0 { appState.quizError = nil } }
+            ),
+            presenting: appState.quizError
+        ) { _ in
+            Button("确定", role: .cancel) {
+                appState.quizError = nil
+            }
+        } message: { error in
+            Text(error)
+        }
     }
 
     // MARK: - 正在生成提示

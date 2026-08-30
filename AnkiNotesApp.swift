@@ -98,6 +98,7 @@ final class AppState: ObservableObject {
     private(set) var quizService: QuizService!
     @Published var isGeneratingQuestions = false
     @Published var generationProgress: (current: Int, total: Int, noteTitle: String)?
+    @Published var quizError: String? = nil  // 生成题目报错信息
 
     @Published var providerStatus: String? = nil
     @Published var iCloudContainerAvailable: Bool = false
@@ -403,6 +404,12 @@ final class AppState: ObservableObject {
         }
         let allNotes = storage.getAllNotes()
         isGeneratingQuestions = true
+        quizError = nil
+        quiz.onError = { [weak self] error in
+            DispatchQueue.main.async {
+                self?.quizError = error
+            }
+        }
         quiz.generateQuestionsForAllNotes(
             notes: allNotes,
             config: bailianConfig,
