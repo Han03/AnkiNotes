@@ -94,6 +94,12 @@ struct QuizHomeView: View {
                         Text("正在处理：\(progress.noteTitle)（\(progress.current + 1)/\(progress.total)）")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
+                        // 显示已生成字数（流式响应实时更新）
+                        if appState.quizService?.generatedCharCount ?? 0 > 0 {
+                            Text("已生成：\(appState.quizService?.generatedCharCount ?? 0) 字")
+                                .font(.caption)
+                                .foregroundColor(.purple.opacity(0.8))
+                        }
                     }
                 }
                 Spacer()

@@ -32,7 +32,9 @@ final class QuizService {
     private(set) var isGenerating = false  // 是否正在生成题目
     private(set) var isCancelled = false    // 是否被用户取消
     private(set) var failedNoteIds: Set<UUID> = []  // 生成失败的笔记ID（可重试）
-    private var currentAPITask: URLSessionDataTask?  // 当前正在进行的 API 请求任务
+    private var currentAPITask: URLSessionDataTask?  // 当前正在进行的 API 请求任务（保留兼容）
+    private var currentStreamTask: Task<Void, Never>?  // 当前流式请求任务（用于取消）
+    @Published var generatedCharCount: Int = 0  // 当前笔记已生成字数（实时进度）
     var onError: ((String) -> Void)?  // 生成题目报错回调
 
     private let fileURL: URL
@@ -176,6 +178,8 @@ final class QuizService {
         isCancelled = true
         currentAPITask?.cancel()
         currentAPITask = nil
+        currentStreamTask?.cancel()
+        currentStreamTask = nil
     }
     
     /// 为所有未生成题目的笔记生成题目（后台异步执行）
@@ -351,7 +355,7 @@ final class QuizService {
         """
     }
 
-    /// 调用百炼 API
+    /// 调用百炼 API（流式响应 SSE，避免长文本生成超时）
     private func callBailianAPI(prompt: String, config: BailianConfig) -> String? {
         // 如果已被取消，立即返回
         guard !isCancelled else { return nil }
@@ -361,6 +365,8 @@ final class QuizService {
         request.httpMethod = "POST"
         request.setValue("Bearer \(config.apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        // 流式响应需要较长的超时，设置为 10 分钟（流式第一个字节很快返回，不会触发）
+        request.timeoutInterval = 600
 
         let body: [String: Any] = [
             "model": config.modelCode,
@@ -369,40 +375,88 @@ final class QuizService {
                 ["role": "user", "content": prompt]
             ],
             "temperature": 0.7,
-            "max_tokens": 20000
+            "max_tokens": 20000,
+            "stream": true  // 启用流式响应
         ]
 
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-
+        
         let semaphore = DispatchSemaphore(value: 0)
         var result: String?
-
-        let task = URLSession.shared.dataTask(with: request) { data, response, error in
-            defer { semaphore.signal() }
-            // 如果被取消，不处理结果
-            guard !self.isCancelled else { return }
-            guard let data = data, error == nil else {
-                if let error = error as? URLError, error.code == .cancelled {
+        var accumulatedContent = ""
+        
+        // 重置已生成字数
+        DispatchQueue.main.async {
+            self.generatedCharCount = 0
+        }
+        
+        let streamTask = Task {
+            do {
+                let (bytes, response) = try await URLSession.shared.bytes(for: request)
+                
+                // 检查 HTTP 状态码
+                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode != 200 {
+                    var errorData = ""
+                    for try await byte in bytes {
+                        errorData.append(Character(UnicodeScalar(byte)))
+                    }
+                    print("⚠️ 百炼 API HTTP 错误: \(httpResponse.statusCode), \(errorData.prefix(500))")
+                    semaphore.signal()
+                    return
+                }
+                
+                // 读取流式数据（SSE 格式）
+                for try await line in bytes.lines {
+                    // 检查是否被取消
+                    if self.isCancelled { break }
+                    
+                    // SSE 格式: data: {...}
+                    guard line.hasPrefix("data: ") else { continue }
+                    let jsonStr = String(line.dropFirst(6))
+                    
+                    // 流结束标记
+                    if jsonStr == "[DONE]" { break }
+                    
+                    // 解析 JSON 片段
+                    guard let data = jsonStr.data(using: .utf8),
+                          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                          let choices = json["choices"] as? [[String: Any]],
+                          let first = choices.first,
+                          let delta = first["delta"] as? [String: Any],
+                          let content = delta["content"] as? String else {
+                        continue
+                    }
+                    
+                    // 累积内容
+                    accumulatedContent += content
+                    
+                    // 实时更新已生成字数
+                    let count = accumulatedContent.count
+                    DispatchQueue.main.async {
+                        self.generatedCharCount = count
+                    }
+                }
+                
+                if self.isCancelled {
+                    print("ℹ️ 百炼 API 流式请求已取消")
+                } else {
+                    result = accumulatedContent
+                }
+            } catch {
+                if let urlError = error as? URLError, urlError.code == .cancelled {
                     print("ℹ️ 百炼 API 请求已取消")
                 } else {
-                    print("⚠️ 百炼 API 请求失败: \(error?.localizedDescription ?? "unknown")")
+                    print("⚠️ 百炼 API 请求失败: \(error.localizedDescription)")
                 }
-                return
             }
-            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let choices = json["choices"] as? [[String: Any]],
-               let first = choices.first,
-               let message = first["message"] as? [String: Any],
-               let content = message["content"] as? String {
-                result = content
-            } else {
-                print("⚠️ 百炼 API 响应解析失败: \(String(data: data, encoding: .utf8) ?? "")")
-            }
+            
+            semaphore.signal()
         }
-        currentAPITask = task
-        task.resume()
-        _ = semaphore.wait(timeout: .now() + 120)  // 超时 120 秒
-        currentAPITask = nil
+        
+        currentStreamTask = streamTask
+        // 无限等待，直到生成完成或用户取消（流式响应不会因为生成长而超时）
+        semaphore.wait()
+        currentStreamTask = nil
         return result
     }
 
