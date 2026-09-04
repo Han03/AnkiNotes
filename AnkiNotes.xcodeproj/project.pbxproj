@@ -257,6 +257,9 @@
 			ANQuizService /* QuizService.swift in Sources */,
 			ANQuizHome /* QuizHomeView.swift in Sources */,
 			ANQuizSession /* QuizSessionView.swift in Sources */,
+			ANKnowledgePoint /* KnowledgePoint.swift in Sources */,
+			ANKnowledgeService /* KnowledgeService.swift in Sources */,
+			ANKnowledgeExplainView /* KnowledgeExplainView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
