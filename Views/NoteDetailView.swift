@@ -28,16 +28,6 @@ struct NoteDetailView: View {
                     VStack(alignment: .leading, spacing: 16) {
                         // 完整 Markdown 内容（带知识点标记）
                         sectionHeader("完整内容")
-                        if isExtractingKnowledge && knowledgePoints.isEmpty {
-                            HStack {
-                                ProgressView()
-                                    .scaleEffect(0.8)
-                                Text("正在提取知识点...")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                            .padding(.vertical, 4)
-                        }
                         MarkdownView(
                             markdown: note.markdownContent,
                             knowledgePoints: knowledgePoints,
@@ -46,6 +36,9 @@ struct NoteDetailView: View {
                             }
                         )
                         .padding(.horizontal, 4)
+                        
+                        // 知识点提取区域
+                        knowledgeSection(note)
                         
                         // SRS 信息
                         sectionHeader("记忆数据")
@@ -143,10 +136,106 @@ struct NoteDetailView: View {
         }
         .onAppear {
             loadNote()
-            // 后台异步提取知识点
-            extractKnowledgePoints()
+            // 加载已缓存的知识点（不自动提取）
+            loadCachedKnowledgePoints()
         }
         .onDisappear { appState.refreshStats() }
+    }
+    
+    // MARK: - 知识点提取区域
+    
+    @ViewBuilder
+    private func knowledgeSection(_ note: Note) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Image(systemName: "lightbulb.fill")
+                    .foregroundColor(.yellow)
+                Text("知识点精讲")
+                    .textStyle(.sectionTitle)
+                Spacer()
+                if !knowledgePoints.isEmpty {
+                    Text("\(knowledgePoints.count) 个知识点")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            
+            if isExtractingKnowledge {
+                HStack(spacing: 12) {
+                    ProgressView()
+                        .scaleEffect(0.9)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("正在提取知识点...")
+                            .font(.subheadline)
+                            .foregroundColor(.purple)
+                        if !knowledgePoints.isEmpty {
+                            Text("已提取 \(knowledgePoints.count) 个")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    Spacer()
+                }
+                .padding()
+                .background(Color.purple.opacity(0.08))
+                .cornerRadius(10)
+            } else if knowledgePoints.isEmpty {
+                Button {
+                    extractKnowledgePoints()
+                } label: {
+                    HStack {
+                        Image(systemName: "wand.and.stars")
+                        Text("提取知识点")
+                            .font(.subheadline.bold())
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .foregroundColor(.secondary)
+                    }
+                    .padding()
+                    .background(Color.purple.opacity(0.1))
+                    .foregroundColor(.purple)
+                    .cornerRadius(10)
+                }
+                .buttonStyle(.plain)
+                .disabled(!appState.bailianConfig.isConfigured)
+                
+                if !appState.bailianConfig.isConfigured {
+                    Text("请先在设置中配置百炼大模型")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    FlexibleView(data: knowledgePoints, spacing: 8) { point in
+                        Button {
+                            selectedKnowledgePoint = point
+                        } label: {
+                            Text(point.keyword)
+                                .font(.caption)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(Color.purple.opacity(0.12))
+                                .foregroundColor(.purple)
+                                .cornerRadius(8)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    
+                    Button {
+                        extractKnowledgePoints()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.clockwise")
+                            Text("重新提取")
+                                .font(.caption)
+                        }
+                        .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(.top, 4)
     }
     
     // MARK: - 分区
@@ -231,6 +320,13 @@ struct NoteDetailView: View {
     }
     
     // MARK: - 知识点提取
+    
+    private func loadCachedKnowledgePoints() {
+        guard let note = note else { return }
+        if let cached = KnowledgeService.shared.loadExtraction(for: note.id) {
+            knowledgePoints = cached
+        }
+    }
     
     private func extractKnowledgePoints() {
         guard let note = note else { return }
@@ -355,5 +451,66 @@ struct FolderPickerView: View {
             }
         }
         .listStyle(.insetGrouped)
+    }
+}
+
+// MARK: - 流式布局视图（用于标签云）
+
+struct FlexibleView<Data: RandomAccessCollection, Content: View>: View where Data.Element: Hashable {
+    let data: Data
+    let spacing: CGFloat
+    let content: (Data.Element) -> Content
+    
+    @State private var totalHeight: CGFloat = .zero
+    
+    var body: some View {
+        GeometryReader { geometry in
+            self.generateContent(in: geometry)
+        }
+        .frame(height: totalHeight)
+    }
+    
+    private func generateContent(in geometry: GeometryProxy) -> some View {
+        var width = CGFloat.zero
+        var height = CGFloat.zero
+        
+        return ZStack(alignment: .topLeading) {
+            ForEach(Array(data), id: \.self) { item in
+                content(item)
+                    .padding(.trailing, spacing)
+                    .padding(.bottom, spacing)
+                    .alignmentGuide(.leading) { dimension in
+                        if abs(width - dimension.width) > geometry.size.width {
+                            width = 0
+                            height -= dimension.height
+                        }
+                        let result = width
+                        if item == data.last {
+                            width = 0
+                        } else {
+                            width -= dimension.width
+                        }
+                        return result
+                    }
+                    .alignmentGuide(.top) { _ in
+                        let result = height
+                        if item == data.last {
+                            height = 0
+                        }
+                        return result
+                    }
+            }
+        }
+        .background(viewHeightReader($totalHeight))
+    }
+    
+    private func viewHeightReader(_ binding: Binding<CGFloat>) -> some View {
+        GeometryReader { geometry -> Color in
+            let rect = geometry.frame(in: .local)
+            DispatchQueue.main.async {
+                binding.wrappedValue = rect.size.height
+            }
+            return .clear
+        }
     }
 }
