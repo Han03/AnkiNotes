@@ -70,13 +70,11 @@ struct NoteDetailView: View {
                 }
                 // 知识点详解界面
                 .sheet(item: $selectedKnowledgePoint) { point in
-                    if let note = note {
-                        KnowledgeExplainView(
-                            point: point,
-                            noteContent: note.markdownContent,
-                            config: appState.bailianConfig
-                        )
-                    }
+                    KnowledgeExplainView(
+                        point: point,
+                        noteContent: note.markdownContent,
+                        config: appState.bailianConfig
+                    )
                 }
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
