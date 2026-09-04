@@ -17,16 +17,35 @@ struct NoteDetailView: View {
     @State private var showMoveFolder = false
     @State private var isSyncingNote = false  // 正在同步单个笔记
     @State private var selectedFolderId: UUID?
+    @State private var knowledgePoints: [KnowledgePoint] = []  // 已提取的知识点
+    @State private var selectedKnowledgePoint: KnowledgePoint? = nil  // 选中的知识点（用于弹出详解）
+    @State private var isExtractingKnowledge = false  // 正在提取知识点
     
     var body: some View {
         Group {
             if let note = note {
                 ScrollView(.vertical) {
                     VStack(alignment: .leading, spacing: 16) {
-                        // 完整 Markdown 内容
+                        // 完整 Markdown 内容（带知识点标记）
                         sectionHeader("完整内容")
-                        MarkdownView(markdown: note.markdownContent)
-                            .padding(.horizontal, 4)
+                        if isExtractingKnowledge && knowledgePoints.isEmpty {
+                            HStack {
+                                ProgressView()
+                                    .scaleEffect(0.8)
+                                Text("正在提取知识点...")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding(.vertical, 4)
+                        }
+                        MarkdownView(
+                            markdown: note.markdownContent,
+                            knowledgePoints: knowledgePoints,
+                            onKnowledgeTap: { point in
+                                selectedKnowledgePoint = point
+                            }
+                        )
+                        .padding(.horizontal, 4)
                         
                         // SRS 信息
                         sectionHeader("记忆数据")
@@ -47,6 +66,16 @@ struct NoteDetailView: View {
                             .padding()
                             .background(.ultraThinMaterial)
                             .cornerRadius(12)
+                    }
+                }
+                // 知识点详解界面
+                .sheet(item: $selectedKnowledgePoint) { point in
+                    if let note = note {
+                        KnowledgeExplainView(
+                            point: point,
+                            noteContent: note.markdownContent,
+                            config: appState.bailianConfig
+                        )
                     }
                 }
                 .toolbar {
@@ -114,7 +143,11 @@ struct NoteDetailView: View {
                 EmptyStateView("笔记不存在或已删除", systemImage: "trash")
             }
         }
-        .onAppear { loadNote() }
+        .onAppear {
+            loadNote()
+            // 后台异步提取知识点
+            extractKnowledgePoints()
+        }
         .onDisappear { appState.refreshStats() }
     }
     
@@ -197,6 +230,34 @@ struct NoteDetailView: View {
         appState.storage.deleteNote(id: noteId)
         note = nil
         appState.refreshStats()
+    }
+    
+    // MARK: - 知识点提取
+    
+    private func extractKnowledgePoints() {
+        guard let note = note else { return }
+        guard appState.bailianConfig.isConfigured else { return }
+        
+        // 先检查缓存
+        if let cached = KnowledgeService.shared.loadExtraction(for: note.id) {
+            knowledgePoints = cached
+            return
+        }
+        
+        isExtractingKnowledge = true
+        
+        KnowledgeService.shared.extractKeywords(
+            note: note,
+            config: appState.bailianConfig,
+            onPoint: { point in
+                // 实时标记：每识别到一个知识点就添加到列表
+                knowledgePoints.append(point)
+            },
+            completion: { points in
+                isExtractingKnowledge = false
+                knowledgePoints = points
+            }
+        )
     }
 }
 

@@ -25,6 +25,9 @@
 		ANReviewHome /* ReviewHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANReviewHomeRef /* ReviewHomeView.swift */; };
 		ANReviewSession /* ReviewSessionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANReviewSessionRef /* ReviewSessionView.swift */; };
 		ANReviewQuiz /* ReviewQuizView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANReviewQuizRef /* ReviewQuizView.swift */; };
+		ANKnowledgeExplainView /* KnowledgeExplainView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANKnowledgeExplainViewRef /* KnowledgeExplainView.swift */; };
+		ANKnowledgeService /* KnowledgeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANKnowledgeServiceRef /* KnowledgeService.swift */; };
+		ANKnowledgePoint /* KnowledgePoint.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANKnowledgePointRef /* KnowledgePoint.swift */; };
 		ANStats /* StatsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANStatsRef /* StatsView.swift */; };
 		ANSett /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANSettRef /* SettingsView.swift */; };
 		ANFrontMat /* MarkdownFrontmatterParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANFrontMatRef /* MarkdownFrontmatterParser.swift */; };
@@ -53,6 +56,9 @@
 		ANReviewHomeRef /* ReviewHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewHomeView.swift; sourceTree = "<group>"; };
 		ANReviewSessionRef /* ReviewSessionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewSessionView.swift; sourceTree = "<group>"; };
 		ANReviewQuizRef /* ReviewQuizView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewQuizView.swift; sourceTree = "<group>"; };
+		ANKnowledgeExplainViewRef /* KnowledgeExplainView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnowledgeExplainView.swift; sourceTree = "<group>"; };
+		ANKnowledgeServiceRef /* KnowledgeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnowledgeService.swift; sourceTree = "<group>"; };
+		ANKnowledgePointRef /* KnowledgePoint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnowledgePoint.swift; sourceTree = "<group>"; };
 		ANStatsRef /* StatsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsView.swift; sourceTree = "<group>"; };
 		ANSettRef /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		ANSharedViewRef /* SharedViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedViews.swift; sourceTree = "<group>"; };
@@ -98,6 +104,7 @@
 				ANNoteRef /* Note.swift */,
 				ANLogRef /* ReviewLog.swift */,
 			ANQuestionRef /* Question.swift */,
+				ANKnowledgePointRef /* KnowledgePoint.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -112,6 +119,7 @@
 				ANFrontMatRef /* MarkdownFrontmatterParser.swift */,
 				ANCloudProviderRef /* CloudProvider.swift */,
 			ANQuizServiceRef /* QuizService.swift */,
+				ANKnowledgeServiceRef /* KnowledgeService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -132,6 +140,7 @@
 				ANSettRef /* SettingsView.swift */,
 			ANQuizHomeRef /* QuizHomeView.swift */,
 			ANQuizSessionRef /* QuizSessionView.swift */,
+				ANKnowledgeExplainViewRef /* KnowledgeExplainView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";

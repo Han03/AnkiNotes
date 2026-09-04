@@ -216,12 +216,20 @@ struct MarkdownView: View {
     let markdown: String
     var bodyFont: Font = .body
     var textColor: Color = .primary
+    var knowledgePoints: [KnowledgePoint] = []  // 知识点列表（用于标记原文）
+    var onKnowledgeTap: ((KnowledgePoint) -> Void)? = nil  // 点击知识点回调
     
     var body: some View {
         let blocks = MarkdownRenderer.parse(markdown: markdown)
         VStack(alignment: .leading, spacing: 12) {
             ForEach(blocks) { block in
-                BlockView(block: block, bodyFont: bodyFont, textColor: textColor)
+                BlockView(
+                    block: block,
+                    bodyFont: bodyFont,
+                    textColor: textColor,
+                    knowledgePoints: knowledgePoints,
+                    onKnowledgeTap: onKnowledgeTap
+                )
             }
         }
     }
@@ -231,6 +239,8 @@ private struct BlockView: View {
     let block: MarkdownBlock
     var bodyFont: Font
     var textColor: Color
+    var knowledgePoints: [KnowledgePoint] = []
+    var onKnowledgeTap: ((KnowledgePoint) -> Void)? = nil
     
     var body: some View {
         switch block {
@@ -239,14 +249,26 @@ private struct BlockView: View {
         case .heading(let level, let text):
             headingView(level: level, text: text)
         case .paragraph(let text):
-            InlineMarkdownText(text: text, font: bodyFont, color: textColor)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            KnowledgeInlineText(
+                text: text,
+                font: bodyFont,
+                color: textColor,
+                knowledgePoints: knowledgePoints,
+                onKnowledgeTap: onKnowledgeTap
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
         case .quote(let text):
             HStack(spacing: 8) {
                 Rectangle()
                     .fill(Color.secondary.opacity(0.4))
                     .frame(width: 4)
-                InlineMarkdownText(text: text, font: .body.italic(), color: .secondary)
+                KnowledgeInlineText(
+                    text: text,
+                    font: .body.italic(),
+                    color: .secondary,
+                    knowledgePoints: knowledgePoints,
+                    onKnowledgeTap: onKnowledgeTap
+                )
             }
             .padding(.vertical, 4)
         case .unorderedList(let items):
@@ -254,7 +276,13 @@ private struct BlockView: View {
                 ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                     HStack(alignment: .top, spacing: 8) {
                         Text("•").bold()
-                        InlineMarkdownText(text: item, font: bodyFont, color: textColor)
+                        KnowledgeInlineText(
+                            text: item,
+                            font: bodyFont,
+                            color: textColor,
+                            knowledgePoints: knowledgePoints,
+                            onKnowledgeTap: onKnowledgeTap
+                        )
                     }
                 }
             }
@@ -263,7 +291,13 @@ private struct BlockView: View {
                 ForEach(Array(items.enumerated()), id: \.offset) { idx, item in
                     HStack(alignment: .top, spacing: 8) {
                         Text("\(idx + 1).").bold().frame(width: 24, alignment: .trailing)
-                        InlineMarkdownText(text: item, font: bodyFont, color: textColor)
+                        KnowledgeInlineText(
+                            text: item,
+                            font: bodyFont,
+                            color: textColor,
+                            knowledgePoints: knowledgePoints,
+                            onKnowledgeTap: onKnowledgeTap
+                        )
                     }
                 }
             }
@@ -509,5 +543,118 @@ struct InlineMarkdownText: View {
             segs.append(InlineSegment(content: text, style: .normal, linkURL: nil))
         }
         return segs
+    }
+}
+
+// MARK: - 带知识点标记的行内文本渲染
+
+/// 支持知识点标记的行内文本渲染器
+/// 使用 AttributedString + 自定义 URL scheme 实现可点击的知识点虚线下划线
+struct KnowledgeInlineText: View {
+    let text: String
+    var font: Font = .body
+    var color: Color = .primary
+    var knowledgePoints: [KnowledgePoint] = []
+    var onKnowledgeTap: ((KnowledgePoint) -> Void)? = nil
+    
+    var body: some View {
+        let attributed = buildAttributedString()
+        Text(attributed)
+            .font(font)
+            .foregroundColor(color)
+            .environment(\.openURL, OpenURLAction { url in
+                if url.scheme == "knowledge",
+                   let pointId = UUID(uuidString: url.host ?? ""),
+                   let point = knowledgePoints.first(where: { $0.id == pointId }) {
+                    onKnowledgeTap?(point)
+                    return .handled
+                }
+                return .systemAction
+            })
+    }
+    
+    private func buildAttributedString() -> AttributedString {
+        var attr = AttributedString(text)
+        
+        // 应用基础样式
+        attr.font = font
+        attr.foregroundColor = color
+        
+        // 处理粗体 **text**
+        applyMarkdownStyle(&attr, pattern: #"\*\*(.+?)\*\*"#, style: .bold)
+        // 处理斜体 *text*
+        applyMarkdownStyle(&attr, pattern: #"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)"#, style: .italic)
+        // 处理行内代码 `code`
+        applyInlineCode(&attr)
+        
+        // 标记知识点（虚线下划线 + 可点击链接）
+        for point in knowledgePoints {
+            markKnowledgePoint(&attr, point: point)
+        }
+        
+        return attr
+    }
+    
+    private enum MarkdownStyle {
+        case bold, italic
+    }
+    
+    private func applyMarkdownStyle(_ attr: inout AttributedString, pattern: String, style: MarkdownStyle) {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return }
+        let nsRange = NSRange(text.startIndex..., in: text)
+        let matches = regex.matches(in: text, range: nsRange).reversed()
+        
+        for match in matches {
+            guard let fullRange = Range(match.range, in: text),
+                  let contentRange = Range(match.range(at: 1), in: text) else { continue }
+            
+            let content = String(text[contentRange])
+            if let attrContentRange = Range(fullRange, in: attr) {
+                attr[attrContentRange].setAttributes(AttributeContainer())
+                // 替换标记符号
+                // 由于 AttributedString 不支持直接替换文本，这里只设置样式，保留标记符号
+                // 简化处理：只对内容部分设置样式
+                if let attrInnerRange = Range(contentRange, in: attr) {
+                    switch style {
+                    case .bold:
+                        attr[attrInnerRange].inlinePresentationIntent = .stronglyEmphasized
+                    case .italic:
+                        attr[attrInnerRange].inlinePresentationIntent = .emphasized
+                    }
+                }
+            }
+        }
+    }
+    
+    private func applyInlineCode(_ attr: inout AttributedString) {
+        guard let regex = try? NSRegularExpression(pattern: "`([^`]+)`") else { return }
+        let nsRange = NSRange(text.startIndex..., in: text)
+        let matches = regex.matches(in: text, range: nsRange).reversed()
+        
+        for match in matches {
+            guard let contentRange = Range(match.range(at: 1), in: text),
+                  let attrRange = Range(contentRange, in: attr) else { continue }
+            attr[attrRange].font = .system(.callout, design: .monospaced)
+            attr[attrRange].foregroundColor = .orange
+        }
+    }
+    
+    private func markKnowledgePoint(_ attr: inout AttributedString, point: KnowledgePoint) {
+        let keyword = point.keyword
+        guard !keyword.isEmpty else { return }
+        
+        // 在文本中查找关键字（不区分大小写）
+        var searchRange = text.startIndex..<text.endIndex
+        while let range = text.range(of: keyword, options: .caseInsensitive, range: searchRange) {
+            if let attrRange = Range(range, in: attr) {
+                // 设置虚线下划线
+                attr[attrRange].underlineStyle = .patternDash
+                attr[attrRange].underlineColor = .purple
+                attr[attrRange].foregroundColor = .purple
+                // 设置自定义 URL scheme，用于点击拦截
+                attr[attrRange].link = URL(string: "knowledge://\(point.id.uuidString)")
+            }
+            searchRange = range.upperBound..<text.endIndex
+        }
     }
 }
