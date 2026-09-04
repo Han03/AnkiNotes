@@ -26,6 +26,10 @@ struct ReviewSessionView: View {
     // 测评
     @State private var showReviewQuiz = false  // 是否显示测评界面
     
+    // 知识点
+    @State private var knowledgePoints: [KnowledgePoint] = []  // 当前笔记的知识点
+    @State private var selectedKnowledgePoint: KnowledgePoint? = nil  // 选中的知识点
+    
     var body: some View {
         Group {
             if queue.isEmpty {
@@ -57,6 +61,8 @@ struct ReviewSessionView: View {
         let scheduler = appState.scheduler!
         queue = scheduler.getTodayReviewQueue(in: folderId)
         cardStartTime = Date()
+        // 提取第一篇笔记的知识点
+        extractKnowledgeForCurrentNote()
     }
     
     // MARK: - 复习流程
@@ -110,8 +116,14 @@ struct ReviewSessionView: View {
                     
                     Divider()
                     
-                    // 完整笔记内容
-                    MarkdownView(markdown: note.markdownContent)
+                    // 完整笔记内容（带知识点标记）
+                    MarkdownView(
+                        markdown: note.markdownContent,
+                        knowledgePoints: knowledgePoints,
+                        onKnowledgeTap: { point in
+                            selectedKnowledgePoint = point
+                        }
+                    )
                 }
                 .padding(20)
             }
@@ -142,6 +154,16 @@ struct ReviewSessionView: View {
                             applyRating(rating)
                         }
                     }
+                )
+            }
+        }
+        // 知识点详解界面
+        .sheet(item: $selectedKnowledgePoint) { point in
+            if currentIndex < queue.count {
+                KnowledgeExplainView(
+                    point: point,
+                    noteContent: queue[currentIndex].markdownContent,
+                    config: appState.bailianConfig
                 )
             }
         }
@@ -246,8 +268,38 @@ struct ReviewSessionView: View {
                 offsetX = 0
                 cardDegrees = 0
                 cardStartTime = Date()
+                // 切换笔记时提取新笔记的知识点
+                extractKnowledgeForCurrentNote()
             }
         }
+    }
+    
+    // MARK: - 知识点提取
+    
+    private func extractKnowledgeForCurrentNote() {
+        guard currentIndex < queue.count else { return }
+        let note = queue[currentIndex]
+        guard appState.bailianConfig.isConfigured else { return }
+        
+        // 先检查缓存
+        if let cached = KnowledgeService.shared.loadExtraction(for: note.id) {
+            knowledgePoints = cached
+            return
+        }
+        
+        knowledgePoints = []
+        
+        KnowledgeService.shared.extractKeywords(
+            note: note,
+            config: appState.bailianConfig,
+            onPoint: { point in
+                // 实时标记
+                knowledgePoints.append(point)
+            },
+            completion: { points in
+                knowledgePoints = points
+            }
+        )
     }
     
     // MARK: - 复习总结
