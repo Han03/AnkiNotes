@@ -158,6 +158,7 @@ struct ReviewSessionView: View {
             if let note = currentIndex < queue.count ? queue[currentIndex] : nil {
                 ReviewQuizView(
                     note: note,
+                    folderPath: appState.storage?.getNoteFolderPath(for: note) ?? "",
                     quizService: appState.quizService,
                     onComplete: { rating in
                         showReviewQuiz = false

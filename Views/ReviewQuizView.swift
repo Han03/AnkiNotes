@@ -10,6 +10,7 @@ import SwiftUI
 /// 复习时的测评界面：通过做题评估掌握程度，自动给出评级
 struct ReviewQuizView: View {
     let note: Note
+    let folderPath: String
     let quizService: QuizService
     var onComplete: (ReviewRating) -> Void
     
@@ -71,6 +72,31 @@ struct ReviewQuizView: View {
             
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                    // 题目来源：笔记标题 + 完整路径
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "folder")
+                            .foregroundColor(.secondary)
+                            .font(.caption)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(note.title)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            if !folderPath.isEmpty {
+                                Text(folderPath)
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary.opacity(0.7))
+                            }
+                        }
+                        Spacer()
+                        Text(question.type == .singleChoice ? "选择题" : "填空题")
+                            .font(.caption)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(question.type == .singleChoice ? Color.blue.opacity(0.1) : Color.orange.opacity(0.1))
+                            .foregroundColor(question.type == .singleChoice ? .blue : .orange)
+                            .clipShape(Capsule())
+                    }
+                    
                     // 题干
                     Text(question.question)
                         .font(.headline)
@@ -228,9 +254,20 @@ struct ReviewQuizView: View {
                                 Text("你的答案：")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
-                                Text(userAnswer.isEmpty ? "未作答" : userAnswer)
-                                    .font(.caption)
-                                    .foregroundColor(isCorrect ? .green : .red)
+                                if userAnswer.isEmpty {
+                                    Text("未作答")
+                                        .font(.caption)
+                                        .foregroundColor(.red)
+                                } else if question.type == .singleChoice,
+                                          let optionContent = optionContent(for: question, key: userAnswer) {
+                                    Text("\(userAnswer). \(optionContent)")
+                                        .font(.caption)
+                                        .foregroundColor(isCorrect ? .green : .red)
+                                } else {
+                                    Text(userAnswer)
+                                        .font(.caption)
+                                        .foregroundColor(isCorrect ? .green : .red)
+                                }
                             }
                             
                             // 正确答案
@@ -238,9 +275,16 @@ struct ReviewQuizView: View {
                                 Text("正确答案：")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
-                                Text(question.answer)
-                                    .font(.caption)
-                                    .foregroundColor(.green)
+                                if question.type == .singleChoice,
+                                   let optionContent = optionContent(for: question, key: question.answer) {
+                                    Text("\(question.answer). \(optionContent)")
+                                        .font(.caption)
+                                        .foregroundColor(.green)
+                                } else {
+                                    Text(question.answer)
+                                        .font(.caption)
+                                        .foregroundColor(.green)
+                                }
                             }
                             
                             // 答案解析
@@ -329,5 +373,12 @@ struct ReviewQuizView: View {
         if accuracy >= 0.7 { return .blue }
         if accuracy >= 0.4 { return .orange }
         return .red
+    }
+    
+    // MARK: - 辅助函数
+    
+    /// 根据选项编号获取选项内容
+    private func optionContent(for question: Question, key: String) -> String? {
+        question.options?.first(where: { $0.key == key })?.content
     }
 }

@@ -74,13 +74,24 @@ struct QuizSessionView: View {
     private func questionView(_ q: Question) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                // 题目来源
-                HStack {
-                    Image(systemName: "doc.text")
+                // 题目来源：笔记标题 + 完整路径
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "folder")
                         .foregroundColor(.secondary)
-                    Text(q.noteTitle)
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(q.noteTitle)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        if let note = appState.storage?.getNote(id: q.noteId) {
+                            let folderPath = appState.storage?.getNoteFolderPath(for: note) ?? ""
+                            if !folderPath.isEmpty {
+                                Text(folderPath)
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary.opacity(0.7))
+                            }
+                        }
+                    }
                     Spacer()
                     Text(q.type == .singleChoice ? "选择题" : "填空题")
                         .font(.caption)
