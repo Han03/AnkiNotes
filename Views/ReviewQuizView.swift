@@ -111,17 +111,20 @@ struct ReviewQuizView: View {
                                 .textFieldStyle(.roundedBorder)
                                 .padding(.vertical, 4)
                             
-                            Button("提交答案") {
+                            Button {
                                 userAnswers[question.id] = fillBlankInput
                                 fillBlankInput = ""
                                 nextQuestion()
+                            } label: {
+                                Text("提交答案")
+                                    .font(.subheadline.bold())
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 12)
+                                    .background(Color.blue)
+                                    .foregroundColor(.white)
+                                    .cornerRadius(10)
                             }
-                            .font(.subheadline.bold())
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                            .background(Color.blue)
-                            .foregroundColor(.white)
-                            .cornerRadius(10)
+                            .buttonStyle(.plain)
                             .disabled(fillBlankInput.trimmingCharacters(in: .whitespaces).isEmpty)
                         }
                     }
@@ -140,84 +143,141 @@ struct ReviewQuizView: View {
         let accuracy = total > 0 ? Double(correctCount) / Double(total) : 0
         let rating = ratingForAccuracy(accuracy)
         
-        return VStack(spacing: 24) {
-            Spacer()
-            
-            // 正确率圆环
-            ZStack {
-                Circle()
-                    .stroke(Color.gray.opacity(0.2), lineWidth: 12)
-                    .frame(width: 120, height: 120)
+        return ScrollView {
+            VStack(spacing: 20) {
+                // 正确率圆环
+                ZStack {
+                    Circle()
+                        .stroke(Color.gray.opacity(0.2), lineWidth: 12)
+                        .frame(width: 100, height: 100)
+                    
+                    Circle()
+                        .trim(from: 0, to: accuracy)
+                        .stroke(colorForAccuracy(accuracy), style: StrokeStyle(lineWidth: 12, lineCap: .round))
+                        .frame(width: 100, height: 100)
+                        .rotationEffect(.degrees(-90))
+                    
+                    VStack(spacing: 2) {
+                        Text("\(Int(accuracy * 100))%")
+                            .font(.title2.bold())
+                        Text("正确率")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .padding(.top, 8)
                 
-                Circle()
-                    .trim(from: 0, to: accuracy)
-                    .stroke(colorForAccuracy(accuracy), style: StrokeStyle(lineWidth: 12, lineCap: .round))
-                    .frame(width: 120, height: 120)
-                    .rotationEffect(.degrees(-90))
+                // 答题统计 + 评级
+                HStack(spacing: 16) {
+                    VStack(spacing: 4) {
+                        Text("\(correctCount)")
+                            .font(.title.bold())
+                            .foregroundColor(.green)
+                        Text("答对")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    
+                    VStack(spacing: 4) {
+                        Text("\(total - correctCount)")
+                            .font(.title.bold())
+                            .foregroundColor(.red)
+                        Text("答错")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    
+                    VStack(spacing: 4) {
+                        Text(rating.description)
+                            .font(.title.bold())
+                            .foregroundColor(Color(hex: rating.color))
+                        Text("评级")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .padding()
+                .background(Color(.secondarySystemBackground))
+                .cornerRadius(12)
                 
-                VStack(spacing: 4) {
-                    Text("\(Int(accuracy * 100))%")
-                        .font(.largeTitle.bold())
-                    Text("正确率")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                // 答题详情
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("答题详情")
+                        .font(.headline)
+                    
+                    ForEach(Array(questions.enumerated()), id: \.offset) { index, question in
+                        let userAnswer = userAnswers[question.id] ?? ""
+                        let isCorrect = question.isCorrect(userAnswer: userAnswer)
+                        
+                        VStack(alignment: .leading, spacing: 8) {
+                            // 题目
+                            HStack(alignment: .top, spacing: 8) {
+                                Image(systemName: isCorrect ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                    .foregroundColor(isCorrect ? .green : .red)
+                                    .font(.subheadline)
+                                Text("\(index + 1). \(question.question)")
+                                    .font(.subheadline)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            
+                            // 用户答案
+                            HStack(alignment: .top, spacing: 4) {
+                                Text("你的答案：")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                Text(userAnswer.isEmpty ? "未作答" : userAnswer)
+                                    .font(.caption)
+                                    .foregroundColor(isCorrect ? .green : .red)
+                            }
+                            
+                            // 正确答案
+                            HStack(alignment: .top, spacing: 4) {
+                                Text("正确答案：")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                Text(question.answer)
+                                    .font(.caption)
+                                    .foregroundColor(.green)
+                            }
+                            
+                            // 答案解析
+                            if let explanation = question.explanation, !explanation.isEmpty {
+                                HStack(alignment: .top, spacing: 4) {
+                                    Text("解析：")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    Text(explanation)
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        }
+                        .padding()
+                        .background(Color(.secondarySystemBackground))
+                        .cornerRadius(10)
+                    }
                 }
-            }
-            
-            // 答题统计
-            HStack(spacing: 32) {
-                VStack(spacing: 4) {
-                    Text("\(correctCount)")
-                        .font(.title.bold())
-                        .foregroundColor(.green)
-                    Text("答对")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                
+                // 应用评级按钮
+                Button {
+                    onComplete(rating)
+                    dismiss()
+                } label: {
+                    Text("应用评级并继续")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                        .background(Color(hex: rating.color))
+                        .foregroundColor(.white)
+                        .cornerRadius(12)
                 }
-                VStack(spacing: 4) {
-                    Text("\(total - correctCount)")
-                        .font(.title.bold())
-                        .foregroundColor(.red)
-                    Text("答错")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-            
-            // 自动评级结果
-            VStack(spacing: 8) {
-                Text("系统评级")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                Text(rating.description)
-                    .font(.title.bold())
-                    .foregroundColor(Color(hex: rating.color))
-                Text(ratingDescription(for: rating))
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                .padding(.bottom, 8)
             }
             .padding()
-            .background(Color(.secondarySystemBackground))
-            .cornerRadius(12)
-            
-            Spacer()
-            
-            // 应用评级按钮
-            Button {
-                onComplete(rating)
-                dismiss()
-            } label: {
-                Text("应用评级并继续")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                    .background(Color(hex: rating.color))
-                    .foregroundColor(.white)
-                    .cornerRadius(12)
-            }
-            .padding(.horizontal)
         }
-        .padding()
         .background(Color(.systemGroupedBackground))
     }
     
