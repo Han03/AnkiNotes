@@ -40,33 +40,43 @@ final class QuizService {
     private let fileURL: URL
     private let generatedIdsURL: URL
 
+    private let fileSystem: FileSystemService
+    
     init(fileSystem: FileSystemService) {
+        self.fileSystem = fileSystem
         self.fileURL = fileSystem.metadataDirectory.appendingPathComponent("quiz_questions.json")
         self.generatedIdsURL = fileSystem.metadataDirectory.appendingPathComponent("quiz_generated_notes.json")
+        load()
+    }
+    
+    /// 从本地缓存重新加载题库（元数据同步后调用）
+    func reloadFromCache() {
         load()
     }
 
     // MARK: - 持久化
 
     private func load() {
-        // 加载题目
-        if let data = try? Data(contentsOf: fileURL),
+        // 优先从本地缓存读取（通过 fileSystem）
+        // fileSystem.loadJSON 会自动处理缓存和云端同步
+        if let data = try? fileSystem.readNoteContent(from: fileURL).data(using: .utf8),
            let decoded = try? JSONDecoder().decode([Question].self, from: data) {
             questions = decoded
         }
-        // 加载已生成笔记 ID
-        if let data = try? Data(contentsOf: generatedIdsURL),
+        if let data = try? fileSystem.readNoteContent(from: generatedIdsURL).data(using: .utf8),
            let decoded = try? JSONDecoder().decode([UUID].self, from: data) {
             generatedNoteIds = Set(decoded)
         }
     }
 
     private func save() {
-        if let data = try? JSONEncoder().encode(questions) {
-            try? data.write(to: fileURL, options: .atomic)
+        if let data = try? JSONEncoder().encode(questions),
+           let str = String(data: data, encoding: .utf8) {
+            try? fileSystem.writeNoteContent(str, to: fileURL)
         }
-        if let data = try? JSONEncoder().encode(Array(generatedNoteIds)) {
-            try? data.write(to: generatedIdsURL, options: .atomic)
+        if let data = try? JSONEncoder().encode(Array(generatedNoteIds)),
+           let str = String(data: data, encoding: .utf8) {
+            try? fileSystem.writeNoteContent(str, to: generatedIdsURL)
         }
     }
 

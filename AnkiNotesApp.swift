@@ -178,6 +178,20 @@ final class AppState: ObservableObject {
         iCloudContainerAvailable = (activeFS as? ICloudFS)?.isAvailable ?? false
         providerStatus = summarizeStatus()
         refreshStats()
+        // 6) 后台异步从云端拉取元数据到本地缓存
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self = self, let fs = self.activeFS else { return }
+            let pulled = MetadataSyncService.shared.pullFromCloud(cloudFS: fs)
+            if pulled > 0 {
+                print("📥 启动时元数据同步: 拉取 \(pulled) 个文件")
+                // 拉取后重新加载 Storage 和 Quiz 数据
+                DispatchQueue.main.async {
+                    self.storage.reloadFromCache()
+                    self.quizService.reloadFromCache()
+                    self.refreshStats()
+                }
+            }
+        }
         isBootstrapped = true
     }
 
@@ -342,16 +356,37 @@ final class AppState: ObservableObject {
                     self.storage.triggerRefresh()
                 }
             }
+            // 同步前：从云端拉取元数据到本地缓存
+            if let fs = self.activeFS {
+                let pulled = MetadataSyncService.shared.pullFromCloud(cloudFS: fs)
+                if pulled > 0 {
+                    print("📥 同步前元数据拉取: \(pulled) 个文件")
+                    self.storage.reloadFromCache()
+                    self.quizService.reloadFromCache()
+                }
+            }
             // 从云端扫描并导入到本地
             let report = self.storage.importFromCloud()
+            // 同步后：推送本地元数据到云端
+            if let fs = self.activeFS {
+                let pushed = MetadataSyncService.shared.pushToCloud(cloudFS: fs)
+                if pushed > 0 {
+                    print("📤 同步后元数据推送: \(pushed) 个文件")
+                }
+            }
             DispatchQueue.main.async {
                 if !silent {
                     if report.scannedMarkdownFiles == 0 {
                         self.providerStatus = "⚠️ 云端 Notes 目录没有发现 .md 文件。请确认笔记放在了坚果云的 Notes/ 目录下。"
                     } else {
-                        self.providerStatus = "✅ 同步完成：新增 \(report.importedCount)，跳过 \(report.skippedCount)，失败 \(report.failedCount)，扫描到 \(report.scannedMarkdownFiles) 个 .md 文件"
+                        var status = "✅ 同步完成：新增 \(report.importedCount)，跳过 \(report.skippedCount)，失败 \(report.failedCount)，扫描到 \(report.scannedMarkdownFiles) 个 .md 文件"
+                        if report.scannedLectureFiles > 0 {
+                            status += "，讲稿 \(report.lectureImportedCount) 个"
+                        }
+                        self.providerStatus = status
                     }
                 }
+                self.refreshStats()
                 completion?(report)
             }
         }

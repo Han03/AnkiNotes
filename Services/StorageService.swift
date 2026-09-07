@@ -25,6 +25,14 @@ final class StorageService: ObservableObject {
         consistencyCheck()
     }
     
+    /// 从本地缓存重新加载所有元数据（元数据同步后调用）
+    func reloadFromCache() {
+        folders = fileSystem.loadFolders()
+        noteMetas = fileSystem.loadNoteIndex()
+        reviewLogs = fileSystem.loadReviewLogs()
+        triggerRefresh()
+    }
+    
     // MARK: - 文件夹 CRUD
     
     func getAllFolders() -> [Folder] { folders.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending } }

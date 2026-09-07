@@ -17,6 +17,18 @@ final class FileSystemService {
 
     let cloudFS: CloudFileSystem
 
+    /// 本地元数据缓存目录（Library/Caches/Metadata）
+    private var localCacheDirectory: URL {
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        let dir = caches.appendingPathComponent("Metadata", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+    
+    private func localCacheURL(for url: URL) -> URL {
+        localCacheDirectory.appendingPathComponent(url.lastPathComponent)
+    }
+    
     init(cloudFS: CloudFileSystem) {
         self.cloudFS = cloudFS
     }
@@ -209,12 +221,22 @@ final class FileSystemService {
     // MARK: - 通用 JSON 工具
 
     private func loadJSON<T: Decodable>(from url: URL, defaultValue: T) -> T {
+        // 优先从本地缓存读取
+        let cacheURL = localCacheURL(for: url)
+        if let cacheData = try? Data(contentsOf: cacheURL),
+           let decoded = try? JSONDecoder().decode(T.self, from: cacheData) {
+            return decoded
+        }
+        // 缓存不存在，从云端读取并写入缓存
         guard cloudFS.fileExists(at: url),
               let data = try? cloudFS.readData(at: url) else {
             return defaultValue
         }
         do {
-            return try JSONDecoder().decode(T.self, from: data)
+            let decoded = try JSONDecoder().decode(T.self, from: data)
+            // 写入本地缓存
+            try? data.write(to: cacheURL, options: .atomic)
+            return decoded
         } catch {
             print("⚠️ JSON 解码失败 \(url.lastPathComponent): \(error)")
             return defaultValue
@@ -224,9 +246,20 @@ final class FileSystemService {
     private func saveJSON<T: Encodable>(_ value: T, to url: URL) {
         do {
             let data = try JSONEncoder().encode(value)
-            try cloudFS.writeData(data, to: url)
+            // 1. 先写本地缓存（保证快速读取）
+            let cacheURL = localCacheURL(for: url)
+            try data.write(to: cacheURL, options: .atomic)
+            // 2. 异步写云端（不阻塞主线程）
+            DispatchQueue.global(qos: .utility).async { [weak self] in
+                guard let self = self else { return }
+                do {
+                    try self.cloudFS.writeData(data, to: url)
+                } catch {
+                    print("⚠️ JSON 云端写入失败 \(url.lastPathComponent): \(error)")
+                }
+            }
         } catch {
-            print("⚠️ JSON 写入失败 \(url.lastPathComponent): \(error)")
+            print("⚠️ JSON 缓存写入失败 \(url.lastPathComponent): \(error)")
         }
     }
 }
