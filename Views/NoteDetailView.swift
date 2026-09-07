@@ -85,9 +85,9 @@ struct NoteDetailView: View {
                     ToolbarItem(placement: .topBarTrailing) {
                         Menu {
                             // 阅读讲稿按钮（只有有讲稿时显示）
-                            if let storage = appState.storage, let n = note, storage.hasLecture(for: n) {
+                            if let storage = appState.storage, storage.hasLecture(for: note) {
                                 Button {
-                                    openLecture(note: n)
+                                    openLecture(note: note)
                                 } label: {
                                     Label("阅读讲稿", systemImage: "book.closed")
                                 }
