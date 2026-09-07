@@ -12,6 +12,7 @@ struct LectureReaderView: View {
     @Environment(\.dismiss) private var dismiss
     
     let note: Note
+    let folderPath: String
     let lectureContent: String
     
     var body: some View {
@@ -22,7 +23,7 @@ struct LectureReaderView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(note.title)
                             .font(.headline)
-                        if let folderPath = note.folderPath {
+                        if !folderPath.isEmpty {
                             Text(folderPath)
                                 .font(.caption)
                                 .foregroundColor(.secondary)

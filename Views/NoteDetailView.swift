@@ -74,7 +74,11 @@ struct NoteDetailView: View {
                 // 讲稿阅读界面
                 .sheet(isPresented: $showLecture) {
                     if let n = note, let content = lectureContent {
-                        LectureReaderView(note: n, lectureContent: content)
+                        LectureReaderView(
+                            note: n,
+                            folderPath: appState.storage?.getNoteFolderPath(for: n) ?? "",
+                            lectureContent: content
+                        )
                     }
                 }
                 .toolbar {
