@@ -258,6 +258,18 @@ final class StorageService: ObservableObject {
         return getFolderPath(for: note.folderId)
     }
     
+    // MARK: - 课堂讲稿
+    
+    /// 检查笔记是否有对应的课堂讲稿
+    func hasLecture(for note: Note) -> Bool {
+        fileSystem.lectureExists(folderId: note.folderId, title: note.title, folders: folders)
+    }
+    
+    /// 读取课堂讲稿内容
+    func readLecture(for note: Note) throws -> String {
+        try fileSystem.readLecture(folderId: note.folderId, title: note.title, folders: folders)
+    }
+    
     @discardableResult
     func createNote(title: String, folderId: UUID?, markdownContent: String = "", tags: [String] = [], skipCloudSync: Bool = false) -> Note {
         let note = Note(
@@ -499,7 +511,51 @@ final class StorageService: ObservableObject {
         }
         persistFolders()
         persistNoteIndex()
+        
+        // 同步课堂讲稿（Lecture 目录下的 .txt 文件）
+        syncLecturesFromCloud(cloud: cloud, report: &report)
+        
         return report
+    }
+    
+    /// 从云端同步课堂讲稿
+    private func syncLecturesFromCloud(cloud: CloudFileSystem, report: inout ImportReport) {
+        let lectureRoot = cloud.rootDirectory.appendingPathComponent("Lecture", isDirectory: true)
+        var lectureFiles: [URL] = []
+        collectFilesFromFS(cloud, at: lectureRoot, extensions: ["txt"], skipNames: [], into: &lectureFiles)
+        report.scannedLectureFiles = lectureFiles.count
+        for srcURL in lectureFiles {
+            do {
+                let relativeComponents = relativePathComponents(of: srcURL, from: lectureRoot)
+                let folderComponents = Array(relativeComponents.dropLast())
+                let fileName = srcURL.lastPathComponent
+                let title = parseTitleFromFileName(fileName)
+                // 找到对应的文件夹
+                let folderId = getFolderId(for: folderComponents)
+                // 保存讲稿到本地
+                let rawBody = try cloud.readData(at: srcURL)
+                let bodyStr = String(data: rawBody, encoding: .utf8) ?? ""
+                _ = try? fileSystem.writeLecture(bodyStr, folderId: folderId, title: title, folders: folders)
+                report.lectureImportedCount += 1
+            } catch {
+                report.lectureFailedCount += 1
+            }
+        }
+    }
+    
+    /// 根据路径组件查找文件夹 ID
+    private func getFolderId(for pathComponents: [String]) -> UUID? {
+        guard !pathComponents.isEmpty else { return nil }
+        var currentId: UUID? = nil
+        for name in pathComponents {
+            let safeName = fileSystem.sanitizeFileName(name)
+            if let found = folders.first(where: { $0.parentId == currentId && $0.name == safeName }) {
+                currentId = found.id
+            } else {
+                return nil
+            }
+        }
+        return currentId
     }
 
     /// 从云端同步单个笔记（打开编辑前调用，减少冲突）
@@ -578,6 +634,10 @@ final class StorageService: ObservableObject {
 
     /// 从指定 FS 递归扫描 .md 文件
     private func collectMarkdownFilesFromFS(_ fs: CloudFileSystem, at url: URL, skipNames: Set<String>, into result: inout [URL]) {
+        collectFilesFromFS(fs, at: url, extensions: ["md", "markdown"], skipNames: skipNames, into: &result)
+    }
+    
+    private func collectFilesFromFS(_ fs: CloudFileSystem, at url: URL, extensions: [String], skipNames: Set<String>, into result: inout [URL]) {
         let children: [URL]
         do { children = try fs.contentsOfDirectory(at: url) } catch { return }
         for child in children {
@@ -586,10 +646,10 @@ final class StorageService: ObservableObject {
             var subChildren: [URL] = []
             do { subChildren = try fs.contentsOfDirectory(at: child) } catch {}
             let ext = child.pathExtension.lowercased()
-            if ext == "md" || ext == "markdown" {
+            if extensions.contains(ext) {
                 result.append(child)
             } else if !subChildren.isEmpty {
-                collectMarkdownFilesFromFS(fs, at: child, skipNames: skipNames, into: &result)
+                collectFilesFromFS(fs, at: child, extensions: extensions, skipNames: skipNames, into: &result)
             }
         }
     }
@@ -669,6 +729,9 @@ final class StorageService: ObservableObject {
         var failedCount: Int = 0
         var folderCreatedCount: Int = 0
         var scannedMarkdownFiles: Int = 0
+        var scannedLectureFiles: Int = 0
+        var lectureImportedCount: Int = 0
+        var lectureFailedCount: Int = 0
         var messages: [String] = []   // 简单说明 / 错误 / 导入的笔记标题样例 (最多前 10)
         var warningMessages: [String] = [] // 警告（如空文件）
     }

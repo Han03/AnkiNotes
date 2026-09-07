@@ -76,7 +76,7 @@ struct FolderBrowserView: View {
                         NavigationLink {
                             NoteDetailView(noteId: note.id)
                         } label: {
-                            NoteRow(note: note, folderPath: storage.getNoteFolderPath(for: note), hasQuestions: appState.quizService.generatedNoteIds.contains(note.id))
+                            NoteRow(note: note, folderPath: storage.getNoteFolderPath(for: note), hasQuestions: appState.quizService.generatedNoteIds.contains(note.id), hasLecture: storage.hasLecture(for: note))
                         }
                         .swipeActions(edge: .leading) {
                             Button {
@@ -403,6 +403,7 @@ private struct NoteRow: View {
     let note: Note
     let folderPath: String
     let hasQuestions: Bool
+    let hasLecture: Bool
     
     var body: some View {
         HStack(spacing: 12) {
@@ -435,6 +436,15 @@ private struct NoteRow: View {
                             .padding(.horizontal, 6).padding(.vertical, 2)
                             .background(Color.purple.opacity(0.15))
                             .foregroundColor(.purple)
+                            .cornerRadius(4)
+                    }
+                    // 有讲稿标识：橙色"稿"字
+                    if hasLecture {
+                        Text("稿")
+                            .textStyle(.subsectionTitle)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Color.orange.opacity(0.15))
+                            .foregroundColor(.orange)
                             .cornerRadius(4)
                     }
                     Text(dueText)

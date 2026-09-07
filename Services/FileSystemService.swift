@@ -33,6 +33,13 @@ final class FileSystemService {
         return dir
     }
 
+    /// 课堂讲稿总目录（root/Lecture）
+    var lecturesRootDirectory: URL {
+        let dir = rootDirectory.appendingPathComponent("Lecture", isDirectory: true)
+        try? cloudFS.createDirectoryIfNeeded(at: dir)
+        return dir
+    }
+
     /// JSON 索引目录（root/.metadata，iCloud 下也会被自动同步，因为不是点开头会上传；
     /// 但我们在设置 URLResourceValues 隐藏仅是为了文件 App 不显示它）
     var metadataDirectory: URL {
@@ -64,6 +71,21 @@ final class FileSystemService {
         try? cloudFS.createDirectoryIfNeeded(at: currentURL)
         let safeTitle = sanitizeFileName(title)
         let fileName = "\(safeTitle).md"
+        return currentURL.appendingPathComponent(fileName)
+    }
+
+    /// 讲稿文件 URL（与笔记相同路径和名称，扩展名为 .txt）
+    func lectureFileURL(folderId: UUID?, title: String, folders: [Folder]) -> URL {
+        var currentURL = lecturesRootDirectory
+        if let folderId = folderId {
+            let pathComponents = buildFolderPath(folderId: folderId, folders: folders)
+            for folderName in pathComponents.reversed() {
+                currentURL = currentURL.appendingPathComponent(folderName, isDirectory: true)
+            }
+        }
+        try? cloudFS.createDirectoryIfNeeded(at: currentURL)
+        let safeTitle = sanitizeFileName(title)
+        let fileName = "\(safeTitle).txt"
         return currentURL.appendingPathComponent(fileName)
     }
 
@@ -101,6 +123,30 @@ final class FileSystemService {
             throw NSError(domain: "FileSystemService", code: -3, userInfo: [NSLocalizedDescriptionKey: "Markdown 文件不是有效的 UTF-8 编码"])
         }
         return str
+    }
+
+    // MARK: - 讲稿 IO
+
+    func lectureExists(folderId: UUID?, title: String, folders: [Folder]) -> Bool {
+        let url = lectureFileURL(folderId: folderId, title: title, folders: folders)
+        return cloudFS.fileExists(at: url)
+    }
+
+    func readLecture(folderId: UUID?, title: String, folders: [Folder]) throws -> String {
+        let url = lectureFileURL(folderId: folderId, title: title, folders: folders)
+        let data = try cloudFS.readData(at: url)
+        guard let str = String(data: data, encoding: .utf8) else {
+            throw NSError(domain: "FileSystemService", code: -4, userInfo: [NSLocalizedDescriptionKey: "讲稿文件不是有效的 UTF-8 编码"])
+        }
+        return str
+    }
+
+    func writeLecture(_ content: String, folderId: UUID?, title: String, folders: [Folder]) throws {
+        let url = lectureFileURL(folderId: folderId, title: title, folders: folders)
+        guard let data = content.data(using: .utf8) else {
+            throw NSError(domain: "FileSystemService", code: -5, userInfo: [NSLocalizedDescriptionKey: "讲稿内容转 UTF-8 失败"])
+        }
+        try cloudFS.writeData(data, to: url)
     }
 
     func deleteNoteFile(at url: URL) throws {

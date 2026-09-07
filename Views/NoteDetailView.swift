@@ -20,6 +20,8 @@ struct NoteDetailView: View {
     @State private var knowledgePoints: [KnowledgePoint] = []  // 已提取的知识点
     @State private var selectedKnowledgePoint: KnowledgePoint? = nil  // 选中的知识点（用于弹出详解）
     @State private var isExtractingKnowledge = false  // 正在提取知识点
+    @State private var showLecture = false  // 是否显示讲稿阅读页面
+    @State private var lectureContent: String? = nil  // 讲稿内容
     
     var body: some View {
         Group {
@@ -69,9 +71,23 @@ struct NoteDetailView: View {
                         config: appState.bailianConfig
                     )
                 }
+                // 讲稿阅读界面
+                .sheet(isPresented: $showLecture) {
+                    if let n = note, let content = lectureContent {
+                        LectureReaderView(note: n, lectureContent: content)
+                    }
+                }
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         Menu {
+                            // 阅读讲稿按钮（只有有讲稿时显示）
+                            if let storage = appState.storage, let n = note, storage.hasLecture(for: n) {
+                                Button {
+                                    openLecture(note: n)
+                                } label: {
+                                    Label("阅读讲稿", systemImage: "book.closed")
+                                }
+                            }
                             Button {
                                 // 打开编辑前先单独同步该笔记，减少冲突
                                 isSyncingNote = true
@@ -511,6 +527,19 @@ struct FlexibleView<Data: RandomAccessCollection, Content: View>: View where Dat
                 binding.wrappedValue = rect.size.height
             }
             return .clear
+        }
+    }
+    
+    // MARK: - 讲稿
+    
+    private func openLecture(note: Note) {
+        guard let storage = appState.storage else { return }
+        do {
+            lectureContent = try storage.readLecture(for: note)
+            showLecture = true
+        } catch {
+            lectureContent = "读取讲稿失败：\(error.localizedDescription)"
+            showLecture = true
         }
     }
 }

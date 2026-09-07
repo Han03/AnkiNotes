@@ -25,6 +25,7 @@
 		ANReviewHome /* ReviewHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANReviewHomeRef /* ReviewHomeView.swift */; };
 		ANReviewSession /* ReviewSessionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANReviewSessionRef /* ReviewSessionView.swift */; };
 		ANReviewQuiz /* ReviewQuizView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANReviewQuizRef /* ReviewQuizView.swift */; };
+		ANLectureReaderView /* LectureReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANLectureReaderViewRef /* LectureReaderView.swift */; };
 		ANKnowledgeExplainView /* KnowledgeExplainView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANKnowledgeExplainViewRef /* KnowledgeExplainView.swift */; };
 		ANKnowledgeService /* KnowledgeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANKnowledgeServiceRef /* KnowledgeService.swift */; };
 		ANKnowledgePoint /* KnowledgePoint.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANKnowledgePointRef /* KnowledgePoint.swift */; };
@@ -56,6 +57,7 @@
 		ANReviewHomeRef /* ReviewHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewHomeView.swift; sourceTree = "<group>"; };
 		ANReviewSessionRef /* ReviewSessionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewSessionView.swift; sourceTree = "<group>"; };
 		ANReviewQuizRef /* ReviewQuizView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewQuizView.swift; sourceTree = "<group>"; };
+		ANLectureReaderViewRef /* LectureReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LectureReaderView.swift; sourceTree = "<group>"; };
 		ANKnowledgeExplainViewRef /* KnowledgeExplainView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnowledgeExplainView.swift; sourceTree = "<group>"; };
 		ANKnowledgeServiceRef /* KnowledgeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnowledgeService.swift; sourceTree = "<group>"; };
 		ANKnowledgePointRef /* KnowledgePoint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnowledgePoint.swift; sourceTree = "<group>"; };
@@ -140,6 +142,7 @@
 				ANSettRef /* SettingsView.swift */,
 			ANQuizHomeRef /* QuizHomeView.swift */,
 			ANQuizSessionRef /* QuizSessionView.swift */,
+				ANLectureReaderViewRef /* LectureReaderView.swift */,
 				ANKnowledgeExplainViewRef /* KnowledgeExplainView.swift */,
 			);
 			path = Views;
@@ -259,6 +262,7 @@
 			ANQuizSession /* QuizSessionView.swift in Sources */,
 			ANKnowledgePoint /* KnowledgePoint.swift in Sources */,
 			ANKnowledgeService /* KnowledgeService.swift in Sources */,
+			ANLectureReaderView /* LectureReaderView.swift in Sources */,
 			ANKnowledgeExplainView /* KnowledgeExplainView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
