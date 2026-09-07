@@ -73,10 +73,10 @@ struct NoteDetailView: View {
                 }
                 // 讲稿阅读界面
                 .sheet(isPresented: $showLecture) {
-                    if let n = note, let content = lectureContent {
+                    if let content = lectureContent {
                         LectureReaderView(
-                            note: n,
-                            folderPath: appState.storage?.getNoteFolderPath(for: n) ?? "",
+                            note: note,
+                            folderPath: appState.storage?.getNoteFolderPath(for: note) ?? "",
                             lectureContent: content
                         )
                     }
