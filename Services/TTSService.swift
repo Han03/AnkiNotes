@@ -334,7 +334,8 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
             audioPlayer?.play()
         } catch {
             // 播放失败，降级到 iOS 原生
-            if let sentence = currentText.isEmpty ? sentences[currentSentenceIndex] : currentText {
+            let sentence = currentText.isEmpty ? (currentSentenceIndex < sentences.count ? sentences[currentSentenceIndex] : "") : currentText
+            if !sentence.isEmpty {
                 speakiOSNative(sentence)
             }
         }
