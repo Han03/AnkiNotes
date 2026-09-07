@@ -549,7 +549,8 @@ final class StorageService: ObservableObject {
         var currentId: UUID? = nil
         for name in pathComponents {
             let safeName = fileSystem.sanitizeFileName(name)
-            if let found = folders.first(where: { $0.parentId == currentId && $0.name == safeName }) {
+            // 不区分大小写匹配，与 getOrCreateFolder 保持一致
+            if let found = folders.first(where: { $0.parentId == currentId && $0.name.lowercased() == safeName.lowercased() }) {
                 currentId = found.id
             } else {
                 return nil
@@ -909,9 +910,11 @@ final class StorageService: ObservableObject {
     /// 从文件名提取标题（去掉 UUID 前缀、.md/.markdown 后缀、去除非法字符占位、去前后空格）
     private func parseTitleFromFileName(_ fileName: String) -> String {
         var s = fileName
-        // 去掉 .md / .markdown
+        // 去掉 .md / .markdown / .txt 后缀
         if s.lowercased().hasSuffix(".markdown") {
             s = String(s.dropLast(".markdown".count))
+        } else if s.lowercased().hasSuffix(".txt") {
+            s = String(s.dropLast(4))
         } else if s.lowercased().hasSuffix(".md") {
             s = String(s.dropLast(3))
         }
