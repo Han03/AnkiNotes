@@ -369,6 +369,19 @@ struct NoteDetailView: View {
             }
         )
     }
+    
+    // MARK: - 讲稿
+    
+    private func openLecture(note: Note) {
+        guard let storage = appState.storage else { return }
+        do {
+            lectureContent = try storage.readLecture(for: note)
+            showLecture = true
+        } catch {
+            lectureContent = "读取讲稿失败：\(error.localizedDescription)"
+            showLecture = true
+        }
+    }
 }
 
 // MARK: - InfoChip
@@ -527,19 +540,6 @@ struct FlexibleView<Data: RandomAccessCollection, Content: View>: View where Dat
                 binding.wrappedValue = rect.size.height
             }
             return .clear
-        }
-    }
-    
-    // MARK: - 讲稿
-    
-    private func openLecture(note: Note) {
-        guard let storage = appState.storage else { return }
-        do {
-            lectureContent = try storage.readLecture(for: note)
-            showLecture = true
-        } catch {
-            lectureContent = "读取讲稿失败：\(error.localizedDescription)"
-            showLecture = true
         }
     }
 }
