@@ -348,20 +348,38 @@ private struct TableView: View {
     var bodyFont: Font
     var textColor: Color
     
+    // 计算每列的最小宽度（表头和所有数据行中的最大值）
+    private var columnMinWidths: [CGFloat] {
+        var widths = Array(repeating: CGFloat(80), count: max(headers.count, rows.first?.count ?? 0))
+        // 表头宽度估算
+        for (i, header) in headers.enumerated() {
+            let w = CGFloat(header.count) * 14 + 24  // 估算字符宽度 + padding
+            widths[i] = max(widths[i], w)
+        }
+        // 数据行宽度估算
+        for row in rows {
+            for (i, cell) in row.enumerated() where i < widths.count {
+                let w = CGFloat(cell.count) * 12 + 24
+                widths[i] = max(widths[i], w)
+            }
+        }
+        return widths
+    }
+    
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             VStack(alignment: .leading, spacing: 0) {
                 // 表头
                 HStack(spacing: 0) {
-                    ForEach(Array(headers.enumerated()), id: \.offset) { _, header in
+                    ForEach(Array(headers.enumerated()), id: \.offset) { colIdx, header in
                         Text(header)
                             .font(bodyFont.bold())
                             .foregroundColor(textColor)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 8)
-                            .frame(minWidth: 80, alignment: .leading)
+                            .frame(width: columnMinWidths[colIdx], alignment: .leading)
                             .background(Color.secondary.opacity(0.15))
-                        if header != headers.last {
+                        if colIdx < headers.count - 1 {
                             Rectangle()
                                 .fill(Color.secondary.opacity(0.3))
                                 .frame(width: 1)
@@ -379,7 +397,7 @@ private struct TableView: View {
                             InlineMarkdownText(text: cell, font: bodyFont, color: textColor)
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 8)
-                                .frame(minWidth: 80, alignment: .leading)
+                                .frame(width: colIdx < columnMinWidths.count ? columnMinWidths[colIdx] : 80, alignment: .leading)
                             if colIdx < row.count - 1 {
                                 Rectangle()
                                     .fill(Color.secondary.opacity(0.2))

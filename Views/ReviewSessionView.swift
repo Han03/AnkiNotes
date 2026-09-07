@@ -99,10 +99,15 @@ struct ReviewSessionView: View {
                 .padding(.vertical, 8)
             
             // 笔记内容区（直接展示完整内容，取消翻卡机制）
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    // 笔记标题和状态
-                    HStack(spacing: 8) {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        // 顶部锚点，用于重置滚动位置
+                        Color.clear
+                            .frame(height: 1)
+                            .id("top")
+                        // 笔记标题和状态
+                        HStack(spacing: 8) {
                         stateLabel(note.srs.cardState)
                         Text(note.title)
                             .font(.headline)
@@ -124,10 +129,17 @@ struct ReviewSessionView: View {
                             selectedKnowledgePoint = point
                         }
                     )
+                    }
+                    .padding(20)
                 }
-                .padding(20)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // 切换笔记时重置滚动位置到顶部
+                .onChange(of: currentIndex) { _ in
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        proxy.scrollTo("top", anchor: .top)
+                    }
+                }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(
                 RoundedRectangle(cornerRadius: 16)
                     .fill(Color(.systemBackground))
