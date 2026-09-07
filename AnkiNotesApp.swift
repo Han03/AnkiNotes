@@ -94,6 +94,17 @@ final class AppState: ObservableObject {
     }
     private static let keyBailianConfig = "bailian_config"
 
+    // MARK: - TTS 语音合成配置
+    @Published var ttsConfig: TTSConfig = TTSConfig() {
+        didSet {
+            if let data = try? JSONEncoder().encode(ttsConfig) {
+                UserDefaults.standard.set(data, forKey: Self.keyTTSConfig)
+            }
+            TTSService.shared.updateConfig(ttsConfig)
+        }
+    }
+    private static let keyTTSConfig = "tts_config"
+
     // MARK: - 题库
     private(set) var quizService: QuizService!
     @Published var isGeneratingQuestions = false
@@ -152,6 +163,12 @@ final class AppState: ObservableObject {
            let cfg = try? JSONDecoder().decode(BailianConfig.self, from: data) {
             bailianConfig = cfg
         }
+        // 加载 TTS 配置
+        if let data = UserDefaults.standard.data(forKey: Self.keyTTSConfig),
+           let cfg = try? JSONDecoder().decode(TTSConfig.self, from: data) {
+            ttsConfig = cfg
+        }
+        TTSService.shared.updateConfig(ttsConfig)
         // 3) 恢复文字大小
         let storedScale = UserDefaults.standard.double(forKey: Self.keyTextScale)
         textScale = (storedScale > 0.1 && storedScale < 5) ? storedScale : 1.0

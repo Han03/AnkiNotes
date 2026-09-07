@@ -19,6 +19,7 @@ struct SettingsView: View {
             VStack(spacing: 16) {
                 cloudProviderSection
                 bailianSection
+                ttsSection
                 textScaleSection
                 aboutSection
             }
@@ -323,6 +324,73 @@ struct SettingsView: View {
                         .textStyle(.secondaryText)
                         .foregroundColor(.green)
                 }
+            }
+        }
+        .padding(18)
+        .background(RoundedRectangle(cornerRadius: 18).fill(Color(.systemBackground)))
+        .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
+    }
+
+    // MARK: - TTS 语音合成配置
+    private var ttsSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Image(systemName: "speaker.wave.2.fill")
+                    .foregroundColor(.orange)
+                    .font(.title2)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("语音朗读（TTS）")
+                        .textStyle(.subsectionTitle)
+                    Text("讲稿阅读时使用的语音合成方案")
+                        .textStyle(.secondaryText)
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+            }
+
+            // TTS 方案选择
+            VStack(alignment: .leading, spacing: 6) {
+                Text("朗读方案")
+                    .textStyle(.secondaryText)
+                    .foregroundColor(.secondary)
+                Picker("朗读方案", selection: $appState.ttsConfig.provider) {
+                    ForEach(TTSProvider.allCases) { provider in
+                        Text(provider.displayName).tag(provider)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+
+            // Edge-TTS 音色选择
+            if appState.ttsConfig.provider == .edgeTTS {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Edge-TTS 音色")
+                        .textStyle(.secondaryText)
+                        .foregroundColor(.secondary)
+                    Picker("音色", selection: $appState.ttsConfig.edgeVoice) {
+                        ForEach(EdgeTTSVoice.allCases) { voice in
+                            Text(voice.displayName).tag(voice.rawValue)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+            }
+
+            // 语速调节
+            VStack(alignment: .leading, spacing: 6) {
+                Text("语速：\(String(format: "%.1f", appState.ttsConfig.rate))x")
+                    .textStyle(.secondaryText)
+                    .foregroundColor(.secondary)
+                Slider(value: $appState.ttsConfig.rate, in: 0.5...2.0, step: 0.1)
+            }
+
+            // 说明
+            HStack {
+                Image(systemName: "info.circle")
+                    .foregroundColor(.secondary)
+                Text(appState.ttsConfig.provider == .edgeTTS ? "Edge-TTS 需联网，音质较好；iOS 原生可离线使用" : "iOS 原生 TTS 完全离线，使用系统自带音色")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
         }
         .padding(18)
