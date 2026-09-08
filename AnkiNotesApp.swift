@@ -408,11 +408,19 @@ final class AppState: ObservableObject {
                     self.providerStatus = "✅ 获取云端锁成功，开始同步..."
                 }
             }
+            // 同步前：先备份本地 noteMetas（包含未同步的 SRS 复习记录）
+            let localNoteMetasBackup = MetadataSyncService.shared.readLocalNoteMetas()
             // 同步前：从云端拉取元数据和知识点缓存到本地缓存（不加载到内存）
             // 注意：不调用 reloadFromCache，避免云端索引提前加载导致 importFromCloud 全部判定为重复跳过
             let pulled = MetadataSyncService.shared.pullFromCloud(cloudFS: fs)
             if pulled > 0 {
                 print("📥 同步前元数据拉取到缓存: \(pulled) 个文件")
+            }
+            // 智能合并 SRS 数据：基于 updatedAt 合并本地备份和云端数据，避免多端复习时覆盖
+            if !localNoteMetasBackup.isEmpty {
+                let cloudNoteMetas = MetadataSyncService.shared.readLocalNoteMetas()
+                let mergedNoteMetas = MetadataSyncService.shared.mergeNoteMetas(local: localNoteMetasBackup, cloud: cloudNoteMetas)
+                MetadataSyncService.shared.writeLocalNoteMetas(mergedNoteMetas)
             }
             // 拉取知识点缓存
             let knowledgePulled = MetadataSyncService.shared.pullKnowledgeCache(cloudFS: fs)

@@ -584,6 +584,39 @@ final class StorageService: ObservableObject {
         return report
     }
     
+    /// 智能合并题目：基于 updatedAt 合并本地和云端题目，避免多端做题时覆盖答题记录
+    private func mergeQuestions(local: [Question], cloud: [Question]) -> [Question] {
+        var merged: [UUID: Question] = [:]
+        
+        // 先加入云端题目
+        for q in cloud {
+            merged[q.id] = q
+        }
+        
+        // 再加入本地题目，比较 updatedAt 保留较新的
+        for localQ in local {
+            if let cloudQ = merged[localQ.id] {
+                // 两端都有，比较 updatedAt，保留较新的答题记录
+                if localQ.updatedAt >= cloudQ.updatedAt {
+                    merged[localQ.id] = localQ
+                }
+                // 否则保留云端的
+            } else {
+                // 只有本地有，保留本地
+                merged[localQ.id] = localQ
+            }
+        }
+        
+        let result = Array(merged.values)
+        let localOnly = local.filter { !cloud.contains($0.id) }.count
+        let cloudOnly = cloud.filter { !local.contains($0.id) }.count
+        let both = local.filter { cloud.contains($0.id) }.count
+        if !local.isEmpty || !cloud.isEmpty {
+            print("🔄 题目数据合并: 本地\(local.count)题 + 云端\(cloud.count)题 → 合并\(result.count)题 (仅本地\(localOnly), 仅云端\(cloudOnly), 两端都有\(both))")
+        }
+        return result
+    }
+
     /// 从云端同步课堂讲稿
     private func syncLecturesFromCloud(cloud: CloudFileSystem, report: inout ImportReport) {
         let lectureRoot = cloud.rootDirectory.appendingPathComponent("Lecture", isDirectory: true)
@@ -625,10 +658,14 @@ final class StorageService: ObservableObject {
                 let title = fileName.lowercased().hasSuffix(".json") ? String(fileName.dropLast(5)) : fileName
                 // 找到对应的文件夹
                 let folderId = getFolderId(for: folderComponents)
-                // 保存题库到本地
+                // 智能合并答题记录：基于 updatedAt 合并本地和云端题目，避免多端做题时覆盖
                 let rawBody = try cloud.readData(at: srcURL)
-                if let questions = try? JSONDecoder().decode([Question].self, from: rawBody) {
-                    _ = try? fileSystem.writeQuestions(questions, folderId: folderId, title: title, folders: folders, skipCloudSync: true)
+                if let cloudQuestions = try? JSONDecoder().decode([Question].self, from: rawBody) {
+                    // 先读取本地题目（如果存在）
+                    let localQuestions = (try? fileSystem.readQuestions(folderId: folderId, title: title, folders: folders)) ?? []
+                    // 合并：按题目 ID 比较 updatedAt，保留较新的答题记录
+                    let mergedQuestions = mergeQuestions(local: localQuestions, cloud: cloudQuestions)
+                    _ = try? fileSystem.writeQuestions(mergedQuestions, folderId: folderId, title: title, folders: folders, skipCloudSync: true)
                     report.questionImportedCount += 1
                 }
             } catch {

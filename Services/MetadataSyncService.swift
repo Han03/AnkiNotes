@@ -42,6 +42,62 @@ final class MetadataSyncService {
         localCacheDirectory.appendingPathComponent(fileName)
     }
     
+    // MARK: - 智能合并：基于时间戳合并 SRS 数据，避免多端覆盖
+    
+    /// 合并本地和云端的 noteMetas，基于 updatedAt 保留较新的数据
+    /// 解决多端同时复习时 SRS 数据被覆盖的问题
+    /// - Parameters:
+    ///   - local: 本地 noteMetas（包含未同步的复习记录）
+    ///   - cloud: 云端 noteMetas
+    /// - Returns: 合并后的 noteMetas
+    func mergeNoteMetas(local: [NoteMeta], cloud: [NoteMeta]) -> [NoteMeta] {
+        var merged: [UUID: NoteMeta] = [:]
+        
+        // 先加入云端数据
+        for noteMeta in cloud {
+            merged[noteMeta.id] = noteMeta
+        }
+        
+        // 再加入本地数据，比较 updatedAt 保留较新的
+        for localNote in local {
+            if let cloudNote = merged[localNote.id] {
+                // 两端都有，比较 updatedAt，保留较新的
+                if localNote.updatedAt >= cloudNote.updatedAt {
+                    merged[localNote.id] = localNote
+                }
+                // 否则保留云端的
+            } else {
+                // 只有本地有，保留本地
+                merged[localNote.id] = localNote
+            }
+        }
+        
+        let result = Array(merged.values)
+        let localOnly = local.filter { !cloud.contains($0.id) }.count
+        let cloudOnly = cloud.filter { !local.contains($0.id) }.count
+        let both = local.filter { cloud.contains($0.id) }.count
+        print("🔄 SRS数据合并: 本地\(local.count)篇 + 云端\(cloud.count)篇 → 合并\(result.count)篇 (仅本地\(localOnly), 仅云端\(cloudOnly), 两端都有\(both))")
+        return result
+    }
+    
+    /// 从本地缓存读取 noteMetas
+    func readLocalNoteMetas() -> [NoteMeta] {
+        let localURL = localCacheURL(for: "notes_index.json")
+        guard let data = try? Data(contentsOf: localURL),
+              let decoded = try? JSONDecoder().decode([NoteMeta].self, from: data) else {
+            return []
+        }
+        return decoded
+    }
+    
+    /// 写入 noteMetas 到本地缓存
+    func writeLocalNoteMetas(_ noteMetas: [NoteMeta]) {
+        let localURL = localCacheURL(for: "notes_index.json")
+        if let data = try? JSONEncoder().encode(noteMetas) {
+            try? data.write(to: localURL, options: .atomic)
+        }
+    }
+    
     // MARK: - Pull：从云端拉取元数据到本地缓存
     
     /// 从云端拉取所有元数据文件到本地缓存
