@@ -79,7 +79,7 @@ struct MainTabView: View {
                         Text(appState.isSilentSyncing ? "后台同步中..." : "正在同步...")
                             .font(.headline)
                             .foregroundColor(.white)
-                        Text(appState.providerStatus.isEmpty ? "正在从云端同步数据，请稍候" : appState.providerStatus)
+                        Text((appState.providerStatus ?? "").isEmpty ? "正在从云端同步数据，请稍候" : (appState.providerStatus ?? ""))
                             .font(.subheadline)
                             .foregroundColor(.white.opacity(0.8))
                             .multilineTextAlignment(.center)
