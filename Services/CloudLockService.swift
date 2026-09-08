@@ -288,6 +288,7 @@ final class CloudLockService {
             print("⚠️ 锁续期失败：不再持有锁")
             isHoldingLock = false
             currentFencingToken = 0
+            stopRenewTimer()  // 续期失败，停止续期定时器
             return false
         }
         
@@ -309,6 +310,7 @@ final class CloudLockService {
             print("⚠️ 锁续期失败: \(error.localizedDescription)")
             isHoldingLock = false
             currentFencingToken = 0
+            stopRenewTimer()  // 续期失败，停止续期定时器
             return false
         }
     }
