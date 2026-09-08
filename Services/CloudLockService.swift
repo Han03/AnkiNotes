@@ -36,21 +36,21 @@ final class CloudLockService {
     /// 锁续期定时器
     private var renewTimer: Timer?
     
-    /// 设备唯一标识（持久化到 UserDefaults）
+    /// 设备唯一标识（持久化到 Keychain，App 重装后保持不变）
     private var deviceId: String {
-        if let id = UserDefaults.standard.string(forKey: "CloudLockDeviceId") {
+        if let id = KeychainHelper.shared.get(forKey: "CloudLockDeviceId") {
             return id
         }
         let id = UUID().uuidString
-        UserDefaults.standard.set(id, forKey: "CloudLockDeviceId")
+        KeychainHelper.shared.save(id, forKey: "CloudLockDeviceId")
         return id
     }
     
-    /// fencing token 计数器（持久化，保证单调递增）
+    /// fencing token 计数器（持久化到 Keychain，保证单调递增，App 重装后不重置）
     private var nextFencingToken: Int64 {
-        let current = UserDefaults.standard.object(forKey: "CloudLockFencingToken") as? Int64 ?? 0
+        let current = Int64(KeychainHelper.shared.get(forKey: "CloudLockFencingToken") ?? "0") ?? 0
         let next = current + 1
-        UserDefaults.standard.set(next, forKey: "CloudLockFencingToken")
+        KeychainHelper.shared.save("\(next)", forKey: "CloudLockFencingToken")
         return next
     }
     
