@@ -960,32 +960,4 @@ final class StorageService: ObservableObject {
         return parentId
     }
     
-    /// 从文件名提取标题（去掉 UUID 前缀、.md/.markdown 后缀、去除非法字符占位、去前后空格）
-    private func parseTitleFromFileName(_ fileName: String) -> String {
-        var s = fileName
-        // 去掉 .md / .markdown / .txt / .json 后缀
-        if s.lowercased().hasSuffix(".markdown") {
-            s = String(s.dropLast(".markdown".count))
-        } else if s.lowercased().hasSuffix(".json") {
-            s = String(s.dropLast(5))
-        } else if s.lowercased().hasSuffix(".txt") {
-            s = String(s.dropLast(4))
-        } else if s.lowercased().hasSuffix(".md") {
-            s = String(s.dropLast(3))
-        }
-        // 去掉形如 "UUID_Title" 或 "UUIDTitle" 中的 UUID 前缀
-        // UUID 固定 36 位 8-4-4-4-12
-        if s.count > 36 {
-            let prefixPart = String(s.prefix(36))
-            let uuidRegex = #"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"#
-            if prefixPart.range(of: uuidRegex, options: .regularExpression) != nil {
-                s = String(s.dropFirst(36))
-                if s.first == "_" || s.first == "-" || s.first == " " { s = String(s.dropFirst()) }
-            }
-        }
-        // 把下划线/连字符替换成空格
-        s = s.replacingOccurrences(of: "_", with: " ")
-             .replacingOccurrences(of: "-", with: " ")
-        return s.trimmingCharacters(in: .whitespaces)
-    }
 }
