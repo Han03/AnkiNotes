@@ -651,6 +651,7 @@ final class StorageService: ObservableObject {
         var questionFiles: [URL] = []
         collectFilesFromFS(cloud, at: questionsRoot, extensions: ["json"], skipNames: [], into: &questionFiles)
         report.scannedQuestionFiles = questionFiles.count
+        print("📚 题库同步: 扫描到 \(questionFiles.count) 个题目文件")
         for srcURL in questionFiles {
             do {
                 let relativeComponents = relativePathComponents(of: srcURL, from: questionsRoot)
@@ -660,17 +661,35 @@ final class StorageService: ObservableObject {
                 let title = fileName.lowercased().hasSuffix(".json") ? String(fileName.dropLast(5)) : fileName
                 // 找到对应的文件夹
                 let folderId = getFolderId(for: folderComponents)
-                // 智能合并答题记录：基于 updatedAt 合并本地和云端题目，避免多端做题时覆盖
+                if folderId == nil && !folderComponents.isEmpty {
+                    print("⚠️ 题库同步: 文件夹未找到 \(folderComponents.joined(separator: "/"))，题目 \(title) 将写到根目录")
+                }
+                // 读取云端题目文件
                 let rawBody = try cloud.readData(at: srcURL)
-                if let cloudQuestions = try? JSONDecoder().decode([Question].self, from: rawBody) {
-                    // 先读取本地题目（如果存在）
-                    let localQuestions = (try? fileSystem.readQuestions(folderId: folderId, title: title, folders: folders)) ?? []
-                    // 合并：按题目 ID 比较 updatedAt，保留较新的答题记录
-                    let mergedQuestions = mergeQuestions(local: localQuestions, cloud: cloudQuestions)
-                    _ = try? fileSystem.writeQuestions(mergedQuestions, folderId: folderId, title: title, folders: folders, skipCloudSync: true)
+                // 解码（不使用 try?，捕获错误并打印）
+                let cloudQuestions: [Question]
+                do {
+                    cloudQuestions = try JSONDecoder().decode([Question].self, from: rawBody)
+                } catch {
+                    print("❌ 题库同步: 解码失败 \(fileName): \(error.localizedDescription)")
+                    report.questionFailedCount += 1
+                    continue
+                }
+                // 先读取本地题目（如果存在）
+                let localQuestions = (try? fileSystem.readQuestions(folderId: folderId, title: title, folders: folders)) ?? []
+                // 合并：按题目 ID 比较 updatedAt，保留较新的答题记录
+                let mergedQuestions = mergeQuestions(local: localQuestions, cloud: cloudQuestions)
+                // 写入本地（不使用 try?，捕获错误并打印）
+                do {
+                    try fileSystem.writeQuestions(mergedQuestions, folderId: folderId, title: title, folders: folders, skipCloudSync: true)
                     report.questionImportedCount += 1
+                    print("✅ 题库同步: 导入 \(title) (\(mergedQuestions.count)题)")
+                } catch {
+                    print("❌ 题库同步: 写入失败 \(title): \(error.localizedDescription)")
+                    report.questionFailedCount += 1
                 }
             } catch {
+                print("❌ 题库同步: 读取失败 \(srcURL.lastPathComponent): \(error.localizedDescription)")
                 report.questionFailedCount += 1
             }
         }

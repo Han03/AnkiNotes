@@ -70,6 +70,25 @@ struct Question: Identifiable, Codable, Hashable {
         self.updatedAt = updatedAt
     }
 
+    // MARK: - 自定义解码：兼容旧版本题目文件（缺少新增字段时使用默认值）
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        noteId = try container.decode(UUID.self, forKey: .noteId)
+        noteTitle = try container.decode(String.self, forKey: .noteTitle)
+        type = try container.decode(QuestionType.self, forKey: .type)
+        question = try container.decode(String.self, forKey: .question)
+        options = try container.decodeIfPresent([ChoiceOption].self, forKey: .options)
+        answer = try container.decode(String.self, forKey: .answer)
+        explanation = try container.decodeIfPresent(String.self, forKey: .explanation)
+        // 新增字段：旧文件可能缺少，使用默认值
+        status = try container.decodeIfPresent(QuestionStatus.self, forKey: .status) ?? .unanswered
+        answerCount = try container.decodeIfPresent(Int.self, forKey: .answerCount) ?? 0
+        correctCount = try container.decodeIfPresent(Int.self, forKey: .correctCount) ?? 0
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
+    }
+
     /// 判断用户答案是否正确
     func isCorrect(userAnswer: String) -> Bool {
         let normalizedUser = userAnswer.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
