@@ -32,7 +32,6 @@
 		ANKnowledgeExplainView /* KnowledgeExplainView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANKnowledgeExplainViewRef /* KnowledgeExplainView.swift */; };
 		ANKnowledgeService /* KnowledgeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANKnowledgeServiceRef /* KnowledgeService.swift */; };
 		ANKnowledgePoint /* KnowledgePoint.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANKnowledgePointRef /* KnowledgePoint.swift */; };
-		ANStats /* StatsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANStatsRef /* StatsView.swift */; };
 		ANSett /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANSettRef /* SettingsView.swift */; };
 		ANFrontMat /* MarkdownFrontmatterParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANFrontMatRef /* MarkdownFrontmatterParser.swift */; };
 		ANCloudProvider /* CloudProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANCloudProviderRef /* CloudProvider.swift */; };
@@ -67,7 +66,6 @@
 		ANKnowledgeExplainViewRef /* KnowledgeExplainView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnowledgeExplainView.swift; sourceTree = "<group>"; };
 		ANKnowledgeServiceRef /* KnowledgeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnowledgeService.swift; sourceTree = "<group>"; };
 		ANKnowledgePointRef /* KnowledgePoint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnowledgePoint.swift; sourceTree = "<group>"; };
-		ANStatsRef /* StatsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsView.swift; sourceTree = "<group>"; };
 		ANSettRef /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		ANSharedViewRef /* SharedViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedViews.swift; sourceTree = "<group>"; };
 		ANFrontMatRef /* MarkdownFrontmatterParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownFrontmatterParser.swift; sourceTree = "<group>"; };
@@ -147,7 +145,6 @@
 				ANReviewHomeRef /* ReviewHomeView.swift */,
 				ANReviewSessionRef /* ReviewSessionView.swift */,
 				ANReviewQuizRef /* ReviewQuizView.swift */,
-				ANStatsRef /* StatsView.swift */,
 				ANSettRef /* SettingsView.swift */,
 			ANQuizHomeRef /* QuizHomeView.swift */,
 			ANQuizSessionRef /* QuizSessionView.swift */,
@@ -261,8 +258,7 @@
 				ANReviewHome /* ReviewHomeView.swift in Sources */,
 				ANReviewSession /* ReviewSessionView.swift in Sources */,
 				ANReviewQuiz /* ReviewQuizView.swift in Sources */,
-				ANStats /* StatsView.swift in Sources */,
-				ANSett /* SettingsView.swift in Sources */,
+					ANSett /* SettingsView.swift in Sources */,
 				ANFrontMat /* MarkdownFrontmatterParser.swift in Sources */,
 				ANCloudProvider /* CloudProvider.swift in Sources */,
 			ANQuestion /* Question.swift in Sources */,

@@ -189,54 +189,6 @@ struct FolderBrowserView: View {
             }
             .hidden()
         )
-        // 下拉刷新：从云端同步笔记到本地（全局唯一同步入口）
-        .refreshable {
-            // 如果后台正在静默同步，只显示加载状态，不重复执行
-            if appState.isSilentSyncing {
-                // 等待静默同步完成
-                await withCheckedContinuation { continuation in
-                    // 轮询等待静默同步完成（最多等 30 秒）
-                    var waited = 0
-                    Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { timer in
-                        waited += 1
-                        if !appState.isSilentSyncing || waited > 60 {
-                            timer.invalidate()
-                            continuation.resume()
-                        }
-                    }
-                }
-            } else {
-                // 正常执行同步
-                await withCheckedContinuation { continuation in
-                    appState.syncFromCloud { _ in
-                        continuation.resume()
-                    }
-                }
-            }
-        }
-        // ✅ 正在同步中遮罩提示（包括静默同步）
-        .overlay {
-            if appState.isSyncing || appState.isSilentSyncing {
-                ZStack {
-                    Color.black.opacity(0.4)
-                        .ignoresSafeArea()
-                    VStack(spacing: 16) {
-                        ProgressView()
-                            .scaleEffect(1.5)
-                            .tint(.white)
-                        Text(appState.isSilentSyncing ? "后台同步中..." : "正在同步笔记...")
-                            .font(.headline)
-                            .foregroundColor(.white)
-                        Text(appState.isSilentSyncing ? "正在后台同步，请稍候" : "请稍候，正在从云端扫描并导入笔记")
-                            .font(.subheadline)
-                            .foregroundColor(.white.opacity(0.8))
-                    }
-                    .padding(24)
-                    .background(RoundedRectangle(cornerRadius: 16).fill(Color(.systemGray6).opacity(0.9)))
-                }
-                .transition(.opacity)
-            }
-        }
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Menu {
