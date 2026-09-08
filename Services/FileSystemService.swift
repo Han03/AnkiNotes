@@ -77,7 +77,7 @@ final class FileSystemService {
                 currentURL = currentURL.appendingPathComponent(folderName, isDirectory: true)
             }
         }
-        try? cloudFS.createDirectoryIfNeeded(at: currentURL)
+        try? FileManager.default.createDirectory(at: currentURL, withIntermediateDirectories: true)
         let safeTitle = sanitizeFileName(title)
         let fileName = "\(safeTitle).md"
         return currentURL.appendingPathComponent(fileName)
@@ -92,7 +92,7 @@ final class FileSystemService {
                 currentURL = currentURL.appendingPathComponent(folderName, isDirectory: true)
             }
         }
-        try? cloudFS.createDirectoryIfNeeded(at: currentURL)
+        try? FileManager.default.createDirectory(at: currentURL, withIntermediateDirectories: true)
         let safeTitle = sanitizeFileName(title)
         let fileName = "\(safeTitle).txt"
         return currentURL.appendingPathComponent(fileName)
@@ -107,7 +107,7 @@ final class FileSystemService {
                 currentURL = currentURL.appendingPathComponent(folderName, isDirectory: true)
             }
         }
-        try? cloudFS.createDirectoryIfNeeded(at: currentURL)
+        try? FileManager.default.createDirectory(at: currentURL, withIntermediateDirectories: true)
         let safeTitle = sanitizeFileName(title)
         let fileName = "\(safeTitle).json"
         return currentURL.appendingPathComponent(fileName)
@@ -156,12 +156,12 @@ final class FileSystemService {
     
     /// 异步同步文件到云端
     private func syncToCloud(data: Data, to url: URL) {
-        guard let cloudFS = cloudFS as? WebDAVFS else { return }
-        DispatchQueue.global(qos: .utility).async {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self = self else { return }
             do {
                 // 计算云端路径：把本地 Documents 路径替换为云端根路径
                 let cloudURL = self.cloudURL(forLocalURL: url)
-                try cloudFS.writeData(data, to: cloudURL)
+                try self.cloudFS.writeData(data, to: cloudURL)
             } catch {
                 print("⚠️ 云端同步失败 \(url.lastPathComponent): \(error.localizedDescription)")
             }
@@ -243,7 +243,14 @@ final class FileSystemService {
     }
 
     func deleteNoteFile(at url: URL) throws {
-        try cloudFS.removeItem(at: url)
+        // 删除本地文件
+        try? FileManager.default.removeItem(at: url)
+        // 异步删除云端
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self = self else { return }
+            let cloudURL = self.cloudURL(forLocalURL: url)
+            try? self.cloudFS.removeItem(at: cloudURL)
+        }
     }
 
     func createPhysicalFolder(named name: String, parentFolderId: UUID?, folders: [Folder]) throws -> URL {
@@ -255,12 +262,25 @@ final class FileSystemService {
             }
         }
         let dirURL = currentURL.appendingPathComponent(sanitizeFileName(name), isDirectory: true)
-        try cloudFS.createDirectoryIfNeeded(at: dirURL)
+        try FileManager.default.createDirectory(at: dirURL, withIntermediateDirectories: true)
+        // 异步创建云端目录
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self = self else { return }
+            let cloudURL = self.cloudURL(forLocalURL: dirURL)
+            try? self.cloudFS.createDirectoryIfNeeded(at: cloudURL)
+        }
         return dirURL
     }
 
     func deletePhysicalFolder(at url: URL) throws {
-        try cloudFS.removeItem(at: url)
+        // 删除本地目录
+        try? FileManager.default.removeItem(at: url)
+        // 异步删除云端目录
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self = self else { return }
+            let cloudURL = self.cloudURL(forLocalURL: url)
+            try? self.cloudFS.removeItem(at: cloudURL)
+        }
     }
     
     /// 移动/重命名物理文件夹（本地 + 云端）
@@ -268,9 +288,10 @@ final class FileSystemService {
     /// 实际的文件移动通过后续的全量同步完成
     func movePhysicalFolder(from sourceURL: URL, to destinationURL: URL) throws {
         // 确保目标目录存在
-        try cloudFS.createDirectoryIfNeeded(at: destinationURL)
-        // 本地文件系统可以直接移动
-        // 云端文件移动通过全量同步处理
+        try FileManager.default.createDirectory(at: destinationURL, withIntermediateDirectories: true)
+        // 本地移动
+        try? FileManager.default.moveItem(at: sourceURL, to: destinationURL)
+        // 云端移动通过全量同步处理
     }
 
     // MARK: - JSON 索引读写（转发到 cloudFS；失败打印警告）
