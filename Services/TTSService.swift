@@ -9,48 +9,23 @@ import Foundation
 import AVFoundation
 import CryptoKit
 
-// MARK: - Edge-TTS WebSocket 连接处理器
+// MARK: - Edge-TTS WebSocket 连接处理器（仅用于日志，不阻塞）
 
-/// Edge-TTS WebSocket 连接处理器，用于监听连接状态
+/// Edge-TTS WebSocket 连接处理器，仅用于日志记录
 final class EdgeTTSWebSocketDelegate: NSObject, URLSessionWebSocketDelegate {
-    /// 连接建立成功的信号
-    private let connectionSemaphore = DispatchSemaphore(value: 0)
-    /// 连接是否成功
-    private(set) var isConnected = false
-    /// 连接错误
-    private(set) var connectionError: Error?
-    
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol protocol: String?) {
         SyncLogger.shared.info("🔊 Edge-TTS: WebSocket 连接建立成功，协议=\(`protocol` ?? "无")")
-        isConnected = true
-        connectionSemaphore.signal()
     }
     
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
         let reasonStr = reason.flatMap { String(data: $0, encoding: .utf8) } ?? "无"
         SyncLogger.shared.info("🔊 Edge-TTS: WebSocket 连接关闭，code=\(closeCode.rawValue), reason=\(reasonStr)")
-        if !isConnected {
-            connectionError = NSError(domain: "EdgeTTS", code: Int(closeCode.rawValue), userInfo: [NSLocalizedDescriptionKey: "连接关闭: \(reasonStr)"])
-            connectionSemaphore.signal()
-        }
     }
     
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        if let error = error, !isConnected {
-            SyncLogger.shared.info("🔊 Edge-TTS: WebSocket 连接失败 - \(error.localizedDescription)")
-            connectionError = error
-            connectionSemaphore.signal()
+        if let error = error {
+            SyncLogger.shared.info("🔊 Edge-TTS: WebSocket 任务完成（错误）- \(error.localizedDescription)")
         }
-    }
-    
-    /// 等待连接建立（超时时间：10秒）
-    func waitForConnection(timeout: TimeInterval = 10) -> Bool {
-        let result = connectionSemaphore.wait(timeout: .now() + timeout)
-        if result == .timedOut {
-            SyncLogger.shared.info("🔊 Edge-TTS: 等待连接超时（\(timeout)秒）")
-            return false
-        }
-        return isConnected && connectionError == nil
     }
 }
 
@@ -191,6 +166,16 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
     // Edge-TTS WebSocket 相关
     private var edgeTTSWebSocketTask: URLSessionWebSocketTask?
     private var edgeTTSAudioData = Data()
+    
+    /// 共享的 URLSession（用于 Edge-TTS，复用连接池，避免每次创建新 session）
+    private static let edgeTTSSession: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 30
+        config.timeoutIntervalForResource = 60
+        config.httpAdditionalHeaders = [:]
+        let delegate = EdgeTTSWebSocketDelegate()
+        return URLSession(configuration: config, delegate: delegate, delegateQueue: OperationQueue.main)
+    }()
     
     @Published private(set) var isSpeaking = false
     @Published private(set) var isPaused = false
@@ -389,6 +374,16 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
     
     // MARK: - Edge-TTS (WebSocket)
     
+    /// 降级到 iOS 原生 TTS
+    private func fallbackToiOSNative(text: String) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            SyncLogger.shared.info("🔊 Edge-TTS: 降级到 iOS 原生 TTS")
+            self.actualProvider = .iOSNative
+            self.speakiOSNative(text)
+        }
+    }
+    
     private func speakEdgeTTS(_ text: String) {
         actualProvider = .edgeTTS
         let ssml = buildSSML(text: text)
@@ -399,14 +394,14 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
         edgeTTSWebSocketTask = nil
         edgeTTSAudioData = Data()
         
-        // 生成连接 ID 和请求 ID（不带连字符的全小写 UUID）
+        // 生成连接 ID 和请求 ID（不带连字符的全小写 UUID，与 Python edge-tts 库一致）
         let connectionId = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
         let requestId = connectionId
         
-        // 生成 Sec-MS-GEC token
+        // 生成 Sec-MS-GEC token（与 Python edge-tts 库的 DRM.generate_sec_ms_gec 算法完全一致）
         let secMsGec = generateSecMsGec()
         
-        // 构建完整的 WebSocket URL（包含所有必要的参数）
+        // 构建完整的 WebSocket URL（包含所有必要的参数，与 Python edge-tts 库一致）
         let urlString = "wss://\(EdgeTTSConstants.baseURL)/edge/v1" +
             "?TrustedClientToken=\(EdgeTTSConstants.trustedClientToken)" +
             "&ConnectionId=\(connectionId)" +
@@ -415,8 +410,7 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
         
         guard let url = URL(string: urlString) else {
             SyncLogger.shared.info("🔊 Edge-TTS: URL 无效，降级到 iOS 原生")
-            actualProvider = .iOSNative
-            speakiOSNative(text)
+            fallbackToiOSNative(text: text)
             return
         }
         
@@ -424,63 +418,51 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
         SyncLogger.shared.info("🔊 Edge-TTS: Sec-MS-GEC=\(secMsGec)")
         SyncLogger.shared.info("🔊 Edge-TTS: URL=\(urlString)")
         
-        // 配置 URLSession，使用 delegate 监听连接状态
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 30
-        config.timeoutIntervalForResource = 60
-        
-        let delegate = EdgeTTSWebSocketDelegate()
-        let session = URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
-        
+        // 构建请求（请求头与 Python edge-tts 库的 WSS_HEADERS + headers_with_muid 完全一致）
         var request = URLRequest(url: url)
-        // 模拟 Edge 浏览器的请求头（参考 edge-tts Python 库）
+        // User-Agent：与 Python edge-tts 库的 BASE_HEADERS 一致
         request.setValue(
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" +
             " (KHTML, like Gecko) Chrome/\(EdgeTTSConstants.chromiumMajorVersion).0.0.0 Safari/537.36" +
             " Edg/\(EdgeTTSConstants.chromiumMajorVersion).0.0.0",
             forHTTPHeaderField: "User-Agent"
         )
+        // Origin：必须是 Chrome 扩展 ID（与 Python edge-tts 库一致）
         request.setValue("chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold", forHTTPHeaderField: "Origin")
+        // Accept-Encoding：与 Python edge-tts 库一致
         request.setValue("gzip, deflate, br, zstd", forHTTPHeaderField: "Accept-Encoding")
+        // Accept-Language：与 Python edge-tts 库一致
         request.setValue("en-US,en;q=0.9", forHTTPHeaderField: "Accept-Language")
+        // Pragma / Cache-Control：与 Python edge-tts 库一致
         request.setValue("no-cache", forHTTPHeaderField: "Pragma")
         request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
-        request.setValue("13", forHTTPHeaderField: "Sec-WebSocket-Version")
-        // 关键：添加 Cookie 头，包含随机的 muid
+        // 注意：不手动设置 Sec-WebSocket-Version，由 URLSession 自动设置（手动设置可能冲突）
+        // Cookie：包含随机的 muid（与 Python edge-tts 库的 DRM.headers_with_muid 一致）
         request.setValue("muid=\(generateMuid());", forHTTPHeaderField: "Cookie")
         
-        let task = session.webSocketTask(with: request)
+        // 使用共享的 URLSession 创建 WebSocket task（复用连接池）
+        let task = TTSService.edgeTTSSession.webSocketTask(with: request)
         edgeTTSWebSocketTask = task
         task.resume()
         
-        SyncLogger.shared.info("🔊 Edge-TTS: 正在建立 WebSocket 连接... requestId=\(requestId)")
+        SyncLogger.shared.info("🔊 Edge-TTS: 已创建 WebSocket task，正在建立连接... requestId=\(requestId)")
+        SyncLogger.shared.info("🔊 Edge-TTS: 注意：不阻塞主线程，连接建立后系统自动发送排队的消息")
         
-        // 等待连接建立成功（最多等待10秒）
-        guard delegate.waitForConnection(timeout: 10) else {
-            SyncLogger.shared.info("🔊 Edge-TTS: 连接建立失败，降级到 iOS 原生。错误=\(delegate.connectionError?.localizedDescription ?? "未知")")
-            DispatchQueue.main.async {
-                self.actualProvider = .iOSNative
-                self.speakiOSNative(text)
-            }
-            return
-        }
+        // 关键修复：不使用 DispatchSemaphore 阻塞主线程！
+        // URLSessionWebSocketTask 支持在连接建立前就发送消息，系统会自动排队等待连接建立
+        // 这与 Python aiohttp 的 ws_connect 后立即 send 的逻辑完全一致
         
-        SyncLogger.shared.info("🔊 Edge-TTS: 连接建立成功，开始发送消息...")
-        
-        // 发送 speech.config 消息
+        // 直接发送 speech.config 消息（系统自动等待连接建立）
         let speechConfigMessage = buildSpeechConfigMessage(requestId: requestId)
         task.send(.string(speechConfigMessage)) { [weak self] error in
             guard let self = self else { return }
             if let error = error {
-                SyncLogger.shared.info("🔊 Edge-TTS: 发送 speech.config 失败 - \(error.localizedDescription)")
-                DispatchQueue.main.async {
-                    self.actualProvider = .iOSNative
-                    self.speakiOSNative(text)
-                }
+                SyncLogger.shared.info("🔊 Edge-TTS: 发送 speech.config 失败（连接可能失败）- \(error.localizedDescription)")
+                self.fallbackToiOSNative(text: text)
                 return
             }
             
-            SyncLogger.shared.info("🔊 Edge-TTS: speech.config 发送成功")
+            SyncLogger.shared.info("🔊 Edge-TTS: speech.config 发送成功（连接已建立）")
             
             // 发送 ssml 消息
             let ssmlMessage = buildSSMLMessage(requestId: requestId, ssml: ssml)
@@ -488,10 +470,7 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
                 guard let self = self else { return }
                 if let error = error {
                     SyncLogger.shared.info("🔊 Edge-TTS: 发送 ssml 失败 - \(error.localizedDescription)")
-                    DispatchQueue.main.async {
-                        self.actualProvider = .iOSNative
-                        self.speakiOSNative(text)
-                    }
+                    self.fallbackToiOSNative(text: text)
                     return
                 }
                 
@@ -501,16 +480,29 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
                 self.receiveEdgeTTSMessages(task: task, originalText: text)
             }
         }
+        
+        // 设置整体超时（30秒，不阻塞主线程，使用 asyncAfter）
+        // 与 Python aiohttp 的 ClientTimeout(total=30) 逻辑一致
+        DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [weak self] in
+            guard let self = self else { return }
+            // 检查是否还是当前任务，且未收到音频数据
+            if self.edgeTTSWebSocketTask === task && self.edgeTTSAudioData.isEmpty {
+                SyncLogger.shared.info("🔊 Edge-TTS: 整体超时（30秒）且未收到音频数据，降级到 iOS 原生")
+                task.cancel()
+                self.fallbackToiOSNative(text: text)
+            }
+        }
     }
     
-    /// 构建 speech.config 消息（参考 edge-tts Python 库的 send_command_request）
+    /// 构建 speech.config 消息（参考 edge-tts Python 库的 send_command_request，完全一致）
     private func buildSpeechConfigMessage(requestId: String) -> String {
         let timestamp = rfc2616Timestamp()
         // os 信息必须与 User-Agent 一致（Windows/Edge）
+        // 注意：JSON 后面必须有 \r\n，与 Python edge-tts 库完全一致
         let configJSON = """
         {"context":{"synthesis":{"audio":{"metadataoptions":{"sentenceBoundaryEnabled":"true","wordBoundaryEnabled":"false"},"outputFormat":"audio-24khz-48kbitrate-mono-mp3"}}}}
         """
-        return "X-Timestamp:\(timestamp)\r\nContent-Type:application/json; charset=utf-8\r\nPath:speech.config\r\n\r\n\(configJSON)"
+        return "X-Timestamp:\(timestamp)\r\nContent-Type:application/json; charset=utf-8\r\nPath:speech.config\r\n\r\n\(configJSON)\r\n"
     }
     
     /// 构建 ssml 消息（参考 edge-tts Python 库的 ssml_headers_plus_data）
