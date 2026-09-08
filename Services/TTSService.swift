@@ -7,6 +7,7 @@
 
 import Foundation
 import AVFoundation
+import CryptoKit
 
 // MARK: - Edge-TTS WebSocket 连接处理器
 
@@ -51,6 +52,56 @@ final class EdgeTTSWebSocketDelegate: NSObject, URLSessionWebSocketDelegate {
         }
         return isConnected && connectionError == nil
     }
+}
+
+// MARK: - Edge-TTS 常量和工具函数
+
+private enum EdgeTTSConstants {
+    static let baseURL = "speech.platform.bing.com/consumer/speech/synthesize/readaloud"
+    static let trustedClientToken = "6A5AA1D4EAFF4E9FB37E23D68491D6F4"
+    static let chromiumFullVersion = "143.0.3650.75"
+    static let chromiumMajorVersion = "143"
+    static let secMsGecVersion = "1-\(chromiumFullVersion)"
+    static let winEpoch: Double = 11644473600
+    static let sToNs: Double = 1e9
+}
+
+/// 生成 Sec-MS-GEC token（参考 edge-tts Python 库的 DRM.generate_sec_ms_gec）
+private func generateSecMsGec() -> String {
+    // 获取当前 Unix 时间戳
+    var ticks = Date().timeIntervalSince1970
+    // 转换到 Windows 文件时间纪元（1601-01-01 00:00:00 UTC）
+    ticks += EdgeTTSConstants.winEpoch
+    // 向下取整到最近的5分钟（300秒）
+    ticks -= ticks.truncatingRemainder(dividingBy: 300)
+    // 转换为100纳秒间隔（Windows 文件时间格式）
+    ticks *= EdgeTTSConstants.sToNs / 100
+    // 拼接时间戳和 TrustedClientToken
+    let strToHash = String(format: "%.0f", ticks) + EdgeTTSConstants.trustedClientToken
+    // 计算 SHA256 哈希，返回大写的十六进制摘要
+    let data = Data(strToHash.utf8)
+    let hash = SHA256.hash(data: data)
+    return hash.compactMap { String(format: "%02X", $0) }.joined()
+}
+
+/// 生成随机 MUID（32位十六进制，大写）
+private func generateMuid() -> String {
+    var bytes = [UInt8](repeating: 0, count: 16)
+    _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+    return bytes.map { String(format: "%02X", $0) }.joined()
+}
+
+/// 解析 Edge-TTS 二进制消息，提取音频数据
+/// 二进制消息格式：[2字节头部长度(大端序)][头部文本][\r\n\r\n][音频数据]
+private func parseEdgeTTSBinaryMessage(_ data: Data) -> Data? {
+    guard data.count >= 2 else { return nil }
+    // 前2字节是头部长度（大端序）
+    let headerLength = Int(data[0]) << 8 | Int(data[1])
+    guard headerLength + 2 <= data.count else { return nil }
+    // 跳过头部长度 + 2字节（\r\n\r\n），剩下的是音频数据
+    let audioStart = headerLength + 2
+    guard audioStart <= data.count else { return nil }
+    return data.subdata(in: audioStart..<data.count)
 }
 
 // MARK: - TTS 配置
@@ -339,8 +390,20 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
         edgeTTSWebSocketTask = nil
         edgeTTSAudioData = Data()
         
-        // Edge-TTS WebSocket URL
-        let urlString = "wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=6A5AA1D4EAFF4E9FB37E23D68491D6F4"
+        // 生成连接 ID 和请求 ID（不带连字符的全小写 UUID）
+        let connectionId = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+        let requestId = connectionId
+        
+        // 生成 Sec-MS-GEC token
+        let secMsGec = generateSecMsGec()
+        
+        // 构建完整的 WebSocket URL（包含所有必要的参数）
+        let urlString = "wss://\(EdgeTTSConstants.baseURL)/edge/v1" +
+            "?TrustedClientToken=\(EdgeTTSConstants.trustedClientToken)" +
+            "&ConnectionId=\(connectionId)" +
+            "&Sec-MS-GEC=\(secMsGec)" +
+            "&Sec-MS-GEC-Version=\(EdgeTTSConstants.secMsGecVersion)"
+        
         guard let url = URL(string: urlString) else {
             SyncLogger.shared.info("🔊 Edge-TTS: URL 无效，降级到 iOS 原生")
             actualProvider = .iOSNative
@@ -348,8 +411,9 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
             return
         }
         
-        // X-RequestId 必须是不带连字符的全小写 UUID（edge-tts 协议要求）
-        let requestId = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+        SyncLogger.shared.info("🔊 Edge-TTS: connectionId=\(connectionId)")
+        SyncLogger.shared.info("🔊 Edge-TTS: Sec-MS-GEC=\(secMsGec)")
+        SyncLogger.shared.info("🔊 Edge-TTS: URL=\(urlString)")
         
         // 配置 URLSession，使用 delegate 监听连接状态
         let config = URLSessionConfiguration.default
@@ -360,13 +424,21 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
         let session = URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
         
         var request = URLRequest(url: url)
-        // 模拟 Edge 浏览器的请求头（关键：Origin 必须是 Chrome 扩展 ID）
-        request.setValue("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0", forHTTPHeaderField: "User-Agent")
+        // 模拟 Edge 浏览器的请求头（参考 edge-tts Python 库）
+        request.setValue(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" +
+            " (KHTML, like Gecko) Chrome/\(EdgeTTSConstants.chromiumMajorVersion).0.0.0 Safari/537.36" +
+            " Edg/\(EdgeTTSConstants.chromiumMajorVersion).0.0.0",
+            forHTTPHeaderField: "User-Agent"
+        )
         request.setValue("chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold", forHTTPHeaderField: "Origin")
-        request.setValue("deflate, br, gzip", forHTTPHeaderField: "Accept-Encoding")
-        request.setValue("zh-CN,zh;q=0.9,en;q=0.8", forHTTPHeaderField: "Accept-Language")
+        request.setValue("gzip, deflate, br, zstd", forHTTPHeaderField: "Accept-Encoding")
+        request.setValue("en-US,en;q=0.9", forHTTPHeaderField: "Accept-Language")
         request.setValue("no-cache", forHTTPHeaderField: "Pragma")
         request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        request.setValue("13", forHTTPHeaderField: "Sec-WebSocket-Version")
+        // 关键：添加 Cookie 头，包含随机的 muid
+        request.setValue("muid=\(generateMuid());", forHTTPHeaderField: "Cookie")
         
         let task = session.webSocketTask(with: request)
         edgeTTSWebSocketTask = task
@@ -422,18 +494,38 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
         }
     }
     
-    /// 构建 speech.config 消息
+    /// 构建 speech.config 消息（参考 edge-tts Python 库的 send_command_request）
     private func buildSpeechConfigMessage(requestId: String) -> String {
+        let timestamp = Date().formatted(.dateTime
+            .weekday(.abbreviated)
+            .day(.twoDigits)
+            .month(.abbreviated)
+            .year()
+            .hour(.twoDigits(amPM: .omitted))
+            .minute(.twoDigits)
+            .second(.twoDigits)
+            .timeZone(.identifier("GMT"))
+        )
         // os 信息必须与 User-Agent 一致（Windows/Edge）
         let configJSON = """
-        {"context":{"system":{"name":"SpeechSDK","version":"1.12.1-rc.1","build":"JavaScript","lang":"JavaScript","os":{"platform":"Browser/Win32","name":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0","version":"5.0"}}}}
+        {"context":{"synthesis":{"audio":{"metadataoptions":{"sentenceBoundaryEnabled":"true","wordBoundaryEnabled":"false"},"outputFormat":"audio-24khz-48kbitrate-mono-mp3"}}}}
         """
-        return "Path: speech.config\r\nX-RequestId: \(requestId)\r\nContent-Type: application/json\r\n\r\n\(configJSON)"
+        return "X-Timestamp:\(timestamp)\r\nContent-Type:application/json; charset=utf-8\r\nPath:speech.config\r\n\r\n\(configJSON)"
     }
     
-    /// 构建 ssml 消息
+    /// 构建 ssml 消息（参考 edge-tts Python 库的 ssml_headers_plus_data）
     private func buildSSMLMessage(requestId: String, ssml: String) -> String {
-        return "Path: ssml\r\nX-RequestId: \(requestId)\r\nContent-Type: application/ssml+xml\r\n\r\n\(ssml)"
+        let timestamp = Date().formatted(.dateTime
+            .weekday(.abbreviated)
+            .day(.twoDigits)
+            .month(.abbreviated)
+            .year()
+            .hour(.twoDigits(amPM: .omitted))
+            .minute(.twoDigits)
+            .second(.twoDigits)
+            .timeZone(.identifier("GMT"))
+        )
+        return "X-Timestamp:\(timestamp)\r\nContent-Type:application/ssml+xml\r\nX-RequestId:\(requestId)\r\nPath:ssml\r\n\r\n\(ssml)"
     }
     
     /// 循环接收 Edge-TTS 消息
@@ -473,22 +565,17 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
                     // 其他文本消息（audio.metadata 等）忽略
                     
                 case .data(let data):
-                    // Edge-TTS 二进制消息格式：前2字节是消息类型标识(0x01=音频数据)，后续字节是实际音频数据
-                    // 必须跳过前2个字节，否则累积的数据包含额外的消息头，音频格式不正确，AVAudioPlayer无法播放！
-                    guard data.count >= 2 else {
+                    // Edge-TTS 二进制消息格式：[2字节头部长度(大端序)][头部文本][\r\n\r\n][音频数据]
+                    // 参考 edge-tts Python 库的处理方式
+                    guard let audioData = parseEdgeTTSBinaryMessage(data) else {
                         SyncLogger.shared.info("🔊 Edge-TTS: 收到无效的二进制消息，大小=\(data.count)字节")
                         break
                     }
-                    let messageType = data[0]
-                    let audioData = data.dropFirst(2)  // 跳过前2个字节的消息头
-                    if messageType == 0x01 {
-                        // 0x01 表示音频数据
+                    if !audioData.isEmpty {
                         self.edgeTTSAudioData.append(audioData)
                         if self.edgeTTSAudioData.count % 10000 < 2000 {
                             SyncLogger.shared.info("🔊 Edge-TTS: 已接收音频数据 \(self.edgeTTSAudioData.count) 字节（消息大小=\(data.count)，音频部分=\(audioData.count)）")
                         }
-                    } else {
-                        SyncLogger.shared.info("🔊 Edge-TTS: 收到非音频二进制消息，类型=0x\(String(format: "%02X", messageType))，大小=\(data.count)字节")
                     }
                 }
                 
