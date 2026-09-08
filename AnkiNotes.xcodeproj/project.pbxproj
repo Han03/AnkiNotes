@@ -27,6 +27,7 @@
 		ANReviewQuiz /* ReviewQuizView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANReviewQuizRef /* ReviewQuizView.swift */; };
 		ANCloudLockService /* CloudLockService.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANCloudLockServiceRef /* CloudLockService.swift */; };
 		ANSyncSnapshotService /* SyncSnapshotService.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANSyncSnapshotServiceRef /* SyncSnapshotService.swift */; };
+		392470F8DA3B93785B7405F8 /* SyncLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 621D2B4E554ED1479A5AE2DD /* SyncLogger.swift */; };
 		ANMetadataSyncService /* MetadataSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANMetadataSyncServiceRef /* MetadataSyncService.swift */; };
 		ANTTSService /* TTSService.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANTTSServiceRef /* TTSService.swift */; };
 		ANLectureReaderView /* LectureReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANLectureReaderViewRef /* LectureReaderView.swift */; };
@@ -62,6 +63,7 @@
 		ANReviewQuizRef /* ReviewQuizView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewQuizView.swift; sourceTree = "<group>"; };
 		ANCloudLockServiceRef /* CloudLockService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudLockService.swift; sourceTree = "<group>"; };
 		ANSyncSnapshotServiceRef /* SyncSnapshotService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncSnapshotService.swift; sourceTree = "<group>"; };
+		621D2B4E554ED1479A5AE2DD /* SyncLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncLogger.swift; sourceTree = "<group>"; };
 		ANMetadataSyncServiceRef /* MetadataSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetadataSyncService.swift; sourceTree = "<group>"; };
 		ANTTSServiceRef /* TTSService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TTSService.swift; sourceTree = "<group>"; };
 		ANLectureReaderViewRef /* LectureReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LectureReaderView.swift; sourceTree = "<group>"; };
@@ -129,6 +131,7 @@
 			ANQuizServiceRef /* QuizService.swift */,
 				ANCloudLockServiceRef /* CloudLockService.swift */,
 				ANSyncSnapshotServiceRef /* SyncSnapshotService.swift */,
+				621D2B4E554ED1479A5AE2DD /* SyncLogger.swift */,
 				ANMetadataSyncServiceRef /* MetadataSyncService.swift */,
 				ANTTSServiceRef /* TTSService.swift */,
 				ANKnowledgeServiceRef /* KnowledgeService.swift */,
@@ -271,6 +274,7 @@
 			ANKnowledgePoint /* KnowledgePoint.swift in Sources */,
 			ANCloudLockService /* CloudLockService.swift in Sources */,
 			ANSyncSnapshotService /* SyncSnapshotService.swift in Sources */,
+			392470F8DA3B93785B7405F8 /* SyncLogger.swift in Sources */,
 			ANMetadataSyncService /* MetadataSyncService.swift in Sources */,
 			ANTTSService /* TTSService.swift in Sources */,
 			ANKnowledgeService /* KnowledgeService.swift in Sources */,
