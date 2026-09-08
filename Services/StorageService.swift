@@ -873,6 +873,8 @@ final class StorageService: ObservableObject {
                 // 文件级跳过：如果文件无更新，跳过
                 if let root = rootURL, let snap = snapshot {
                     let relativePath = snap.relativePath(for: child, rootURL: root)
+                    // 记录文件的修改时间到快照（不管是否跳过，都记录，下次同步可用于文件级跳过）
+                    snap.updateFile(relativePath: relativePath, lastModified: lastModified)
                     if !snap.isFileUpdated(relativePath: relativePath, lastModified: lastModified) {
                         continue  // 文件无更新，跳过
                     }
