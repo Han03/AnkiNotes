@@ -139,6 +139,10 @@ final class CloudLockService {
                 return false
             }
             
+            // 先设置 currentFencingToken（必须在 verifyLockOwnership 之前）
+            currentFencingToken = token
+            isHoldingLock = true
+            
             // 3. 二次确认：读取锁文件，确认是自己的
             Thread.sleep(forTimeInterval: 0.1)  // 短暂等待，确保写入完成
             if !verifyLockOwnership(cloudFS: cloudFS) {
@@ -148,8 +152,6 @@ final class CloudLockService {
                 return false
             }
             
-            isHoldingLock = true
-            currentFencingToken = token
             startRenewTimer(cloudFS: cloudFS)
             print("✅ 获取云端锁成功 (token: \(token), device: \(deviceId.prefix(8))...)")
             return true
