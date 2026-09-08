@@ -538,13 +538,30 @@ final class StorageService: ObservableObject {
                 let relativeComponents = relativePathComponents(of: srcURL, from: lectureRoot)
                 let folderComponents = Array(relativeComponents.dropLast())
                 let fileName = srcURL.lastPathComponent
-                let title = parseTitleFromFileName(fileName)
+                // 原始文件名去掉 .txt 后缀，用于匹配笔记的 fileName
+                let rawFileName = fileName.hasSuffix(".txt") ? String(fileName.dropLast(4)) : fileName
                 // 找到对应的文件夹
                 let folderId = getFolderId(for: folderComponents)
-                // 保存讲稿到本地
+                // 根据 folderId + 原始文件名找到对应笔记，使用笔记的 title 保存讲稿
+                // 保证保存时使用的 title 与读取时一致
+                var noteTitle = rawFileName
+                if let folderId = folderId,
+                   let matchedMeta = noteMetas.first(where: { 
+                       $0.folderId == folderId && 
+                       ($0.fileName == fileName || $0.fileName == rawFileName + ".md" || $0.fileName == rawFileName + ".markdown")
+                   }) {
+                    noteTitle = matchedMeta.title
+                } else if folderId == nil,
+                   let matchedMeta = noteMetas.first(where: { 
+                       $0.folderId == nil && 
+                       ($0.fileName == fileName || $0.fileName == rawFileName + ".md" || $0.fileName == rawFileName + ".markdown")
+                   }) {
+                    noteTitle = matchedMeta.title
+                }
+                // 保存讲稿到本地，使用笔记的 title
                 let rawBody = try cloud.readData(at: srcURL)
                 let bodyStr = String(data: rawBody, encoding: .utf8) ?? ""
-                _ = try? fileSystem.writeLecture(bodyStr, folderId: folderId, title: title, folders: folders, skipCloudSync: true)
+                _ = try? fileSystem.writeLecture(bodyStr, folderId: folderId, title: noteTitle, folders: folders, skipCloudSync: true)
                 report.lectureImportedCount += 1
             } catch {
                 report.lectureFailedCount += 1
@@ -563,13 +580,30 @@ final class StorageService: ObservableObject {
                 let relativeComponents = relativePathComponents(of: srcURL, from: questionsRoot)
                 let folderComponents = Array(relativeComponents.dropLast())
                 let fileName = srcURL.lastPathComponent
-                let title = parseTitleFromFileName(fileName)
+                // 原始文件名去掉 .json 后缀，用于匹配笔记的 fileName
+                let rawFileName = fileName.hasSuffix(".json") ? String(fileName.dropLast(5)) : fileName
                 // 找到对应的文件夹
                 let folderId = getFolderId(for: folderComponents)
-                // 保存题库到本地缓存
+                // 根据 folderId + 原始文件名找到对应笔记，使用笔记的 title 保存题目
+                // 保证保存时使用的 title 与读取时（QuizService.load 使用 note.title）一致
+                var noteTitle = rawFileName
+                if let folderId = folderId,
+                   let matchedMeta = noteMetas.first(where: { 
+                       $0.folderId == folderId && 
+                       ($0.fileName == fileName || $0.fileName == rawFileName + ".md" || $0.fileName == rawFileName + ".markdown")
+                   }) {
+                    noteTitle = matchedMeta.title
+                } else if folderId == nil,
+                   let matchedMeta = noteMetas.first(where: { 
+                       $0.folderId == nil && 
+                       ($0.fileName == fileName || $0.fileName == rawFileName + ".md" || $0.fileName == rawFileName + ".markdown")
+                   }) {
+                    noteTitle = matchedMeta.title
+                }
+                // 保存题库到本地，使用笔记的 title
                 let rawBody = try cloud.readData(at: srcURL)
                 if let questions = try? JSONDecoder().decode([Question].self, from: rawBody) {
-                    _ = try? fileSystem.writeQuestions(questions, folderId: folderId, title: title, folders: folders, skipCloudSync: true)
+                    _ = try? fileSystem.writeQuestions(questions, folderId: folderId, title: noteTitle, folders: folders, skipCloudSync: true)
                     report.questionImportedCount += 1
                 }
             } catch {
