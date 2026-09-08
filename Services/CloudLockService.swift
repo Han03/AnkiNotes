@@ -59,9 +59,11 @@ final class CloudLockService {
     // MARK: - 锁文件路径
     
     private func lockFileURL(in cloudFS: CloudFileSystem) -> URL {
-        // 锁文件放在根目录下，避免隐藏目录同步问题
-        // 文件名使用 .ankinotes.alock（.lock 后缀在坚果云不会同步，改用 .alock）
-        return cloudFS.rootDirectory.appendingPathComponent(".ankinotes.alock")
+        // 锁文件放在根目录下
+        // 注意：文件名不能以 . 开头，否则坚果云 WebDAV 无法正确访问隐藏文件
+        // 之前使用 .ankinotes.alock（以.开头是隐藏文件），导致 fileExists 永远返回 false，获取锁死循环
+        // 改为 ankinotes.alock（非隐藏文件），坚果云 WebDAV 可以正常访问
+        return cloudFS.rootDirectory.appendingPathComponent("ankinotes.alock")
     }
     
     // MARK: - 锁数据结构
