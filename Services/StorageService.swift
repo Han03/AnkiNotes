@@ -882,6 +882,8 @@ final class StorageService: ObservableObject {
                 // 目录级跳过：如果目录无更新，跳过整个目录
                 if let root = rootURL, let snap = snapshot {
                     let relativePath = snap.relativePath(for: child, rootURL: root)
+                    // 记录目录的修改时间到快照（下次同步时可用于目录级跳过）
+                    snap.updateDirectory(relativePath: relativePath, lastModified: lastModified)
                     if !snap.isDirectoryUpdated(relativePath: relativePath, lastModified: lastModified) {
                         continue  // 目录无更新，跳过
                     }
