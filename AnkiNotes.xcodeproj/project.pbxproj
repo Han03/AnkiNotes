@@ -26,7 +26,6 @@
 		ANReviewSession /* ReviewSessionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANReviewSessionRef /* ReviewSessionView.swift */; };
 		ANReviewQuiz /* ReviewQuizView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANReviewQuizRef /* ReviewQuizView.swift */; };
 		ANCloudLockService /* CloudLockService.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANCloudLockServiceRef /* CloudLockService.swift */; };
-		ANKeychainHelper /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANKeychainHelperRef /* KeychainHelper.swift */; };
 		ANMetadataSyncService /* MetadataSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANMetadataSyncServiceRef /* MetadataSyncService.swift */; };
 		ANTTSService /* TTSService.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANTTSServiceRef /* TTSService.swift */; };
 		ANLectureReaderView /* LectureReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANLectureReaderViewRef /* LectureReaderView.swift */; };
@@ -62,7 +61,6 @@
 		ANReviewSessionRef /* ReviewSessionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewSessionView.swift; sourceTree = "<group>"; };
 		ANReviewQuizRef /* ReviewQuizView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewQuizView.swift; sourceTree = "<group>"; };
 		ANCloudLockServiceRef /* CloudLockService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudLockService.swift; sourceTree = "<group>"; };
-		ANKeychainHelperRef /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
 		ANMetadataSyncServiceRef /* MetadataSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetadataSyncService.swift; sourceTree = "<group>"; };
 		ANTTSServiceRef /* TTSService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TTSService.swift; sourceTree = "<group>"; };
 		ANLectureReaderViewRef /* LectureReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LectureReaderView.swift; sourceTree = "<group>"; };
@@ -130,7 +128,6 @@
 				ANCloudProviderRef /* CloudProvider.swift */,
 			ANQuizServiceRef /* QuizService.swift */,
 				ANCloudLockServiceRef /* CloudLockService.swift */,
-				ANKeychainHelperRef /* KeychainHelper.swift */,
 				ANMetadataSyncServiceRef /* MetadataSyncService.swift */,
 				ANTTSServiceRef /* TTSService.swift */,
 				ANKnowledgeServiceRef /* KnowledgeService.swift */,
@@ -274,7 +271,6 @@
 			ANQuizSession /* QuizSessionView.swift in Sources */,
 			ANKnowledgePoint /* KnowledgePoint.swift in Sources */,
 			ANCloudLockService /* CloudLockService.swift in Sources */,
-			ANKeychainHelper /* KeychainHelper.swift in Sources */,
 			ANMetadataSyncService /* MetadataSyncService.swift in Sources */,
 			ANTTSService /* TTSService.swift in Sources */,
 			ANKnowledgeService /* KnowledgeService.swift in Sources */,

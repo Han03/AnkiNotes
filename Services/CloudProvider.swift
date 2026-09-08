@@ -183,6 +183,56 @@ enum KeychainHelper {
             throw NSError(domain: "KeychainHelper", code: Int(status), userInfo: [NSLocalizedDescriptionKey: "Keychain 删除密码失败（错误码 \(status)）"])
         }
     }
+
+    // MARK: - 通用 Keychain 读写（用于 deviceId、fencingToken 等需要重装后保持不变的数据）
+
+    /// 保存字符串到 Keychain
+    static func save(_ value: String, forAccount account: String) {
+        guard let data = value.data(using: .utf8) else { return }
+        // 先删除旧值
+        delete(forAccount: account)
+        // 添加新值
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: account,
+            kSecValueData: data,
+            kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        ]
+        let status = SecItemAdd(query as CFDictionary, nil)
+        if status != errSecSuccess {
+            print("⚠️ Keychain 保存失败 account=\(account), status=\(status)")
+        }
+    }
+
+    /// 从 Keychain 读取字符串
+    static func get(forAccount account: String) -> String? {
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: account,
+            kSecReturnData: kCFBooleanTrue as Any,
+            kSecMatchLimit: kSecMatchLimitOne
+        ]
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess,
+              let data = result as? Data,
+              let value = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        return value
+    }
+
+    /// 从 Keychain 删除
+    static func delete(forAccount account: String) {
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: account
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
 }
 
 // MARK: - 5. 实现 1：本机存储（FileManager）

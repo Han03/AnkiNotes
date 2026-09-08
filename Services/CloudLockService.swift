@@ -38,19 +38,19 @@ final class CloudLockService {
     
     /// 设备唯一标识（持久化到 Keychain，App 重装后保持不变）
     private var deviceId: String {
-        if let id = KeychainHelper.shared.get(forKey: "CloudLockDeviceId") {
+        if let id = KeychainHelper.get(forAccount: "CloudLockDeviceId") {
             return id
         }
         let id = UUID().uuidString
-        KeychainHelper.shared.save(id, forKey: "CloudLockDeviceId")
+        KeychainHelper.save(id, forAccount: "CloudLockDeviceId")
         return id
     }
     
     /// fencing token 计数器（持久化到 Keychain，保证单调递增，App 重装后不重置）
     private var nextFencingToken: Int64 {
-        let current = Int64(KeychainHelper.shared.get(forKey: "CloudLockFencingToken") ?? "0") ?? 0
+        let current = Int64(KeychainHelper.get(forAccount: "CloudLockFencingToken") ?? "0") ?? 0
         let next = current + 1
-        KeychainHelper.shared.save("\(next)", forKey: "CloudLockFencingToken")
+        KeychainHelper.save("\(next)", forAccount: "CloudLockFencingToken")
         return next
     }
     
