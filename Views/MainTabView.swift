@@ -130,6 +130,23 @@ struct MainTabView: View {
                                 .frame(maxWidth: 280)
                                 .lineLimit(3)
                         }
+                        
+                        // 取消同步按钮
+                        Button(action: {
+                            appState.requestCancelSync()
+                        }) {
+                            Text("取消同步")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 24)
+                                .padding(.vertical, 8)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .fill(Color.red.opacity(0.8))
+                                )
+                        }
+                        .padding(.top, 4)
                     }
                     .padding(24)
                     .background(RoundedRectangle(cornerRadius: 16).fill(Color(.systemGray6).opacity(0.95)))

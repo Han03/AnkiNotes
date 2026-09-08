@@ -129,6 +129,20 @@ final class AppState: ObservableObject {
     @Published var syncProgress: Double = 0  // 同步进度 0-100
     @Published var syncStep: String = ""  // 当前同步步骤
     @Published var syncDetail: String = ""  // 同步详情
+    @Published var syncErrorMessage: String? = nil  // 同步错误信息
+    private var cancelSyncRequested = false  // 用户请求取消同步
+    
+    /// 请求取消当前同步操作
+    func requestCancelSync() {
+        cancelSyncRequested = true
+        SyncLogger.shared.warning("用户请求取消同步")
+    }
+    
+    /// 重置取消标志（同步开始时调用）
+    private func resetCancelFlag() {
+        cancelSyncRequested = false
+        syncErrorMessage = nil
+    }
 
     // MARK: - 全局文字缩放倍率
 
@@ -373,6 +387,9 @@ final class AppState: ObservableObject {
         syncProgress = 0
         syncDetail = "正在初始化同步..."
         
+        // 重置取消标志和错误信息
+        resetCancelFlag()
+        
         // 启动同步日志会话
         SyncLogger.shared.startSession()
         SyncLogger.shared.info("同步开始，silent=\(silent)")
@@ -418,33 +435,69 @@ final class AppState: ObservableObject {
             let lockStartTime = Date()
             var lockAcquired = false
             var retryCount = 0
-            while !lockAcquired {
+            let maxLockRetries = 12  // 最大重试次数，约1-2分钟
+            while !lockAcquired && retryCount < maxLockRetries {
+                // 检查用户是否请求取消
+                if self.cancelSyncRequested {
+                    SyncLogger.shared.warning("用户取消同步，中断获取云端锁")
+                    DispatchQueue.main.async {
+                        self.syncErrorMessage = "同步已取消"
+                        self.providerStatus = "⚠️ 同步已取消"
+                    }
+                    completion?(StorageService.ImportReport())
+                    return
+                }
+                
                 SyncLogger.shared.debug("尝试获取云端锁，第 \(retryCount + 1) 次")
                 lockAcquired = CloudLockService.shared.acquireLock(cloudFS: fs)
                 if !lockAcquired {
                     retryCount += 1
                     let holderInfo = CloudLockService.shared.lockHolderInfo(cloudFS: fs)
                     let debugInfo = CloudLockService.shared.lockDebugInfo(cloudFS: fs)
-                    SyncLogger.shared.warning("获取云端锁失败，第 \(retryCount) 次重试，holderInfo=\(holderInfo ?? "无")。\(debugInfo)")
+                    
+                    // 检测是否是限流错误（503）
+                    let isRateLimited = debugInfo.contains("503") || debugInfo.contains("Too many requests")
+                    let retryInterval = isRateLimited ? 10.0 : 5.0  // 限流时增加重试间隔
+                    
+                    SyncLogger.shared.warning("获取云端锁失败，第 \(retryCount)/\(maxLockRetries) 次重试，限流=\(isRateLimited)，holderInfo=\(holderInfo ?? "无")。\(debugInfo)")
+                    
                     // 更新提示信息，保持同步窗口打开（静默同步也显示）
                     if let holderInfo = holderInfo {
                         DispatchQueue.main.async {
-                            self.providerStatus = "⏳ 其他设备正在同步，等待中...（已等待 \(retryCount * 5)秒）\n\(holderInfo)\n\n将自动重试，无需关闭窗口"
+                            self.providerStatus = "⏳ 其他设备正在同步，等待中...（第 \(retryCount)/\(maxLockRetries) 次重试）\n\(holderInfo)\n\n将自动重试，可点击取消"
                             self.syncStep = "等待云端锁"
                             self.syncProgress = 1
-                            self.syncDetail = "其他设备正在同步，已等待 \(retryCount * 5)秒"
+                            self.syncDetail = "其他设备正在同步，第 \(retryCount)/\(maxLockRetries) 次重试"
+                        }
+                    } else if isRateLimited {
+                        DispatchQueue.main.async {
+                            self.providerStatus = "⚠️ 云端限流（请求过多），等待 \(Int(retryInterval)) 秒后重试...（第 \(retryCount)/\(maxLockRetries) 次）\n\n可点击取消同步"
+                            self.syncStep = "云端限流"
+                            self.syncProgress = 1
+                            self.syncDetail = "云端限流，等待 \(Int(retryInterval)) 秒后重试"
                         }
                     } else {
                         DispatchQueue.main.async {
-                            self.providerStatus = "⏳ 等待云端锁释放...（已等待 \(retryCount * 5)秒）\n\n将自动重试，无需关闭窗口"
+                            self.providerStatus = "⏳ 等待云端锁释放...（第 \(retryCount)/\(maxLockRetries) 次重试）\n\n将自动重试，可点击取消"
                             self.syncStep = "等待云端锁"
                             self.syncProgress = 1
-                            self.syncDetail = "等待云端锁释放，已等待 \(retryCount * 5)秒"
+                            self.syncDetail = "等待云端锁释放，第 \(retryCount)/\(maxLockRetries) 次重试"
                         }
                     }
-                    // 等待5秒后重试
-                    Thread.sleep(forTimeInterval: 5)
+                    // 等待后重试
+                    Thread.sleep(forTimeInterval: retryInterval)
                 }
+            }
+            
+            // 检查是否达到最大重试次数
+            if !lockAcquired && retryCount >= maxLockRetries {
+                SyncLogger.shared.error("获取云端锁失败，达到最大重试次数 \(maxLockRetries)，中断同步")
+                DispatchQueue.main.async {
+                    self.syncErrorMessage = "获取云端锁失败，请稍后重试"
+                    self.providerStatus = "❌ 获取云端锁失败，已重试 \(maxLockRetries) 次，请稍后重试"
+                }
+                completion?(StorageService.ImportReport())
+                return
             }
             let lockDuration = Date().timeIntervalSince(lockStartTime)
             SyncLogger.shared.stepDone("获取云端锁", duration: lockDuration)
@@ -570,20 +623,61 @@ final class AppState: ObservableObject {
             SyncLogger.shared.stepStart("重新获取云端锁（用于推送数据）")
             var pushLockAcquired = false
             var pushRetryCount = 0
-            while !pushLockAcquired {
+            let maxPushLockRetries = 6  // 推送数据获取锁的最大重试次数，约1分钟
+            while !pushLockAcquired && pushRetryCount < maxPushLockRetries {
+                // 检查用户是否请求取消
+                if self.cancelSyncRequested {
+                    SyncLogger.shared.warning("用户取消同步，中断推送数据获取锁")
+                    DispatchQueue.main.async {
+                        self.syncErrorMessage = "同步已取消"
+                        self.providerStatus = "⚠️ 同步已取消"
+                    }
+                    completion?(StorageService.ImportReport())
+                    return
+                }
+                
                 pushLockAcquired = CloudLockService.shared.acquireLock(cloudFS: fs)
                 if !pushLockAcquired {
                     pushRetryCount += 1
                     let debugInfo = CloudLockService.shared.lockDebugInfo(cloudFS: fs)
-                    SyncLogger.shared.warning("推送数据获取锁失败，第 \(pushRetryCount) 次重试。\(debugInfo)")
+                    
+                    // 检测是否是限流错误（503）
+                    let isRateLimited = debugInfo.contains("503") || debugInfo.contains("Too many requests")
+                    let retryInterval = isRateLimited ? 10.0 : 5.0
+                    
+                    SyncLogger.shared.warning("推送数据获取锁失败，第 \(pushRetryCount)/\(maxPushLockRetries) 次重试，限流=\(isRateLimited)。\(debugInfo)")
                     DispatchQueue.main.async {
-                        self.providerStatus = "⏳ 等待云端锁释放以推送数据...（已等待 \(pushRetryCount * 5)秒）"
+                        if isRateLimited {
+                            self.providerStatus = "⚠️ 云端限流，等待 \(Int(retryInterval)) 秒后重试推送...（第 \(pushRetryCount)/\(maxPushLockRetries) 次）\n\n可点击取消同步"
+                        } else {
+                            self.providerStatus = "⏳ 等待云端锁释放以推送数据...（第 \(pushRetryCount)/\(maxPushLockRetries) 次重试）\n\n可点击取消同步"
+                        }
                         self.syncStep = "等待云端锁"
-                        self.syncDetail = "正在等待其他设备完成同步..."
+                        self.syncDetail = "等待获取锁以推送数据，第 \(pushRetryCount)/\(maxPushLockRetries) 次重试"
                     }
-                    Thread.sleep(forTimeInterval: 5)
+                    Thread.sleep(forTimeInterval: retryInterval)
                 }
             }
+            
+            // 检查是否达到最大重试次数
+            if !pushLockAcquired && pushRetryCount >= maxPushLockRetries {
+                SyncLogger.shared.warning("推送数据获取锁失败，达到最大重试次数 \(maxPushLockRetries)，跳过推送数据（数据已保存在本地，下次同步时会自动推送）")
+                DispatchQueue.main.async {
+                    self.providerStatus = "⚠️ 云端繁忙，跳过数据推送（数据已保存在本地，下次同步时会自动推送）"
+                    self.syncStep = "跳过推送"
+                    self.syncDetail = "云端繁忙，跳过数据推送"
+                }
+                // 跳过推送，直接完成同步
+                DispatchQueue.main.async {
+                    self.syncStep = "同步完成"
+                    self.syncProgress = 100
+                    self.syncDetail = "同步已完成（数据推送跳过，下次同步时自动推送）"
+                    self.refreshStats()
+                    completion?(report)
+                }
+                return
+            }
+            
             SyncLogger.shared.stepDone("重新获取云端锁（用于推送数据）")
             SyncLogger.shared.info("重新获取云端锁成功，重试 \(pushRetryCount) 次，开始推送数据")
             // 同步后：推送本地元数据和知识点缓存到云端
