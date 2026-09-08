@@ -816,8 +816,14 @@ final class StorageService: ObservableObject {
                 let rawBody = try fileSystem.readNoteContent(from: srcURL)
                 let parsed = MarkdownFrontmatterParser.parse(rawBody)
 
-                // 标题：Frontmatter.title → 文件名去掉 .md → 默认 "未命名"
-                var title = (parsed.title?.isEmpty == false) ? parsed.title! : parseTitleFromFileName(fileName)
+                // 标题：直接取文件名去掉 .md/.markdown 后缀，不使用 frontmatter title
+                // 保证笔记 title 与题库/讲稿文件名匹配一致
+                var title = fileName
+                if title.lowercased().hasSuffix(".markdown") {
+                    title = String(title.dropLast(9))
+                } else if title.lowercased().hasSuffix(".md") {
+                    title = String(title.dropLast(3))
+                }
                 if title.isEmpty { title = "未命名-\(UUID().uuidString.prefix(6))" }
 
                 // 文件夹：按相对路径创建层级
