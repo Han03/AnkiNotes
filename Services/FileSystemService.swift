@@ -137,28 +137,77 @@ final class FileSystemService {
         return str
     }
 
-    // MARK: - 讲稿 IO
+    // MARK: - 讲稿本地缓存目录
+    
+    /// 讲稿本地缓存目录（Library/Caches/Lectures）
+    private var lectureCacheDirectory: URL {
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        let dir = caches.appendingPathComponent("Lectures", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+    
+    private func lectureCacheURL(folderId: UUID?, title: String, folders: [Folder]) -> URL {
+        var currentURL = lectureCacheDirectory
+        if let folderId = folderId {
+            let pathComponents = buildFolderPath(folderId: folderId, folders: folders)
+            for folderName in pathComponents.reversed() {
+                currentURL = currentURL.appendingPathComponent(folderName, isDirectory: true)
+            }
+        }
+        try? FileManager.default.createDirectory(at: currentURL, withIntermediateDirectories: true)
+        let safeTitle = sanitizeFileName(title)
+        return currentURL.appendingPathComponent("\(safeTitle).txt")
+    }
+
+    // MARK: - 讲稿 IO（带本地缓存）
 
     func lectureExists(folderId: UUID?, title: String, folders: [Folder]) -> Bool {
+        let cacheURL = lectureCacheURL(folderId: folderId, title: title, folders: folders)
+        // 优先检查本地缓存
+        if FileManager.default.fileExists(atPath: cacheURL.path) {
+            return true
+        }
+        // 缓存不存在，检查云端
         let url = lectureFileURL(folderId: folderId, title: title, folders: folders)
         return cloudFS.fileExists(at: url)
     }
 
     func readLecture(folderId: UUID?, title: String, folders: [Folder]) throws -> String {
+        let cacheURL = lectureCacheURL(folderId: folderId, title: title, folders: folders)
+        // 优先从本地缓存读取
+        if let cacheData = try? Data(contentsOf: cacheURL),
+           let str = String(data: cacheData, encoding: .utf8) {
+            return str
+        }
+        // 缓存不存在，从云端读取并写入缓存
         let url = lectureFileURL(folderId: folderId, title: title, folders: folders)
         let data = try cloudFS.readData(at: url)
         guard let str = String(data: data, encoding: .utf8) else {
             throw NSError(domain: "FileSystemService", code: -4, userInfo: [NSLocalizedDescriptionKey: "讲稿文件不是有效的 UTF-8 编码"])
         }
+        // 写入本地缓存
+        try? data.write(to: cacheURL, options: .atomic)
         return str
     }
 
     func writeLecture(_ content: String, folderId: UUID?, title: String, folders: [Folder]) throws {
-        let url = lectureFileURL(folderId: folderId, title: title, folders: folders)
         guard let data = content.data(using: .utf8) else {
             throw NSError(domain: "FileSystemService", code: -5, userInfo: [NSLocalizedDescriptionKey: "讲稿内容转 UTF-8 失败"])
         }
-        try cloudFS.writeData(data, to: url)
+        // 1. 先写本地缓存
+        let cacheURL = lectureCacheURL(folderId: folderId, title: title, folders: folders)
+        try data.write(to: cacheURL, options: .atomic)
+        // 2. 异步写云端
+        let url = lectureFileURL(folderId: folderId, title: title, folders: folders)
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self = self else { return }
+            do {
+                try self.cloudFS.writeData(data, to: url)
+            } catch {
+                print("⚠️ 讲稿云端写入失败: \(error.localizedDescription)")
+            }
+        }
     }
 
     func deleteNoteFile(at url: URL) throws {

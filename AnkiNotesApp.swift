@@ -178,18 +178,22 @@ final class AppState: ObservableObject {
         iCloudContainerAvailable = (activeFS as? ICloudFS)?.isAvailable ?? false
         providerStatus = summarizeStatus()
         refreshStats()
-        // 6) 后台异步从云端拉取元数据到本地缓存
+        // 6) 后台异步从云端拉取元数据和知识点缓存到本地
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self = self, let fs = self.activeFS else { return }
             let pulled = MetadataSyncService.shared.pullFromCloud(cloudFS: fs)
             if pulled > 0 {
                 print("📥 启动时元数据同步: 拉取 \(pulled) 个文件")
-                // 拉取后重新加载 Storage 和 Quiz 数据
                 DispatchQueue.main.async {
                     self.storage.reloadFromCache()
                     self.quizService.reloadFromCache()
                     self.refreshStats()
                 }
+            }
+            // 拉取知识点缓存
+            let knowledgePulled = MetadataSyncService.shared.pullKnowledgeCache(cloudFS: fs)
+            if knowledgePulled > 0 {
+                print("📥 启动时知识点缓存同步: 拉取 \(knowledgePulled) 个文件")
             }
         }
         isBootstrapped = true
@@ -356,7 +360,7 @@ final class AppState: ObservableObject {
                     self.storage.triggerRefresh()
                 }
             }
-            // 同步前：从云端拉取元数据到本地缓存
+            // 同步前：从云端拉取元数据和知识点缓存到本地
             if let fs = self.activeFS {
                 let pulled = MetadataSyncService.shared.pullFromCloud(cloudFS: fs)
                 if pulled > 0 {
@@ -364,14 +368,24 @@ final class AppState: ObservableObject {
                     self.storage.reloadFromCache()
                     self.quizService.reloadFromCache()
                 }
+                // 拉取知识点缓存
+                let knowledgePulled = MetadataSyncService.shared.pullKnowledgeCache(cloudFS: fs)
+                if knowledgePulled > 0 {
+                    print("📥 同步前知识点缓存拉取: \(knowledgePulled) 个文件")
+                }
             }
             // 从云端扫描并导入到本地
             let report = self.storage.importFromCloud()
-            // 同步后：推送本地元数据到云端
+            // 同步后：推送本地元数据和知识点缓存到云端
             if let fs = self.activeFS {
                 let pushed = MetadataSyncService.shared.pushToCloud(cloudFS: fs)
                 if pushed > 0 {
                     print("📤 同步后元数据推送: \(pushed) 个文件")
+                }
+                // 推送知识点缓存
+                let knowledgePushed = MetadataSyncService.shared.pushKnowledgeCache(cloudFS: fs)
+                if knowledgePushed > 0 {
+                    print("📤 同步后知识点缓存推送: \(knowledgePushed) 个文件")
                 }
             }
             DispatchQueue.main.async {

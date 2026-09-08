@@ -29,6 +29,8 @@ struct ReviewSessionView: View {
     // 知识点
     @State private var knowledgePoints: [KnowledgePoint] = []  // 当前笔记的知识点
     @State private var selectedKnowledgePoint: KnowledgePoint? = nil  // 选中的知识点
+    @State private var showLecture = false  // 是否显示讲稿阅读页面
+    @State private var lectureContent: String? = nil  // 讲稿内容
     
     var body: some View {
         Group {
@@ -108,16 +110,26 @@ struct ReviewSessionView: View {
                             .id("top")
                         // 笔记标题和状态
                         HStack(spacing: 8) {
-                        stateLabel(note.srs.cardState)
-                        Text(note.title)
-                            .font(.headline)
-                            .lineLimit(2)
-                        Spacer()
-                        let sched = SM2Algorithm.dueDescription(note.srs.dueDate)
-                        Text(sched)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
+                            stateLabel(note.srs.cardState)
+                            Text(note.title)
+                                .font(.headline)
+                                .lineLimit(2)
+                            // 阅读讲稿按钮（只有有讲稿时显示）
+                            if let storage = appState.storage, storage.hasLecture(for: note) {
+                                Button {
+                                    openLecture(note: note)
+                                } label: {
+                                    Image(systemName: "book.closed.fill")
+                                        .font(.caption)
+                                        .foregroundColor(.orange)
+                                }
+                            }
+                            Spacer()
+                            let sched = SM2Algorithm.dueDescription(note.srs.dueDate)
+                            Text(sched)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
                     
                     Divider()
                     
@@ -177,6 +189,16 @@ struct ReviewSessionView: View {
                     point: point,
                     noteContent: queue[currentIndex].markdownContent,
                     config: appState.bailianConfig
+                )
+            }
+        }
+        // 讲稿阅读页面
+        .sheet(isPresented: $showLecture) {
+            if currentIndex < queue.count, let content = lectureContent {
+                LectureReaderView(
+                    note: queue[currentIndex],
+                    folderPath: appState.storage?.getNoteFolderPath(for: queue[currentIndex]) ?? "",
+                    lectureContent: content
                 )
             }
         }
@@ -313,6 +335,19 @@ struct ReviewSessionView: View {
                 knowledgePoints = points
             }
         )
+    }
+    
+    // MARK: - 讲稿阅读
+    
+    private func openLecture(note: Note) {
+        guard let storage = appState.storage else { return }
+        do {
+            lectureContent = try storage.readLecture(for: note)
+            showLecture = true
+        } catch {
+            lectureContent = "读取讲稿失败：\(error.localizedDescription)"
+            showLecture = true
+        }
     }
     
     // MARK: - 复习总结

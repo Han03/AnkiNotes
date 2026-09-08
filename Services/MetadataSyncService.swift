@@ -175,6 +175,119 @@ final class MetadataSyncService {
         pushWorkItem = nil
         NotificationCenter.default.post(name: .metadataSyncNeeded, object: nil)
     }
+    
+    // MARK: - 知识点缓存同步（.knowledge_cache）
+    
+    /// 本地知识点缓存目录（Documents/.knowledge_cache）
+    private var localKnowledgeCacheDir: URL {
+        let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let dir = docs.appendingPathComponent(".knowledge_cache", isDirectory: true)
+        try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+    
+    /// 从云端拉取知识点缓存到本地
+    func pullKnowledgeCache(cloudFS: CloudFileSystem) -> Int {
+        let cloudDir = cloudFS.rootDirectory.appendingPathComponent(".knowledge_cache", isDirectory: true)
+        var pulledCount = 0
+        
+        // 扫描云端 .knowledge_cache 目录
+        let cloudFiles = listFilesRecursive(cloudFS: cloudFS, at: cloudDir)
+        for cloudURL in cloudFiles {
+            do {
+                let relativePath = cloudURL.path.replacingOccurrences(of: cloudDir.path, with: "")
+                let localURL = localKnowledgeCacheDir.appendingPathComponent(relativePath)
+                
+                guard cloudFS.fileExists(at: cloudURL) else { continue }
+                let cloudData = try cloudFS.readData(at: cloudURL)
+                
+                // 比较本地缓存
+                if let localData = try? Data(contentsOf: localURL),
+                   localData == cloudData {
+                    continue
+                }
+                
+                // 写入本地
+                try? fileManager.createDirectory(at: localURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try cloudData.write(to: localURL, options: .atomic)
+                pulledCount += 1
+                print("📥 知识点缓存同步: 拉取 \(cloudURL.lastPathComponent)")
+            } catch {
+                print("⚠️ 知识点缓存拉取失败 \(cloudURL.lastPathComponent): \(error.localizedDescription)")
+            }
+        }
+        return pulledCount
+    }
+    
+    /// 将本地知识点缓存推送到云端
+    func pushKnowledgeCache(cloudFS: CloudFileSystem) -> Int {
+        let cloudDir = cloudFS.rootDirectory.appendingPathComponent(".knowledge_cache", isDirectory: true)
+        try? cloudFS.createDirectoryIfNeeded(at: cloudDir)
+        var pushedCount = 0
+        
+        // 扫描本地 .knowledge_cache 目录
+        let localFiles = listLocalFilesRecursive(at: localKnowledgeCacheDir)
+        for localURL in localFiles {
+            do {
+                let relativePath = localURL.path.replacingOccurrences(of: localKnowledgeCacheDir.path, with: "")
+                let cloudURL = cloudDir.appendingPathComponent(relativePath)
+                
+                guard fileManager.fileExists(atPath: localURL.path) else { continue }
+                let localData = try Data(contentsOf: localURL)
+                
+                // 比较云端
+                if let cloudData = try? cloudFS.readData(at: cloudURL),
+                   cloudData == localData {
+                    continue
+                }
+                
+                // 写入云端
+                try? cloudFS.createDirectoryIfNeeded(at: cloudURL.deletingLastPathComponent())
+                try cloudFS.writeData(localData, to: cloudURL)
+                pushedCount += 1
+                print("📤 知识点缓存同步: 推送 \(localURL.lastPathComponent)")
+            } catch {
+                print("⚠️ 知识点缓存推送失败 \(localURL.lastPathComponent): \(error.localizedDescription)")
+            }
+        }
+        return pushedCount
+    }
+    
+    // MARK: - 递归扫描文件工具
+    
+    private func listFilesRecursive(cloudFS: CloudFileSystem, at url: URL) -> [URL] {
+        var result: [URL] = []
+        let children: [URL]
+        do { children = try cloudFS.contentsOfDirectory(at: url) } catch { return result }
+        for child in children {
+            var subChildren: [URL] = []
+            do { subChildren = try cloudFS.contentsOfDirectory(at: child) } catch {}
+            if subChildren.isEmpty {
+                // 是文件
+                result.append(child)
+            } else {
+                // 是目录，递归
+                result.append(contentsOf: listFilesRecursive(cloudFS: cloudFS, at: child))
+            }
+        }
+        return result
+    }
+    
+    private func listLocalFilesRecursive(at url: URL) -> [URL] {
+        var result: [URL] = []
+        guard let children = try? fileManager.contentsOfDirectory(at: url, includingPropertiesForKeys: nil) else { return result }
+        for child in children {
+            var isDir: ObjCBool = false
+            if fileManager.fileExists(atPath: child.path, isDirectory: &isDir) {
+                if isDir.boolValue {
+                    result.append(contentsOf: listLocalFilesRecursive(at: child))
+                } else {
+                    result.append(child)
+                }
+            }
+        }
+        return result
+    }
 }
 
 // MARK: - Notification
