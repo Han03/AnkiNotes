@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 /// 同步日志记录器 - 将同步过程的详细日志写入 tmp 目录
 /// 用于排查同步卡住或报错的问题
