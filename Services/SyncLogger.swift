@@ -123,6 +123,9 @@ final class SyncLogger {
     }
     
     private func writeLine(_ line: String) {
+        // 确保文件句柄存在（同步结束后可能被关闭，自动创建新文件）
+        ensureFileHandle()
+        
         guard let handle = fileHandle, let data = line.data(using: .utf8) else { return }
         
         do {
@@ -135,6 +138,51 @@ final class SyncLogger {
             handle.synchronizeFile()
         } catch {
             print("⚠️ SyncLogger: 写入日志失败: \(error)")
+        }
+    }
+    
+    /// 确保文件句柄存在，如果不存在则创建新的日志文件
+    private func ensureFileHandle() {
+        guard fileHandle == nil else { return }
+        
+        // 创建日志文件名：sync_YYYYMMDD_HHMMSS.log
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd_HHmmss"
+        let timestamp = formatter.string(from: Date())
+        let fileName = "sync_\(timestamp).log"
+        
+        // tmp 目录
+        let tmpDir = NSTemporaryDirectory()
+        let filePath = (tmpDir as NSString).appendingPathComponent(fileName)
+        
+        // 创建空文件（如果不存在）
+        if !FileManager.default.fileExists(atPath: filePath) {
+            FileManager.default.createFile(atPath: filePath, contents: nil, attributes: nil)
+        }
+        
+        do {
+            fileHandle = try FileHandle(forWritingTo: URL(fileURLWithPath: filePath))
+            fileHandle?.seekToEndOfFile()
+            logFilePath = filePath
+            
+            // 写入会话开始标记
+            let header = String(repeating: "=", count: 60) + "\n" +
+                         "日志会话自动创建（非同步期间）\n" +
+                         "时间: \(Date().description)\n" +
+                         "日志文件: \(filePath)\n" +
+                         String(repeating: "=", count: 60) + "\n"
+            if let data = header.data(using: .utf8) {
+                if #available(iOS 13.4, *) {
+                    try fileHandle?.write(contentsOf: data)
+                } else {
+                    fileHandle?.write(data)
+                }
+                fileHandle?.synchronizeFile()
+            }
+            
+            print("📝 SyncLogger: 自动创建日志文件: \(filePath)")
+        } catch {
+            print("⚠️ SyncLogger: 自动创建日志文件失败: \(error)")
         }
     }
     
