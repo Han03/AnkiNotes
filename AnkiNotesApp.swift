@@ -644,8 +644,9 @@ final class AppState: ObservableObject {
             // 【优化】检查是否有需要推送的本地更改，如果没有则跳过推送数据（避免不必要的锁获取和限流）
             // 检查本地元数据目录和知识点缓存目录是否有变化
             let fileManager = FileManager.default
-            let metadataDir = self.storage.metadataDirectory
-            let knowledgeCacheDir = self.storage.rootDirectory.appendingPathComponent(".knowledge_cache")
+            let documentsDir = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
+            let metadataDir = documentsDir.appendingPathComponent(".metadata", isDirectory: true)
+            let knowledgeCacheDir = documentsDir.appendingPathComponent(".knowledge_cache", isDirectory: true)
             
             var hasLocalChanges = false
             var metadataChanged = false
