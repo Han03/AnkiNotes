@@ -631,6 +631,13 @@ final class AppState: ObservableObject {
             let localProcessDuration = Date().timeIntervalSince(localProcessStartTime)
             SyncLogger.shared.stepDone("本地处理", duration: localProcessDuration)
             SyncLogger.shared.info("本地处理完成，总耗时 \(String(format: "%.2f", localProcessDuration))秒")
+            
+            // 立即保存同步快照（即使推送失败，快照也已保存，下次同步可增量跳过）
+            SyncLogger.shared.stepStart("保存同步快照")
+            self.syncSnapshotService.save()
+            SyncLogger.shared.stepDone("保存同步快照")
+            SyncLogger.shared.info("同步快照已保存，下次同步可增量跳过已同步内容")
+            
             // 本地处理完成，重新获取锁用于推送云端
             SyncLogger.shared.stepStart("重新获取云端锁（用于推送数据）")
             var pushLockAcquired = false
@@ -729,11 +736,6 @@ final class AppState: ObservableObject {
             let knowledgePushDuration = Date().timeIntervalSince(knowledgePushStartTime)
             SyncLogger.shared.stepDone("推送知识点缓存到云端", duration: knowledgePushDuration)
             SyncLogger.shared.info("推送知识点缓存到云端: \(knowledgePushed) 个文件，耗时 \(String(format: "%.2f", knowledgePushDuration))秒")
-            // 同步完成后保存快照
-            SyncLogger.shared.stepStart("保存同步快照")
-            self.syncSnapshotService.save()
-            SyncLogger.shared.stepDone("保存同步快照")
-            SyncLogger.shared.info("同步快照已保存")
             
             DispatchQueue.main.async {
                 // 静默同步也显示完成状态

@@ -22,6 +22,14 @@ final class StorageService: ObservableObject {
     /// 同步快照服务（用于增量同步）
     weak var syncSnapshotService: SyncSnapshotService?
     
+    /// 讲稿存在性缓存（避免频繁检查文件系统）
+    private var lectureExistsCache: [UUID: Bool] = [:]
+    
+    /// 清除讲稿存在性缓存（讲稿/笔记发生变化时调用）
+    func clearLectureCache() {
+        lectureExistsCache.removeAll()
+    }
+    
     init(fileSystem: FileSystemService) {
         self.fileSystem = fileSystem
         self.folders = fileSystem.loadFolders()
@@ -35,6 +43,7 @@ final class StorageService: ObservableObject {
         folders = fileSystem.loadFolders()
         noteMetas = fileSystem.loadNoteIndex()
         reviewLogs = fileSystem.loadReviewLogs()
+        clearLectureCache()  // 重新加载后清除讲稿缓存
         triggerRefresh()
     }
     
@@ -289,16 +298,24 @@ final class StorageService: ObservableObject {
     
     // MARK: - 课堂讲稿
     
-    /// 检查笔记是否有对应的课堂讲稿
+    /// 检查笔记是否有对应的课堂讲稿（带缓存，避免频繁检查文件系统）
     func hasLecture(for note: Note) -> Bool {
+        // 先检查缓存
+        if let cached = lectureExistsCache[note.id] {
+            return cached
+        }
+        // 缓存未命中，检查文件系统
         let exists = fileSystem.lectureExists(folderId: note.folderId, title: note.title, folders: folders)
-        SyncLogger.shared.debug("📖 hasLecture: note.title=\(note.title), folderId=\(note.folderId?.uuidString ?? "nil"), folders=\(folders.count), exists=\(exists)")
+        lectureExistsCache[note.id] = exists
         return exists
     }
     
     /// 读取课堂讲稿内容
     func readLecture(for note: Note) throws -> String {
-        try fileSystem.readLecture(folderId: note.folderId, title: note.title, folders: folders)
+        let content = try fileSystem.readLecture(folderId: note.folderId, title: note.title, folders: folders)
+        // 读取成功后更新缓存
+        lectureExistsCache[note.id] = true
+        return content
     }
     
     @discardableResult
