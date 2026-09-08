@@ -57,6 +57,11 @@ final class QuizService {
     func updateNotes(_ notes: [Note], folders: [Folder]) {
         self.notes = notes
         self.folders = folders
+        // 更新笔记列表后自动重新加载题目（确保 App 启动时题目能正常加载）
+        if !notes.isEmpty {
+            load()
+            print("📚 QuizService.updateNotes: 已更新 \(notes.count) 篇笔记，加载题目 \(questions.count) 道")
+        }
     }
     
     /// 从本地缓存重新加载题库（元数据同步后调用）
@@ -69,6 +74,8 @@ final class QuizService {
     private func load() {
         // 按笔记文件夹结构加载题目：遍历所有笔记，读取对应的 Questions/[路径]/[标题].json
         var allQuestions: [Question] = []
+        var loadedNotes = 0
+        var skippedNotes = 0
         for note in notes {
             do {
                 let noteQuestions = try fileSystem.readQuestions(
@@ -76,12 +83,19 @@ final class QuizService {
                     title: note.title,
                     folders: folders
                 )
-                allQuestions.append(contentsOf: noteQuestions)
+                if !noteQuestions.isEmpty {
+                    allQuestions.append(contentsOf: noteQuestions)
+                    loadedNotes += 1
+                } else {
+                    skippedNotes += 1
+                }
             } catch {
                 // 该笔记没有题目文件，跳过
+                skippedNotes += 1
             }
         }
         questions = allQuestions
+        print("📚 QuizService.load: 遍历 \(notes.count) 篇笔记，加载题目 \(questions.count) 道（有题目的笔记 \(loadedNotes) 篇，无题目 \(skippedNotes) 篇）")
         
         // 加载已生成笔记 ID
         if let data = try? fileSystem.readNoteContent(from: generatedIdsURL).data(using: .utf8),
