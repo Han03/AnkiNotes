@@ -71,8 +71,8 @@ struct NoteDetailView: View {
                         config: appState.bailianConfig
                     )
                 }
-                // 讲稿阅读界面
-                .sheet(isPresented: $showLecture) {
+                // 讲稿阅读界面（使用 fullScreenCover 避免与知识点详解的 sheet 冲突）
+                .fullScreenCover(isPresented: $showLecture) {
                     if let content = lectureContent {
                         LectureReaderView(
                             note: note,

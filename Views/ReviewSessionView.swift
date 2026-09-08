@@ -192,8 +192,8 @@ struct ReviewSessionView: View {
                 )
             }
         }
-        // 讲稿阅读页面
-        .sheet(isPresented: $showLecture) {
+        // 讲稿阅读页面（使用 fullScreenCover 避免与其他 sheet 冲突）
+        .fullScreenCover(isPresented: $showLecture) {
             if currentIndex < queue.count, let content = lectureContent {
                 LectureReaderView(
                     note: queue[currentIndex],
