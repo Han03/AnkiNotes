@@ -406,6 +406,8 @@ final class AppState: ObservableObject {
             let report = self.storage.importFromCloud()
             // 导入完成后，再从本地缓存加载元数据（合并本地和云端的索引）
             self.storage.reloadFromCache()
+            // 先更新 quizService 的笔记和文件夹列表，否则 reloadFromCache 时遍历空数组读不到题目
+            self.quizService.updateNotes(self.storage.getAllNotes(), folders: self.storage.getAllFolders())
             self.quizService.reloadFromCache()
             // 推送前验证锁的所有权（防止锁过期后被其他设备抢占）
             guard CloudLockService.shared.verifyLockOwnership(cloudFS: fs) else {
