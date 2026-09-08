@@ -23,7 +23,7 @@ struct AnkiNotesApp: App {
                     // 应用启动时后台静默同步
                     appState.performSilentSyncOnLaunch()
                 }
-                .onChange(of: scenePhase) { _, newPhase in
+                .onChange(of: scenePhase) { newPhase in
                     // App 进入后台时释放云端锁，防止死锁
                     if newPhase == .background {
                         if let fs = appState.activeFS {
