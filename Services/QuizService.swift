@@ -39,6 +39,8 @@ final class QuizService {
 
     private let generatedIdsURL: URL
     private let fileSystem: FileSystemService
+    /// 云端文件系统（用于锁验证，由 AppState 设置）
+    weak var cloudFS: CloudFileSystem?
     
     /// 所有笔记（用于查找 folderId 和 title，由 AppState 更新）
     var notes: [Note] = []
@@ -357,6 +359,14 @@ final class QuizService {
 
                 // 每完成一个笔记就立即保存该笔记的题目，确保中断不丢失已生成题目
                 self.saveQuestions(for: note)
+                
+                // 验证云端锁的所有权（防止锁过期后被其他设备抢占）
+                if let cloudFS = self.cloudFS,
+                   !CloudLockService.shared.verifyLockOwnership(cloudFS: cloudFS) {
+                    print("⚠️ 生成题目中断：云端锁已失效")
+                    wasCancelled = true
+                    break
+                }
             }
 
             self.isGenerating = false

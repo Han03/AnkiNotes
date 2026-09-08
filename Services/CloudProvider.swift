@@ -111,6 +111,9 @@ protocol CloudFileSystem: AnyObject {
     func readData(at url: URL) throws -> Data
     /// 写入数据（atomic）
     func writeData(_ data: Data, to url: URL) throws
+    /// 原子写入：仅当文件不存在时才写入（用于分布式锁获取）
+    /// - Returns: true=写入成功，false=文件已存在
+    func writeDataIfNotExists(_ data: Data, to url: URL) throws -> Bool
     /// 删除
     func removeItem(at url: URL) throws
     /// 复制（用于 Provider 切换时迁移数据）
@@ -215,6 +218,24 @@ final class LocalFS: CloudFileSystem {
         try data.write(to: url, options: .atomic)
     }
 
+    func writeDataIfNotExists(_ data: Data, to url: URL) throws -> Bool {
+        try createDirectoryIfNeeded(at: url.deletingLastPathComponent())
+        if fm.fileExists(atPath: url.path) {
+            return false
+        }
+        // 原子写入：使用 .withoutOverwriting 选项
+        do {
+            try data.write(to: url, options: [.atomic, .withoutOverwriting])
+            return true
+        } catch {
+            // 文件可能在检查后被其他进程创建
+            if (error as NSError).code == NSFileWriteFileExistsError {
+                return false
+            }
+            throw error
+        }
+    }
+
     func removeItem(at url: URL) throws {
         guard fm.fileExists(atPath: url.path) else { return }
         try fm.removeItem(at: url)
@@ -288,6 +309,22 @@ final class ICloudFS: CloudFileSystem {
     func writeData(_ data: Data, to url: URL) throws {
         try createDirectoryIfNeeded(at: url.deletingLastPathComponent())
         try data.write(to: url, options: .atomic)
+    }
+
+    func writeDataIfNotExists(_ data: Data, to url: URL) throws -> Bool {
+        try createDirectoryIfNeeded(at: url.deletingLastPathComponent())
+        if fm.fileExists(atPath: url.path) {
+            return false
+        }
+        do {
+            try data.write(to: url, options: [.atomic, .withoutOverwriting])
+            return true
+        } catch {
+            if (error as NSError).code == NSFileWriteFileExistsError {
+                return false
+            }
+            throw error
+        }
     }
 
     func removeItem(at url: URL) throws {
@@ -404,6 +441,26 @@ final class WebDAVFS: CloudFileSystem {
         req.httpBody = data
         req.setValue("\(data.count)", forHTTPHeaderField: "Content-Length")
         _ = try sendBlockingRequest(req, allowedStatus: [200, 201, 204])
+    }
+
+    /// 原子写入：仅当文件不存在时才写入
+    /// 使用 If-None-Match: * header，WebDAV 服务器在文件已存在时返回 412 Precondition Failed
+    func writeDataIfNotExists(_ data: Data, to url: URL) throws -> Bool {
+        try createDirectoryIfNeeded(at: url.deletingLastPathComponent())
+        var req = request(url: url, method: "PUT")
+        req.httpBody = data
+        req.setValue("\(data.count)", forHTTPHeaderField: "Content-Length")
+        req.setValue("*", forHTTPHeaderField: "If-None-Match")  // 关键：仅当不存在时才写入
+        do {
+            _ = try sendBlockingRequest(req, allowedStatus: [200, 201, 204])
+            return true
+        } catch let error as WebDAVError {
+            // 412 Precondition Failed = 文件已存在
+            if case .httpError(let code, _) = error, code == 412 {
+                return false
+            }
+            throw error
+        }
     }
 
     func removeItem(at url: URL) throws {

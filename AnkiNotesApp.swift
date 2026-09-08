@@ -405,6 +405,17 @@ final class AppState: ObservableObject {
             }
             // 从云端扫描并导入到本地
             let report = self.storage.importFromCloud()
+            // 推送前验证锁的所有权（防止锁过期后被其他设备抢占）
+            guard CloudLockService.shared.verifyLockOwnership(cloudFS: fs) else {
+                print("⚠️ 同步中断：云端锁已失效，可能被其他设备抢占")
+                DispatchQueue.main.async {
+                    if !silent {
+                        self.providerStatus = "⚠️ 同步中断：云端锁已失效，请稍后重试"
+                    }
+                }
+                completion?(StorageService.ImportReport())
+                return
+            }
             // 同步后：推送本地元数据和知识点缓存到云端
             let pushed = MetadataSyncService.shared.pushToCloud(cloudFS: fs)
             if pushed > 0 {
@@ -574,6 +585,8 @@ final class AppState: ObservableObject {
         scheduler  = SchedulerService(storage: storage)
         quizService = QuizService(fileSystem: localFileSvc)
         storage.quizService = quizService  // 让删除笔记时能联动删除相关题目
+        // 设置云端文件系统（用于锁验证）
+        quizService.cloudFS = webDAVFS ?? localFS
         // 更新 quizService 的笔记和文件夹列表（用于按文件夹结构存储题目）
         quizService.updateNotes(storage.getAllNotes(), folders: storage.getAllFolders())
         refreshStats()
