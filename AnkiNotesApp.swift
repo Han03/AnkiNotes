@@ -10,6 +10,8 @@ import SwiftUI
 @main
 struct AnkiNotesApp: App {
     @StateObject private var appState = AppState()
+    @Environment(\.scenePhase) private var scenePhase
+    
     var body: some Scene {
         WindowGroup {
             MainTabView()
@@ -20,6 +22,14 @@ struct AnkiNotesApp: App {
                     appState.bootstrap()
                     // 应用启动时后台静默同步
                     appState.performSilentSyncOnLaunch()
+                }
+                .onChange(of: scenePhase) { _, newPhase in
+                    // App 进入后台时释放云端锁，防止死锁
+                    if newPhase == .background {
+                        if let fs = appState.activeFS {
+                            CloudLockService.shared.applicationDidEnterBackground(cloudFS: fs)
+                        }
+                    }
                 }
         }
     }
@@ -357,6 +367,10 @@ final class AppState: ObservableObject {
             guard let self = self else { return }
             defer {
                 self.syncLock.unlock()
+                // 释放云端锁
+                if let fs = self.activeFS {
+                    CloudLockService.shared.releaseLock(cloudFS: fs)
+                }
                 DispatchQueue.main.async {
                     self.isSyncing = false
                     self.isSilentSyncing = false
@@ -364,33 +378,42 @@ final class AppState: ObservableObject {
                     self.storage.triggerRefresh()
                 }
             }
+            // 获取云端锁（防止多端同时同步）
+            guard let fs = self.activeFS,
+                  CloudLockService.shared.acquireLock(cloudFS: fs) else {
+                // 获取锁失败，提示用户
+                if !silent, let fs = self.activeFS,
+                   let holderInfo = CloudLockService.shared.lockHolderInfo(cloudFS: fs) {
+                    DispatchQueue.main.async {
+                        self.providerStatus = "⚠️ 其他设备正在同步，请稍后再试。\n\(holderInfo)"
+                    }
+                }
+                completion?(StorageService.ImportReport())
+                return
+            }
             // 同步前：从云端拉取元数据和知识点缓存到本地
-            if let fs = self.activeFS {
-                let pulled = MetadataSyncService.shared.pullFromCloud(cloudFS: fs)
-                if pulled > 0 {
-                    print("📥 同步前元数据拉取: \(pulled) 个文件")
-                    self.storage.reloadFromCache()
-                    self.quizService.reloadFromCache()
-                }
-                // 拉取知识点缓存
-                let knowledgePulled = MetadataSyncService.shared.pullKnowledgeCache(cloudFS: fs)
-                if knowledgePulled > 0 {
-                    print("📥 同步前知识点缓存拉取: \(knowledgePulled) 个文件")
-                }
+            let pulled = MetadataSyncService.shared.pullFromCloud(cloudFS: fs)
+            if pulled > 0 {
+                print("📥 同步前元数据拉取: \(pulled) 个文件")
+                self.storage.reloadFromCache()
+                self.quizService.reloadFromCache()
+            }
+            // 拉取知识点缓存
+            let knowledgePulled = MetadataSyncService.shared.pullKnowledgeCache(cloudFS: fs)
+            if knowledgePulled > 0 {
+                print("📥 同步前知识点缓存拉取: \(knowledgePulled) 个文件")
             }
             // 从云端扫描并导入到本地
             let report = self.storage.importFromCloud()
             // 同步后：推送本地元数据和知识点缓存到云端
-            if let fs = self.activeFS {
-                let pushed = MetadataSyncService.shared.pushToCloud(cloudFS: fs)
-                if pushed > 0 {
-                    print("📤 同步后元数据推送: \(pushed) 个文件")
-                }
-                // 推送知识点缓存
-                let knowledgePushed = MetadataSyncService.shared.pushKnowledgeCache(cloudFS: fs)
-                if knowledgePushed > 0 {
-                    print("📤 同步后知识点缓存推送: \(knowledgePushed) 个文件")
-                }
+            let pushed = MetadataSyncService.shared.pushToCloud(cloudFS: fs)
+            if pushed > 0 {
+                print("📤 同步后元数据推送: \(pushed) 个文件")
+            }
+            // 推送知识点缓存
+            let knowledgePushed = MetadataSyncService.shared.pushKnowledgeCache(cloudFS: fs)
+            if knowledgePushed > 0 {
+                print("📤 同步后知识点缓存推送: \(knowledgePushed) 个文件")
             }
             DispatchQueue.main.async {
                 if !silent {
@@ -472,6 +495,18 @@ final class AppState: ObservableObject {
             completion?(0, 0, false)
             return
         }
+        // 获取云端锁（防止多端同时生成题目导致冲突）
+        guard let fs = activeFS,
+              CloudLockService.shared.acquireLock(cloudFS: fs) else {
+            if let fs = activeFS,
+               let holderInfo = CloudLockService.shared.lockHolderInfo(cloudFS: fs) {
+                quizError = "其他设备正在操作云端数据，请稍后再试。\n\(holderInfo)"
+            } else {
+                quizError = "获取云端锁失败，请稍后再试"
+            }
+            completion?(0, 0, false)
+            return
+        }
         let allNotes = storage.getAllNotes()
         isGeneratingQuestions = true
         quizError = nil
@@ -491,6 +526,10 @@ final class AppState: ObservableObject {
                 }
             },
             completion: { [weak self] newCount, processedCount, wasCancelled in
+                // 释放云端锁
+                if let fs = self?.activeFS {
+                    CloudLockService.shared.releaseLock(cloudFS: fs)
+                }
                 self?.isGeneratingQuestions = false
                 self?.generationProgress = nil
                 // 生成完成后刷新统计
