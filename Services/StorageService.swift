@@ -791,17 +791,17 @@ final class StorageService: ObservableObject {
     }
     
     private func collectFilesFromFS(_ fs: CloudFileSystem, at url: URL, extensions: [String], skipNames: Set<String>, into result: inout [URL]) {
-        let children: [URL]
-        do { children = try fs.contentsOfDirectory(at: url) } catch { return }
-        for child in children {
+        // 使用 contentsOfDirectoryWithTypes 一次获取子项和类型，避免对每个子项发起额外请求
+        // （WebDAV 下 contentsOfDirectory 是网络请求，逐个调用容易超时失败导致目录被跳过）
+        let children: [(url: URL, isDirectory: Bool)]
+        do { children = try fs.contentsOfDirectoryWithTypes(at: url) } catch { return }
+        for (child, isDirectory) in children {
             let name = child.lastPathComponent
             if skipNames.contains(name) { continue }
-            var subChildren: [URL] = []
-            do { subChildren = try fs.contentsOfDirectory(at: child) } catch {}
             let ext = child.pathExtension.lowercased()
             if extensions.contains(ext) {
                 result.append(child)
-            } else if !subChildren.isEmpty {
+            } else if isDirectory {
                 collectFilesFromFS(fs, at: child, extensions: extensions, skipNames: skipNames, into: &result)
             }
         }

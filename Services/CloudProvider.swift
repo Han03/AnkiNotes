@@ -107,6 +107,8 @@ protocol CloudFileSystem: AnyObject {
     func createDirectoryIfNeeded(at url: URL) throws
     /// 列出目录中的直接子项 URL（用于 WebDAV 扫描，本地用 FileManager）
     func contentsOfDirectory(at url: URL) throws -> [URL]
+    /// 列出目录中的直接子项，同时返回是否是目录（避免对每个子项发起额外请求）
+    func contentsOfDirectoryWithTypes(at url: URL) throws -> [(url: URL, isDirectory: Bool)]
     /// 读取数据
     func readData(at url: URL) throws -> Data
     /// 写入数据（atomic）
@@ -261,6 +263,22 @@ final class LocalFS: CloudFileSystem {
         try fm.contentsOfDirectory(at: url, includingPropertiesForKeys: nil, options: [])
     }
 
+    func contentsOfDirectoryWithTypes(at url: URL) throws -> [(url: URL, isDirectory: Bool)] {
+        let urls = try fm.contentsOfDirectory(at: url, includingPropertiesForKeys: [.isDirectoryKey], options: [])
+        return urls.map { url in
+            let isDir = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+            return (url, isDir)
+        }
+    }
+
+    func contentsOfDirectoryWithTypes(at url: URL) throws -> [(url: URL, isDirectory: Bool)] {
+        let urls = try fm.contentsOfDirectory(at: url, includingPropertiesForKeys: [.isDirectoryKey], options: [])
+        return urls.map { url in
+            let isDir = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+            return (url, isDir)
+        }
+    }
+
     func readData(at url: URL) throws -> Data { try Data(contentsOf: url) }
 
     func writeData(_ data: Data, to url: URL) throws {
@@ -337,6 +355,14 @@ final class ICloudFS: CloudFileSystem {
 
     func contentsOfDirectory(at url: URL) throws -> [URL] {
         try fm.contentsOfDirectory(at: url, includingPropertiesForKeys: nil, options: [])
+    }
+
+    func contentsOfDirectoryWithTypes(at url: URL) throws -> [(url: URL, isDirectory: Bool)] {
+        let urls = try fm.contentsOfDirectory(at: url, includingPropertiesForKeys: [.isDirectoryKey], options: [])
+        return urls.map { url in
+            let isDir = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+            return (url, isDir)
+        }
     }
 
     func readData(at url: URL) throws -> Data {
