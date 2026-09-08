@@ -17,6 +17,14 @@ final class MetadataSyncService {
     private var pushWorkItem: DispatchWorkItem?
     private let pushQueue = DispatchQueue(label: "com.ankinotes.metadata.push", qos: .utility)
     
+    /// 同步快照服务（用于知识点缓存的增量同步跳过）
+    private weak var syncSnapshotService: SyncSnapshotService?
+    
+    /// 配置同步快照服务
+    func configure(syncSnapshotService: SyncSnapshotService) {
+        self.syncSnapshotService = syncSnapshotService
+    }
+    
     /// 需要同步的元数据文件名
     /// 注意：quiz_questions.json 已废弃，题库现在按笔记文件夹结构存储在 Questions/ 目录
     private let metadataFiles: [String] = [
@@ -244,17 +252,55 @@ final class MetadataSyncService {
         return dir
     }
     
-    /// 从云端拉取知识点缓存到本地
+    /// 从云端拉取知识点缓存到本地（支持快照跳过）
     func pullKnowledgeCache(cloudFS: CloudFileSystem) -> Int {
         let cloudDir = cloudFS.rootDirectory.appendingPathComponent(".knowledge_cache", isDirectory: true)
         var pulledCount = 0
+        var skippedBySnapshot = 0
         
-        // 只扫描一层目录（知识点缓存文件直接存储在 .knowledge_cache 目录下）
-        let cloudFiles = listFilesFlat(cloudFS: cloudFS, at: cloudDir)
-        for cloudURL in cloudFiles {
+        // 使用 contentsOfDirectoryWithMetadata 扫描目录，获取文件的修改时间（用于快照跳过）
+        let children: [(url: URL, isDirectory: Bool, lastModified: Date?)]
+        do {
+            children = try cloudFS.contentsOfDirectoryWithMetadata(at: cloudDir)
+        } catch {
+            print("⚠️ 知识点缓存拉取: 扫描目录失败 - \(error.localizedDescription)")
+            return 0
+        }
+        
+        // 目录级跳过：检查 .knowledge_cache 目录的修改时间，如果没有更新，跳过整个同步
+        if let snap = syncSnapshotService {
+            let dirRelativePath = ".knowledge_cache"
+            // 获取目录本身的修改时间（通过 getItemMetadata）
+            if let dirMeta = try? cloudFS.getItemMetadata(at: cloudDir),
+               !snap.isDirectoryUpdated(relativePath: dirRelativePath, lastModified: dirMeta.lastModified) {
+                print("📥 知识点缓存同步: 目录无更新，跳过整个同步（快照跳过）")
+                return 0
+            }
+            // 更新目录的修改时间到快照
+            if let dirMeta = try? cloudFS.getItemMetadata(at: cloudDir) {
+                snap.updateDirectory(relativePath: dirRelativePath, lastModified: dirMeta.lastModified)
+            }
+        }
+        
+        for child in children {
+            // 跳过子目录（知识点缓存只有一层目录）
+            guard !child.isDirectory else {
+                print("⚠️ 知识点缓存扫描: 跳过子目录 \(child.url.lastPathComponent)")
+                continue
+            }
+            
+            let cloudURL = child.url
+            let fileName = cloudURL.lastPathComponent
+            let fileRelativePath = ".knowledge_cache/\(fileName)"
+            
+            // 文件级跳过：检查文件的修改时间，如果没有更新，跳过该文件
+            if let snap = syncSnapshotService,
+               !snap.isFileUpdated(relativePath: fileRelativePath, lastModified: child.lastModified) {
+                skippedBySnapshot += 1
+                continue
+            }
+            
             do {
-                // 文件名就是相对路径（只有一层）
-                let fileName = cloudURL.lastPathComponent
                 let localURL = localKnowledgeCacheDir.appendingPathComponent(fileName)
                 
                 guard cloudFS.fileExists(at: cloudURL) else { continue }
@@ -263,6 +309,10 @@ final class MetadataSyncService {
                 // 比较本地缓存
                 if let localData = try? Data(contentsOf: localURL),
                    localData == cloudData {
+                    // 内容相同，更新文件的修改时间到快照
+                    if let snap = syncSnapshotService {
+                        snap.updateFile(relativePath: fileRelativePath, lastModified: child.lastModified)
+                    }
                     continue
                 }
                 
@@ -270,11 +320,22 @@ final class MetadataSyncService {
                 try? fileManager.createDirectory(at: localURL.deletingLastPathComponent(), withIntermediateDirectories: true)
                 try cloudData.write(to: localURL, options: .atomic)
                 pulledCount += 1
+                
+                // 更新文件的修改时间到快照
+                if let snap = syncSnapshotService {
+                    snap.updateFile(relativePath: fileRelativePath, lastModified: child.lastModified)
+                }
+                
                 print("📥 知识点缓存同步: 拉取 \(fileName)")
             } catch {
                 print("⚠️ 知识点缓存拉取失败 \(cloudURL.lastPathComponent): \(error.localizedDescription)")
             }
         }
+        
+        if skippedBySnapshot > 0 {
+            print("📥 知识点缓存同步: 快照跳过 \(skippedBySnapshot) 个文件，实际拉取 \(pulledCount) 个文件")
+        }
+        
         return pulledCount
     }
     

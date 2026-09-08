@@ -961,6 +961,8 @@ final class AppState: ObservableObject {
         syncSnapshotService = SyncSnapshotService(fileSystem: localFileSvc)
         syncSnapshotService.load()
         storage.syncSnapshotService = syncSnapshotService
+        // 注入到 MetadataSyncService，用于知识点缓存的增量同步跳过
+        MetadataSyncService.shared.configure(syncSnapshotService: syncSnapshotService)
         // 设置云端文件系统（用于锁验证）
         quizService.cloudFS = webDAVFS ?? localFS
         // 更新 quizService 的笔记和文件夹列表（用于按文件夹结构存储题目）
