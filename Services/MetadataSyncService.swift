@@ -28,12 +28,12 @@ final class MetadataSyncService {
     
     private init() {}
     
-    // MARK: - 本地缓存目录
+    // MARK: - 本地元数据目录
     
-    /// 本地元数据缓存目录（App 沙盒 Library/Caches/Metadata）
+    /// 本地元数据目录（Documents/.metadata）
     private var localCacheDirectory: URL {
-        let caches = fileManager.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        let dir = caches.appendingPathComponent("Metadata", isDirectory: true)
+        let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let dir = docs.appendingPathComponent(".metadata", isDirectory: true)
         try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }

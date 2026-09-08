@@ -17,59 +17,49 @@ final class FileSystemService {
 
     let cloudFS: CloudFileSystem
 
-    /// 本地元数据缓存目录（Library/Caches/Metadata）
-    private var localCacheDirectory: URL {
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        let dir = caches.appendingPathComponent("Metadata", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
-    }
-    
-    private func localCacheURL(for url: URL) -> URL {
-        localCacheDirectory.appendingPathComponent(url.lastPathComponent)
-    }
-    
     init(cloudFS: CloudFileSystem) {
         self.cloudFS = cloudFS
     }
 
-    // MARK: - 路径（URL 语义保持不变：root/Notes 和 root/.metadata）
+    // MARK: - 路径（全部指向本地 Documents，云端仅用于同步备份）
 
-    /// 根目录：本地 = Documents；iCloud = Container/Documents/AnkiNotes；WebDAV = 服务器+根路径
-    var rootDirectory: URL { cloudFS.rootDirectory }
+    /// 本地 Documents 目录（权威数据源）
+    var localDocumentsDirectory: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+    }
 
-    /// Markdown 物理文件总目录（root/Notes）
+    /// 根目录：本地 Documents（云端仅用于同步）
+    var rootDirectory: URL { localDocumentsDirectory }
+
+    /// Markdown 物理文件总目录（Documents/Notes）
     var notesRootDirectory: URL {
-        let dir = rootDirectory.appendingPathComponent("Notes", isDirectory: true)
-        try? cloudFS.createDirectoryIfNeeded(at: dir)
+        let dir = localDocumentsDirectory.appendingPathComponent("Notes", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
 
-    /// 课堂讲稿总目录（root/Lecture）
+    /// 课堂讲稿总目录（Documents/Lecture）
     var lecturesRootDirectory: URL {
-        let dir = rootDirectory.appendingPathComponent("Lecture", isDirectory: true)
-        try? cloudFS.createDirectoryIfNeeded(at: dir)
+        let dir = localDocumentsDirectory.appendingPathComponent("Lecture", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
     
-    /// 题库总目录（root/Questions，按笔记文件夹结构存储）
+    /// 题库总目录（Documents/Questions，按笔记文件夹结构存储）
     var questionsRootDirectory: URL {
-        let dir = rootDirectory.appendingPathComponent("Questions", isDirectory: true)
-        try? cloudFS.createDirectoryIfNeeded(at: dir)
+        let dir = localDocumentsDirectory.appendingPathComponent("Questions", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
 
-    /// JSON 索引目录（root/.metadata，iCloud 下也会被自动同步，因为不是点开头会上传；
-    /// 但我们在设置 URLResourceValues 隐藏仅是为了文件 App 不显示它）
+    /// JSON 索引目录（Documents/.metadata）
     var metadataDirectory: URL {
-        var dir = rootDirectory.appendingPathComponent(".metadata", isDirectory: true)
-        try? cloudFS.createDirectoryIfNeeded(at: dir)
-        // 仅本地沙盒 / iCloud（URL 对象是 file://）时尝试隐藏属性
-        if dir.isFileURL {
-            var values = URLResourceValues()
-            values.isHidden = true
-            try? dir.setResourceValues(values)
-        }
+        let dir = localDocumentsDirectory.appendingPathComponent(".metadata", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        // 隐藏属性
+        var values = URLResourceValues()
+        values.isHidden = true
+        try? (dir as NSURL).setResourceValues(values)
         return dir
     }
 
@@ -142,174 +132,113 @@ final class FileSystemService {
         return safe
     }
 
-    // MARK: - Markdown IO（转发到 cloudFS）
+    // MARK: - Markdown IO（直接操作本地 Documents）
 
-    func writeNoteContent(_ content: String, to url: URL) throws {
+    func writeNoteContent(_ content: String, to url: URL, skipCloudSync: Bool = false) throws {
         guard let data = content.data(using: .utf8) else {
             throw NSError(domain: "FileSystemService", code: -2, userInfo: [NSLocalizedDescriptionKey: "Markdown 内容转 UTF-8 失败"])
         }
-        try cloudFS.writeData(data, to: url)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try data.write(to: url, options: .atomic)
+        // 异步同步到云端
+        if !skipCloudSync {
+            syncToCloud(data: data, to: url)
+        }
     }
 
     func readNoteContent(from url: URL) throws -> String {
-        let data = try cloudFS.readData(at: url)
+        let data = try Data(contentsOf: url)
         guard let str = String(data: data, encoding: .utf8) else {
             throw NSError(domain: "FileSystemService", code: -3, userInfo: [NSLocalizedDescriptionKey: "Markdown 文件不是有效的 UTF-8 编码"])
         }
         return str
     }
-
-    // MARK: - 讲稿本地缓存目录
     
-    /// 讲稿本地缓存目录（Library/Caches/Lectures）
-    private var lectureCacheDirectory: URL {
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        let dir = caches.appendingPathComponent("Lectures", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
-    }
-    
-    private func lectureCacheURL(folderId: UUID?, title: String, folders: [Folder]) -> URL {
-        var currentURL = lectureCacheDirectory
-        if let folderId = folderId {
-            let pathComponents = buildFolderPath(folderId: folderId, folders: folders)
-            for folderName in pathComponents.reversed() {
-                currentURL = currentURL.appendingPathComponent(folderName, isDirectory: true)
+    /// 异步同步文件到云端
+    private func syncToCloud(data: Data, to url: URL) {
+        guard let cloudFS = cloudFS as? WebDAVFS else { return }
+        DispatchQueue.global(qos: .utility).async {
+            do {
+                // 计算云端路径：把本地 Documents 路径替换为云端根路径
+                let cloudURL = self.cloudURL(forLocalURL: url)
+                try cloudFS.writeData(data, to: cloudURL)
+            } catch {
+                print("⚠️ 云端同步失败 \(url.lastPathComponent): \(error.localizedDescription)")
             }
         }
-        try? FileManager.default.createDirectory(at: currentURL, withIntermediateDirectories: true)
-        let safeTitle = sanitizeFileName(title)
-        return currentURL.appendingPathComponent("\(safeTitle).txt")
+    }
+    
+    /// 本地 URL 转换为云端 URL
+    private func cloudURL(forLocalURL url: URL) -> URL {
+        let localPath = localDocumentsDirectory.path
+        let relativePath = url.path.replacingOccurrences(of: localPath, with: "")
+        return cloudFS.rootDirectory.appendingPathComponent(relativePath)
     }
 
-    // MARK: - 讲稿 IO（带本地缓存）
+    // MARK: - 讲稿 IO（直接操作 Documents/Lecture）
 
     func lectureExists(folderId: UUID?, title: String, folders: [Folder]) -> Bool {
-        let cacheURL = lectureCacheURL(folderId: folderId, title: title, folders: folders)
-        // 优先检查本地缓存
-        if FileManager.default.fileExists(atPath: cacheURL.path) {
-            return true
-        }
-        // 缓存不存在，检查云端
         let url = lectureFileURL(folderId: folderId, title: title, folders: folders)
-        return cloudFS.fileExists(at: url)
+        return FileManager.default.fileExists(atPath: url.path)
     }
 
     func readLecture(folderId: UUID?, title: String, folders: [Folder]) throws -> String {
-        let cacheURL = lectureCacheURL(folderId: folderId, title: title, folders: folders)
-        // 优先从本地缓存读取
-        if let cacheData = try? Data(contentsOf: cacheURL),
-           let str = String(data: cacheData, encoding: .utf8) {
-            return str
-        }
-        // 缓存不存在，从云端读取并写入缓存
         let url = lectureFileURL(folderId: folderId, title: title, folders: folders)
-        let data = try cloudFS.readData(at: url)
+        let data = try Data(contentsOf: url)
         guard let str = String(data: data, encoding: .utf8) else {
             throw NSError(domain: "FileSystemService", code: -4, userInfo: [NSLocalizedDescriptionKey: "讲稿文件不是有效的 UTF-8 编码"])
         }
-        // 写入本地缓存
-        try? data.write(to: cacheURL, options: .atomic)
         return str
     }
 
-    func writeLecture(_ content: String, folderId: UUID?, title: String, folders: [Folder]) throws {
+    func writeLecture(_ content: String, folderId: UUID?, title: String, folders: [Folder], skipCloudSync: Bool = false) throws {
         guard let data = content.data(using: .utf8) else {
             throw NSError(domain: "FileSystemService", code: -5, userInfo: [NSLocalizedDescriptionKey: "讲稿内容转 UTF-8 失败"])
         }
-        // 1. 先写本地缓存
-        let cacheURL = lectureCacheURL(folderId: folderId, title: title, folders: folders)
-        try data.write(to: cacheURL, options: .atomic)
-        // 2. 异步写云端
         let url = lectureFileURL(folderId: folderId, title: title, folders: folders)
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            guard let self = self else { return }
-            do {
-                try self.cloudFS.writeData(data, to: url)
-            } catch {
-                print("⚠️ 讲稿云端写入失败: \(error.localizedDescription)")
-            }
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try data.write(to: url, options: .atomic)
+        // 异步同步到云端
+        if !skipCloudSync {
+            syncToCloud(data: data, to: url)
         }
     }
 
-    // MARK: - 题库本地缓存目录
-    
-    /// 题库本地缓存目录（Library/Caches/Questions）
-    private var questionCacheDirectory: URL {
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        let dir = caches.appendingPathComponent("Questions", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
-    }
-    
-    private func questionCacheURL(folderId: UUID?, title: String, folders: [Folder]) -> URL {
-        var currentURL = questionCacheDirectory
-        if let folderId = folderId {
-            let pathComponents = buildFolderPath(folderId: folderId, folders: folders)
-            for folderName in pathComponents.reversed() {
-                currentURL = currentURL.appendingPathComponent(folderName, isDirectory: true)
-            }
-        }
-        try? FileManager.default.createDirectory(at: currentURL, withIntermediateDirectories: true)
-        let safeTitle = sanitizeFileName(title)
-        return currentURL.appendingPathComponent("\(safeTitle).json")
-    }
-
-    // MARK: - 题库 IO（带本地缓存）
+    // MARK: - 题库 IO（直接操作 Documents/Questions）
 
     func questionExists(folderId: UUID?, title: String, folders: [Folder]) -> Bool {
-        let cacheURL = questionCacheURL(folderId: folderId, title: title, folders: folders)
-        if FileManager.default.fileExists(atPath: cacheURL.path) {
-            return true
-        }
         let url = questionFileURL(folderId: folderId, title: title, folders: folders)
-        return cloudFS.fileExists(at: url)
+        return FileManager.default.fileExists(atPath: url.path)
     }
 
     func readQuestions(folderId: UUID?, title: String, folders: [Folder]) throws -> [Question] {
-        let cacheURL = questionCacheURL(folderId: folderId, title: title, folders: folders)
-        // 优先从本地缓存读取
-        if let cacheData = try? Data(contentsOf: cacheURL),
-           let decoded = try? JSONDecoder().decode([Question].self, from: cacheData) {
-            return decoded
-        }
-        // 缓存不存在，从云端读取并写入缓存
         let url = questionFileURL(folderId: folderId, title: title, folders: folders)
-        let data = try cloudFS.readData(at: url)
+        let data = try Data(contentsOf: url)
         guard let decoded = try? JSONDecoder().decode([Question].self, from: data) else {
             throw NSError(domain: "FileSystemService", code: -6, userInfo: [NSLocalizedDescriptionKey: "题库文件解析失败"])
         }
-        // 写入本地缓存
-        try? data.write(to: cacheURL, options: .atomic)
         return decoded
     }
 
-    func writeQuestions(_ questions: [Question], folderId: UUID?, title: String, folders: [Folder]) throws {
+    func writeQuestions(_ questions: [Question], folderId: UUID?, title: String, folders: [Folder], skipCloudSync: Bool = false) throws {
         let data = try JSONEncoder().encode(questions)
-        // 1. 先写本地缓存
-        let cacheURL = questionCacheURL(folderId: folderId, title: title, folders: folders)
-        try data.write(to: cacheURL, options: .atomic)
-        // 2. 异步写云端
         let url = questionFileURL(folderId: folderId, title: title, folders: folders)
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            guard let self = self else { return }
-            do {
-                try self.cloudFS.writeData(data, to: url)
-            } catch {
-                print("⚠️ 题库云端写入失败: \(error.localizedDescription)")
-            }
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try data.write(to: url, options: .atomic)
+        // 异步同步到云端
+        if !skipCloudSync {
+            syncToCloud(data: data, to: url)
         }
     }
     
     func deleteQuestions(folderId: UUID?, title: String, folders: [Folder]) {
-        // 删除本地缓存
-        let cacheURL = questionCacheURL(folderId: folderId, title: title, folders: folders)
-        try? FileManager.default.removeItem(at: cacheURL)
-        // 异步删除云端
         let url = questionFileURL(folderId: folderId, title: title, folders: folders)
+        try? FileManager.default.removeItem(at: url)
+        // 异步删除云端
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self = self else { return }
-            try? self.cloudFS.removeItem(at: url)
+            let cloudURL = self.cloudURL(forLocalURL: url)
+            try? self.cloudFS.removeItem(at: cloudURL)
         }
     }
 
@@ -373,22 +302,13 @@ final class FileSystemService {
     // MARK: - 通用 JSON 工具
 
     private func loadJSON<T: Decodable>(from url: URL, defaultValue: T) -> T {
-        // 优先从本地缓存读取
-        let cacheURL = localCacheURL(for: url)
-        if let cacheData = try? Data(contentsOf: cacheURL),
-           let decoded = try? JSONDecoder().decode(T.self, from: cacheData) {
-            return decoded
-        }
-        // 缓存不存在，从云端读取并写入缓存
-        guard cloudFS.fileExists(at: url),
-              let data = try? cloudFS.readData(at: url) else {
+        // 直接从本地 Documents/.metadata 读取
+        guard FileManager.default.fileExists(atPath: url.path),
+              let data = try? Data(contentsOf: url) else {
             return defaultValue
         }
         do {
-            let decoded = try JSONDecoder().decode(T.self, from: data)
-            // 写入本地缓存
-            try? data.write(to: cacheURL, options: .atomic)
-            return decoded
+            return try JSONDecoder().decode(T.self, from: data)
         } catch {
             print("⚠️ JSON 解码失败 \(url.lastPathComponent): \(error)")
             return defaultValue
@@ -398,20 +318,12 @@ final class FileSystemService {
     private func saveJSON<T: Encodable>(_ value: T, to url: URL) {
         do {
             let data = try JSONEncoder().encode(value)
-            // 1. 先写本地缓存（保证快速读取）
-            let cacheURL = localCacheURL(for: url)
-            try data.write(to: cacheURL, options: .atomic)
-            // 2. 异步写云端（不阻塞主线程）
-            DispatchQueue.global(qos: .utility).async { [weak self] in
-                guard let self = self else { return }
-                do {
-                    try self.cloudFS.writeData(data, to: url)
-                } catch {
-                    print("⚠️ JSON 云端写入失败 \(url.lastPathComponent): \(error)")
-                }
-            }
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try data.write(to: url, options: .atomic)
+            // 异步同步到云端
+            syncToCloud(data: data, to: url)
         } catch {
-            print("⚠️ JSON 缓存写入失败 \(url.lastPathComponent): \(error)")
+            print("⚠️ JSON 写入失败 \(url.lastPathComponent): \(error)")
         }
     }
 }

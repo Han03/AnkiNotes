@@ -288,7 +288,7 @@ final class StorageService: ObservableObject {
         )
         
         let fileURL = fileSystem.noteFileURL(noteId: note.id, folderId: folderId, title: title, folders: folders)
-        try? fileSystem.writeNoteContent(note.markdownContent, to: fileURL)
+        try? fileSystem.writeNoteContent(note.markdownContent, to: fileURL, skipCloudSync: skipCloudSync)
         
         let meta = NoteMeta(
             id: note.id, title: note.title, folderId: note.folderId,
@@ -544,7 +544,7 @@ final class StorageService: ObservableObject {
                 // 保存讲稿到本地
                 let rawBody = try cloud.readData(at: srcURL)
                 let bodyStr = String(data: rawBody, encoding: .utf8) ?? ""
-                _ = try? fileSystem.writeLecture(bodyStr, folderId: folderId, title: title, folders: folders)
+                _ = try? fileSystem.writeLecture(bodyStr, folderId: folderId, title: title, folders: folders, skipCloudSync: true)
                 report.lectureImportedCount += 1
             } catch {
                 report.lectureFailedCount += 1
@@ -569,7 +569,7 @@ final class StorageService: ObservableObject {
                 // 保存题库到本地缓存
                 let rawBody = try cloud.readData(at: srcURL)
                 if let questions = try? JSONDecoder().decode([Question].self, from: rawBody) {
-                    _ = try? fileSystem.writeQuestions(questions, folderId: folderId, title: title, folders: folders)
+                    _ = try? fileSystem.writeQuestions(questions, folderId: folderId, title: title, folders: folders, skipCloudSync: true)
                     report.questionImportedCount += 1
                 }
             } catch {
