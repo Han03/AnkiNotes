@@ -90,8 +90,8 @@ struct LectureReaderView: View {
                                     ForEach(Array(sentences.enumerated()), id: \.offset) { index, sentence in
                                         Text(sentence)
                                             .font(.body)
-                                            .foregroundColor(index == currentSentenceIndex && isPlaying ? .orange : .primary)
-                                            .background(index == currentSentenceIndex && isPlaying ? Color.orange.opacity(0.1) : Color.clear)
+                                            .foregroundColor(index == currentSentenceIndex ? .orange : .primary)
+                                            .background(index == currentSentenceIndex ? Color.orange.opacity(0.1) : Color.clear)
                                             .frame(maxWidth: .infinity, alignment: .leading)
                                             .id(index)
                                             .onTapGesture {
@@ -146,10 +146,26 @@ struct LectureReaderView: View {
     
     private var playerControlBar: some View {
         VStack(spacing: 12) {
-            // 进度条
+            // 进度条（可拖动）
             VStack(spacing: 4) {
-                ProgressView(value: totalSentences > 0 ? Double(currentSentenceIndex + 1) / Double(totalSentences) : 0)
+                if totalSentences > 1 {
+                    Slider(
+                        value: Binding(
+                            get: { Double(currentSentenceIndex) / Double(totalSentences - 1) },
+                            set: { newValue in
+                                let newIndex = Int(newValue * Double(totalSentences - 1))
+                                if newIndex != currentSentenceIndex {
+                                    jumpToSentence(newIndex)
+                                }
+                            }
+                        ),
+                        in: 0...1
+                    )
                     .tint(.orange)
+                } else {
+                    ProgressView(value: totalSentences > 0 ? 1.0 : 0)
+                        .tint(.orange)
+                }
                 HStack {
                     Text("\(currentSentenceIndex + 1) / \(totalSentences) 句")
                         .font(.caption2)

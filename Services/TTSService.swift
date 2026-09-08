@@ -108,7 +108,7 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
     func updateConfig(_ config: TTSConfig) {
         self.config = config
         self.actualProvider = config.provider
-        print("🔊 TTSService.updateConfig: provider=\(config.provider.displayName), rate=\(config.rate)")
+        SyncLogger.shared.info("🔊 TTSService.updateConfig: provider=\(config.provider.displayName), rate=\(config.rate)")
     }
     
     // MARK: - 文本分句
@@ -175,7 +175,7 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
     func pause() {
         guard isSpeaking else { return }
         isPaused = true
-        print("🔊 TTSService.pause: actualProvider=\(actualProvider.displayName)")
+        SyncLogger.shared.info("🔊 TTSService.pause: actualProvider=\(actualProvider.displayName)")
         switch actualProvider {
         case .edgeTTS:
             audioPlayer?.pause()
@@ -187,7 +187,7 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
     func resume() {
         guard isSpeaking, isPaused else { return }
         isPaused = false
-        print("🔊 TTSService.resume: actualProvider=\(actualProvider.displayName)")
+        SyncLogger.shared.info("🔊 TTSService.resume: actualProvider=\(actualProvider.displayName)")
         switch actualProvider {
         case .edgeTTS:
             audioPlayer?.play()
@@ -297,7 +297,7 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
         // Edge-TTS WebSocket URL
         let urlString = "wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=6A5AA1D4EAFF4E9FB37E23D68491D6F4"
         guard let url = URL(string: urlString) else {
-            print("🔊 Edge-TTS: URL 无效，降级到 iOS 原生")
+            SyncLogger.shared.info("🔊 Edge-TTS: URL 无效，降级到 iOS 原生")
             actualProvider = .iOSNative
             speakiOSNative(text)
             return
@@ -308,14 +308,14 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
         edgeTTSWebSocketTask = task
         task.resume()
         
-        print("🔊 Edge-TTS: 正在建立 WebSocket 连接...")
+        SyncLogger.shared.info("🔊 Edge-TTS: 正在建立 WebSocket 连接...")
         
         // 发送 speech.config 消息
         let speechConfigMessage = buildSpeechConfigMessage(requestId: requestId)
         task.send(.string(speechConfigMessage)) { [weak self] error in
             guard let self = self else { return }
             if let error = error {
-                print("🔊 Edge-TTS: 发送 speech.config 失败 - \(error.localizedDescription)")
+                SyncLogger.shared.info("🔊 Edge-TTS: 发送 speech.config 失败 - \(error.localizedDescription)")
                 DispatchQueue.main.async {
                     self.actualProvider = .iOSNative
                     self.speakiOSNative(text)
@@ -328,7 +328,7 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
             task.send(.string(ssmlMessage)) { [weak self] error in
                 guard let self = self else { return }
                 if let error = error {
-                    print("🔊 Edge-TTS: 发送 ssml 失败 - \(error.localizedDescription)")
+                    SyncLogger.shared.info("🔊 Edge-TTS: 发送 ssml 失败 - \(error.localizedDescription)")
                     DispatchQueue.main.async {
                         self.actualProvider = .iOSNative
                         self.speakiOSNative(text)
@@ -336,7 +336,7 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
                     return
                 }
                 
-                print("🔊 Edge-TTS: 消息已发送，开始接收音频数据...")
+                SyncLogger.shared.info("🔊 Edge-TTS: 消息已发送，开始接收音频数据...")
                 // 开始接收消息
                 self.receiveEdgeTTSMessages(task: task, originalText: text)
             }
@@ -373,19 +373,19 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
                     // 解析文本消息
                     if text.contains("Path: turn.end") {
                         // 合成结束，播放音频
-                        print("🔊 Edge-TTS: 合成结束，音频大小 \(self.edgeTTSAudioData.count) 字节")
+                        SyncLogger.shared.info("🔊 Edge-TTS: 合成结束，音频大小 \(self.edgeTTSAudioData.count) 字节")
                         DispatchQueue.main.async {
                             if !self.edgeTTSAudioData.isEmpty {
                                 self.playAudio(data: self.edgeTTSAudioData)
                             } else {
-                                print("🔊 Edge-TTS: 音频数据为空，降级到 iOS 原生")
+                                SyncLogger.shared.info("🔊 Edge-TTS: 音频数据为空，降级到 iOS 原生")
                                 self.actualProvider = .iOSNative
                                 self.speakiOSNative(originalText)
                             }
                         }
                         return
                     } else if text.contains("Path: turn.start") {
-                        print("🔊 Edge-TTS: 开始合成")
+                        SyncLogger.shared.info("🔊 Edge-TTS: 开始合成")
                     }
                     // 其他文本消息（audio.metadata 等）忽略
                     
@@ -393,7 +393,7 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
                     // 音频数据，累积起来
                     self.edgeTTSAudioData.append(data)
                     if self.edgeTTSAudioData.count % 10000 < 1000 {
-                        print("🔊 Edge-TTS: 已接收音频数据 \(self.edgeTTSAudioData.count) 字节")
+                        SyncLogger.shared.info("🔊 Edge-TTS: 已接收音频数据 \(self.edgeTTSAudioData.count) 字节")
                     }
                 }
                 
@@ -401,11 +401,11 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
                 self.receiveEdgeTTSMessages(task: task, originalText: originalText)
                 
             case .failure(let error):
-                print("🔊 Edge-TTS: 接收消息失败 - \(error.localizedDescription)")
+                SyncLogger.shared.info("🔊 Edge-TTS: 接收消息失败 - \(error.localizedDescription)")
                 DispatchQueue.main.async {
                     if !self.edgeTTSAudioData.isEmpty {
                         // 即使失败了，如果有已接收的音频数据，也尝试播放
-                        print("🔊 Edge-TTS: 接收失败但有部分音频数据，尝试播放 \(self.edgeTTSAudioData.count) 字节")
+                        SyncLogger.shared.info("🔊 Edge-TTS: 接收失败但有部分音频数据，尝试播放 \(self.edgeTTSAudioData.count) 字节")
                         self.playAudio(data: self.edgeTTSAudioData)
                     } else {
                         self.actualProvider = .iOSNative
@@ -446,7 +446,7 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
             audioPlayer?.play()
         } catch {
             // 播放失败，降级到 iOS 原生
-            print("🔊 TTSService: Edge-TTS 播放失败，降级到 iOS 原生")
+            SyncLogger.shared.info("🔊 TTSService: Edge-TTS 播放失败，降级到 iOS 原生")
             actualProvider = .iOSNative
             let sentence = currentText.isEmpty ? (currentSentenceIndex < sentences.count ? sentences[currentSentenceIndex] : "") : currentText
             if !sentence.isEmpty {
