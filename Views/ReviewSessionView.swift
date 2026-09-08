@@ -194,11 +194,12 @@ struct ReviewSessionView: View {
         }
         // 讲稿阅读页面（使用 fullScreenCover 避免与其他 sheet 冲突）
         .fullScreenCover(isPresented: $showLecture) {
-            if currentIndex < queue.count, let content = lectureContent {
+            SyncLogger.shared.info("📖 ReviewSessionView fullScreenCover 闭包执行，lectureContent=\(lectureContent?.count ?? -1), currentIndex=\(currentIndex), queue.count=\(queue.count)")
+            if currentIndex < queue.count {
                 LectureReaderView(
                     note: queue[currentIndex],
                     folderPath: appState.storage?.getNoteFolderPath(for: queue[currentIndex]) ?? "",
-                    lectureContent: content
+                    lectureContent: lectureContent ?? ""
                 )
             }
         }
@@ -314,11 +315,16 @@ struct ReviewSessionView: View {
     private func extractKnowledgeForCurrentNote() {
         guard currentIndex < queue.count else { return }
         let note = queue[currentIndex]
-        guard appState.bailianConfig.isConfigured else { return }
         
-        // 先检查缓存
+        // 先检查缓存（即使大模型未配置，也能加载已有的缓存）
         if let cached = KnowledgeService.shared.loadExtraction(for: note.id) {
             knowledgePoints = cached
+            return
+        }
+        
+        // 大模型未配置时，不提取知识点
+        guard appState.bailianConfig.isConfigured else {
+            knowledgePoints = []
             return
         }
         

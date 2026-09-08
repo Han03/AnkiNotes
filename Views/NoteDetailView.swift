@@ -73,13 +73,12 @@ struct NoteDetailView: View {
                 }
                 // 讲稿阅读界面（使用 fullScreenCover 避免与知识点详解的 sheet 冲突）
                 .fullScreenCover(isPresented: $showLecture) {
-                    if let content = lectureContent {
-                        LectureReaderView(
-                            note: note,
-                            folderPath: appState.storage?.getNoteFolderPath(for: note) ?? "",
-                            lectureContent: content
-                        )
-                    }
+                    SyncLogger.shared.info("📖 fullScreenCover 闭包执行，lectureContent=\(lectureContent?.count ?? -1)")
+                    LectureReaderView(
+                        note: note,
+                        folderPath: appState.storage?.getNoteFolderPath(for: note) ?? "",
+                        lectureContent: lectureContent ?? ""
+                    )
                 }
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {

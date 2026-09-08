@@ -20,6 +20,9 @@ final class SyncLogger {
         queue.async { [weak self] in
             guard let self = self else { return }
             
+            // 清理旧日志（超过20个时清理最早的10个）
+            self.cleanupOldLogs()
+            
             // 关闭之前的文件句柄
             self.fileHandle?.closeFile()
             self.fileHandle = nil
@@ -145,6 +148,9 @@ final class SyncLogger {
     private func ensureFileHandle() {
         guard fileHandle == nil else { return }
         
+        // 清理旧日志（超过20个时清理最早的10个）
+        cleanupOldLogs()
+        
         // 创建日志文件名：sync_YYYYMMDD_HHMMSS.log
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMdd_HHmmss"
@@ -186,7 +192,7 @@ final class SyncLogger {
         }
     }
     
-    /// 清理旧的日志文件（保留最近10个）
+    /// 清理旧的日志文件（超过20个时，清理最早的10个）
     func cleanupOldLogs() {
         queue.async {
             let tmpDir = NSTemporaryDirectory()
@@ -197,13 +203,14 @@ final class SyncLogger {
                 let logFiles = files.filter { $0.hasPrefix("sync_") && $0.hasSuffix(".log") }
                     .sorted(by: >) // 降序，最新的在前
                 
-                // 保留最近10个，删除其余
-                if logFiles.count > 10 {
-                    for i in 10..<logFiles.count {
-                        let filePath = (tmpDir as NSString).appendingPathComponent(logFiles[i])
+                // 超过20个时，清理最早的10个（即保留最新的，删除最旧的10个）
+                if logFiles.count > 20 {
+                    let toDelete = Array(logFiles.suffix(10)) // 最早的10个
+                    for fileName in toDelete {
+                        let filePath = (tmpDir as NSString).appendingPathComponent(fileName)
                         try? fileManager.removeItem(atPath: filePath)
                     }
-                    print("🧹 SyncLogger: 清理了 \(logFiles.count - 10) 个旧日志文件")
+                    print("🧹 SyncLogger: 日志文件数量 \(logFiles.count) > 20，清理了最早的 10 个旧日志文件")
                 }
             } catch {
                 print("⚠️ SyncLogger: 清理旧日志失败: \(error)")

@@ -54,6 +54,7 @@ final class SyncSnapshotService {
     
     /// 保存快照到本地
     func save() {
+        ensureSnapshot()  // 确保快照存在
         guard var snapshot = snapshot else { return }
         snapshot.lastSyncTime = Date()
         let url = fileSystem.metadataDirectory.appendingPathComponent(snapshotFileName)
@@ -62,7 +63,7 @@ final class SyncSnapshotService {
             let data = try JSONEncoder().encode(snapshot)
             try data.write(to: url, options: .atomic)
             self.snapshot = snapshot
-            print("📸 同步快照保存成功：\(snapshot.directories.count) 个目录，\(snapshot.files.count) 个文件")
+            print("📸 同步快照保存成功：\(snapshot.directories.count) 个目录，\(snapshot.files.count) 个文件，路径：\(url.path)")
         } catch {
             print("⚠️ 同步快照保存失败：\(error.localizedDescription)")
         }
@@ -125,15 +126,25 @@ final class SyncSnapshotService {
     
     // MARK: - 快照更新
     
+    /// 确保快照存在（如果不存在则自动创建）
+    private func ensureSnapshot() {
+        if snapshot == nil {
+            snapshot = SyncSnapshot(rootDirectory: "default")
+            print("📸 自动创建同步快照")
+        }
+    }
+    
     /// 更新目录的修改时间
     func updateDirectory(relativePath: String, lastModified: Date?) {
-        guard snapshot != nil, let modified = lastModified else { return }
+        guard let modified = lastModified else { return }
+        ensureSnapshot()  // 确保快照存在
         snapshot?.directories[relativePath] = modified
     }
     
     /// 更新文件的修改时间
     func updateFile(relativePath: String, lastModified: Date?) {
-        guard snapshot != nil, let modified = lastModified else { return }
+        guard let modified = lastModified else { return }
+        ensureSnapshot()  // 确保快照存在
         snapshot?.files[relativePath] = modified
     }
     
