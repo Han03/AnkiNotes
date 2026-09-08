@@ -185,10 +185,32 @@ final class FileSystemService {
 
     func readLecture(folderId: UUID?, title: String, folders: [Folder]) throws -> String {
         let url = lectureFileURL(folderId: folderId, title: title, folders: folders)
+        SyncLogger.shared.info("📖 读取讲稿: title=\(title), folderId=\(folderId?.uuidString ?? "nil"), folders=\(folders.count), path=\(url.path)")
+        
+        let exists = FileManager.default.fileExists(atPath: url.path)
+        SyncLogger.shared.info("📖 讲稿文件是否存在: \(exists)")
+        
+        guard exists else {
+            SyncLogger.shared.error("📖 讲稿文件不存在: \(url.path)")
+            // 列出上级目录内容，便于排查
+            let parentDir = url.deletingLastPathComponent()
+            if let contents = try? FileManager.default.contentsOfDirectory(atPath: parentDir.path) {
+                SyncLogger.shared.info("📖 上级目录内容(\(parentDir.path)): \(contents)")
+            } else {
+                SyncLogger.shared.error("📖 无法读取上级目录: \(parentDir.path)")
+            }
+            throw NSError(domain: "FileSystemService", code: -3, userInfo: [NSLocalizedDescriptionKey: "讲稿文件不存在: \(url.lastPathComponent)"])
+        }
+        
         let data = try Data(contentsOf: url)
+        SyncLogger.shared.info("📖 讲稿文件大小: \(data.count) 字节")
+        
         guard let str = String(data: data, encoding: .utf8) else {
+            SyncLogger.shared.error("📖 讲稿文件不是有效的 UTF-8 编码")
             throw NSError(domain: "FileSystemService", code: -4, userInfo: [NSLocalizedDescriptionKey: "讲稿文件不是有效的 UTF-8 编码"])
         }
+        
+        SyncLogger.shared.info("📖 讲稿读取成功，内容长度: \(str.count) 字符，前100字: \(String(str.prefix(100)))")
         return str
     }
 

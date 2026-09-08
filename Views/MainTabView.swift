@@ -33,10 +33,9 @@ struct MainTabView: View {
             }
             .tag(0)
 
-            // 复习菜单
+            // 复习菜单（取消下拉刷新，避免误触发全局同步）
             NavigationStack {
                 ReviewHomeView()
-                    .refreshable { await triggerSync() }
             }
             .tabItem {
                 Image(systemName: "rectangle.stack.fill")

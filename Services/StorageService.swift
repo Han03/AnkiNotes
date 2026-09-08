@@ -291,7 +291,9 @@ final class StorageService: ObservableObject {
     
     /// 检查笔记是否有对应的课堂讲稿
     func hasLecture(for note: Note) -> Bool {
-        fileSystem.lectureExists(folderId: note.folderId, title: note.title, folders: folders)
+        let exists = fileSystem.lectureExists(folderId: note.folderId, title: note.title, folders: folders)
+        SyncLogger.shared.debug("📖 hasLecture: note.title=\(note.title), folderId=\(note.folderId?.uuidString ?? "nil"), folders=\(folders.count), exists=\(exists)")
+        return exists
     }
     
     /// 读取课堂讲稿内容

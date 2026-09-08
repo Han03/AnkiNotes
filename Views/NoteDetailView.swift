@@ -377,11 +377,18 @@ struct NoteDetailView: View {
     // MARK: - 讲稿
     
     private func openLecture(note: Note) {
-        guard let storage = appState.storage else { return }
+        guard let storage = appState.storage else {
+            SyncLogger.shared.error("📖 openLecture: storage 为 nil")
+            return
+        }
+        SyncLogger.shared.info("📖 openLecture: note.title=\(note.title), folderId=\(note.folderId?.uuidString ?? "nil")")
         do {
-            lectureContent = try storage.readLecture(for: note)
+            let content = try storage.readLecture(for: note)
+            SyncLogger.shared.info("📖 openLecture: 读取成功，内容长度=\(content.count)")
+            lectureContent = content
             showLecture = true
         } catch {
+            SyncLogger.shared.error("📖 openLecture: 读取失败 - \(error.localizedDescription)")
             lectureContent = "读取讲稿失败：\(error.localizedDescription)"
             showLecture = true
         }

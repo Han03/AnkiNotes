@@ -124,6 +124,18 @@ struct LectureReaderView: View {
                     }
                 }
             }
+            .onAppear {
+                SyncLogger.shared.info("📖 LectureReaderView 出现: note.title=\(note.title), folderPath=\(folderPath), lectureContent长度=\(lectureContent.count), sentences数量=\(sentences.count)")
+                if !lectureContent.isEmpty {
+                    SyncLogger.shared.info("📖 讲稿前100字: \(String(lectureContent.prefix(100)))")
+                } else {
+                    SyncLogger.shared.warning("📖 讲稿内容为空！")
+                }
+                totalSentences = sentences.count
+                if !sentences.isEmpty {
+                    currentSentence = sentences[0]
+                }
+            }
             .onDisappear {
                 stopPlaying()
             }

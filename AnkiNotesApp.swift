@@ -484,8 +484,20 @@ final class AppState: ObservableObject {
                             self.syncDetail = "等待云端锁释放，第 \(retryCount)/\(maxLockRetries) 次重试"
                         }
                     }
-                    // 等待后重试
-                    Thread.sleep(forTimeInterval: retryInterval)
+                    // 可中断的等待：每次只sleep 0.1秒，循环检查取消标志，用户点击取消立即生效
+                    let waitStartTime = Date()
+                    while Date().timeIntervalSince(waitStartTime) < retryInterval {
+                        if self.cancelSyncRequested {
+                            SyncLogger.shared.warning("用户取消同步，中断等待")
+                            DispatchQueue.main.async {
+                                self.syncErrorMessage = "同步已取消"
+                                self.providerStatus = "⚠️ 同步已取消"
+                            }
+                            completion?(StorageService.ImportReport())
+                            return
+                        }
+                        Thread.sleep(forTimeInterval: 0.1)
+                    }
                 }
             }
             
@@ -655,7 +667,20 @@ final class AppState: ObservableObject {
                         self.syncStep = "等待云端锁"
                         self.syncDetail = "等待获取锁以推送数据，第 \(pushRetryCount)/\(maxPushLockRetries) 次重试"
                     }
-                    Thread.sleep(forTimeInterval: retryInterval)
+                    // 可中断的等待：每次只sleep 0.1秒，循环检查取消标志，用户点击取消立即生效
+                    let waitStartTime = Date()
+                    while Date().timeIntervalSince(waitStartTime) < retryInterval {
+                        if self.cancelSyncRequested {
+                            SyncLogger.shared.warning("用户取消同步，中断等待推送数据")
+                            DispatchQueue.main.async {
+                                self.syncErrorMessage = "同步已取消"
+                                self.providerStatus = "⚠️ 同步已取消"
+                            }
+                            completion?(StorageService.ImportReport())
+                            return
+                        }
+                        Thread.sleep(forTimeInterval: 0.1)
+                    }
                 }
             }
             
