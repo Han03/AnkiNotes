@@ -391,20 +391,22 @@ final class AppState: ObservableObject {
                 completion?(StorageService.ImportReport())
                 return
             }
-            // 同步前：从云端拉取元数据和知识点缓存到本地
+            // 同步前：从云端拉取元数据和知识点缓存到本地缓存（不加载到内存）
+            // 注意：不调用 reloadFromCache，避免云端索引提前加载导致 importFromCloud 全部判定为重复跳过
             let pulled = MetadataSyncService.shared.pullFromCloud(cloudFS: fs)
             if pulled > 0 {
-                print("📥 同步前元数据拉取: \(pulled) 个文件")
-                self.storage.reloadFromCache()
-                self.quizService.reloadFromCache()
+                print("📥 同步前元数据拉取到缓存: \(pulled) 个文件")
             }
             // 拉取知识点缓存
             let knowledgePulled = MetadataSyncService.shared.pullKnowledgeCache(cloudFS: fs)
             if knowledgePulled > 0 {
                 print("📥 同步前知识点缓存拉取: \(knowledgePulled) 个文件")
             }
-            // 从云端扫描并导入到本地
+            // 从云端扫描并导入到本地（此时内存中的索引为空，会创建所有笔记）
             let report = self.storage.importFromCloud()
+            // 导入完成后，再从本地缓存加载元数据（合并本地和云端的索引）
+            self.storage.reloadFromCache()
+            self.quizService.reloadFromCache()
             // 推送前验证锁的所有权（防止锁过期后被其他设备抢占）
             guard CloudLockService.shared.verifyLockOwnership(cloudFS: fs) else {
                 print("⚠️ 同步中断：云端锁已失效，可能被其他设备抢占")
