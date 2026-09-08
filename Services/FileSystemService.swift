@@ -57,9 +57,10 @@ final class FileSystemService {
         let dir = localDocumentsDirectory.appendingPathComponent(".metadata", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         // 隐藏属性
+        var url = dir
         var values = URLResourceValues()
         values.isHidden = true
-        try? (dir as NSURL).setResourceValues(values)
+        try? url.setResourceValues(values)
         return dir
     }
 
