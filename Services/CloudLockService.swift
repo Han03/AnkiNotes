@@ -22,10 +22,10 @@ final class CloudLockService {
     static let shared = CloudLockService()
     
     /// 锁过期时间（秒）
-    private let lockTimeout: TimeInterval = 300  // 5 分钟
+    private let lockTimeout: TimeInterval = 20  // 20秒
     
     /// 锁续期间隔（秒）
-    private let lockRenewInterval: TimeInterval = 120  // 2 分钟
+    private let lockRenewInterval: TimeInterval = 9  // 9秒（小于过期时间20秒，保证续期及时）
     
     /// 当前是否持有锁
     private(set) var isHoldingLock = false

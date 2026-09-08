@@ -378,18 +378,35 @@ final class AppState: ObservableObject {
                     self.storage.triggerRefresh()
                 }
             }
-            // 获取云端锁（防止多端同时同步）
-            guard let fs = self.activeFS,
-                  CloudLockService.shared.acquireLock(cloudFS: fs) else {
-                // 获取锁失败，提示用户
-                if !silent, let fs = self.activeFS,
-                   let holderInfo = CloudLockService.shared.lockHolderInfo(cloudFS: fs) {
-                    DispatchQueue.main.async {
-                        self.providerStatus = "⚠️ 其他设备正在同步，请稍后再试。\n\(holderInfo)"
-                    }
-                }
+            // 获取云端锁（防止多端同时同步），若被占用则每隔5秒重试直到成功
+            guard let fs = self.activeFS else {
                 completion?(StorageService.ImportReport())
                 return
+            }
+            var lockAcquired = false
+            var retryCount = 0
+            while !lockAcquired {
+                lockAcquired = CloudLockService.shared.acquireLock(cloudFS: fs)
+                if !lockAcquired {
+                    retryCount += 1
+                    // 更新提示信息，保持同步窗口打开
+                    if !silent, let holderInfo = CloudLockService.shared.lockHolderInfo(cloudFS: fs) {
+                        DispatchQueue.main.async {
+                            self.providerStatus = "⏳ 其他设备正在同步，等待中...（已等待 \(retryCount * 5)秒）\n\(holderInfo)\n\n将自动重试，无需关闭窗口"
+                        }
+                    } else if !silent {
+                        DispatchQueue.main.async {
+                            self.providerStatus = "⏳ 等待云端锁释放...（已等待 \(retryCount * 5)秒）\n\n将自动重试，无需关闭窗口"
+                        }
+                    }
+                    // 等待5秒后重试
+                    Thread.sleep(forTimeInterval: 5)
+                }
+            }
+            if !silent {
+                DispatchQueue.main.async {
+                    self.providerStatus = "✅ 获取云端锁成功，开始同步..."
+                }
             }
             // 同步前：从云端拉取元数据和知识点缓存到本地缓存（不加载到内存）
             // 注意：不调用 reloadFromCache，避免云端索引提前加载导致 importFromCloud 全部判定为重复跳过
