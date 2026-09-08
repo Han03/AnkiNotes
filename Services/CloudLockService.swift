@@ -103,12 +103,22 @@ final class CloudLockService {
                     if lockData.expiresAt > now {
                         // 锁未过期
                         if lockData.deviceId == deviceId {
-                            // 是自己持有的锁，续期
-                            return renewLock(cloudFS: cloudFS)
+                            // 是自己持有的锁
+                            if lockData.fencingToken == currentFencingToken && currentFencingToken > 0 {
+                                // token 匹配，正常续期
+                                return renewLock(cloudFS: cloudFS)
+                            } else {
+                                // token 不匹配，说明是之前未正确释放的锁（如续期失败导致 token 被重置）
+                                // 强制删除旧锁，然后重新创建
+                                print("⚠️ 发现自己的旧锁但 token 不匹配（云端: \(lockData.fencingToken), 本地: \(currentFencingToken)），强制删除后重新获取")
+                                try? cloudFS.removeItem(at: lockURL)
+                                Thread.sleep(forTimeInterval: 0.1)
+                            }
+                        } else {
+                            // 被其他设备持有，获取失败
+                            print("🔒 云端锁被设备 \(lockData.deviceId.prefix(8))... 持有，过期时间: \(Date(timeIntervalSince1970: lockData.expiresAt))")
+                            return false
                         }
-                        // 被其他设备持有，获取失败
-                        print("🔒 云端锁被设备 \(lockData.deviceId.prefix(8))... 持有，过期时间: \(Date(timeIntervalSince1970: lockData.expiresAt))")
-                        return false
                     }
                     // 锁已过期，可以强制获取
                     print("🔓 云端锁已过期（token: \(lockData.fencingToken)），强制获取")
@@ -173,12 +183,14 @@ final class CloudLockService {
         
         let lockURL = lockFileURL(in: cloudFS)
         
-        // 只有持有者才能释放
+        // 只验证 deviceId，不验证 fencingToken
+        // 原因：fencingToken 可能因为续期失败等原因被重置为 0，导致验证失败，锁文件无法删除
+        // 只要是自己设备创建的锁，就应该可以删除
         if cloudFS.fileExists(at: lockURL) {
             do {
                 let data = try cloudFS.readData(at: lockURL)
                 if let lockData = try? JSONDecoder().decode(LockData.self, from: data) {
-                    if lockData.deviceId == deviceId && lockData.fencingToken == currentFencingToken {
+                    if lockData.deviceId == deviceId {
                         // 确认是自己的锁，删除
                         try cloudFS.removeItem(at: lockURL)
                         
@@ -190,8 +202,12 @@ final class CloudLockService {
                             print("🔓 释放云端锁成功 (token: \(currentFencingToken))")
                         }
                     } else {
-                        print("⚠️ 锁不是当前设备持有（token 不匹配），不释放")
+                        print("⚠️ 锁不是当前设备持有（deviceId 不匹配），不释放")
                     }
+                } else {
+                    // 锁文件无法解析，可能是损坏的，强制删除
+                    print("⚠️ 锁文件无法解析，强制删除")
+                    try? cloudFS.removeItem(at: lockURL)
                 }
             } catch {
                 print("⚠️ 释放锁失败: \(error.localizedDescription)")
@@ -239,7 +255,25 @@ final class CloudLockService {
         let now = Date().timeIntervalSince1970
         
         // 先验证锁的所有权
-        guard verifyLockOwnership(cloudFS: cloudFS) else {
+        if !verifyLockOwnership(cloudFS: cloudFS) {
+            // 验证失败，检查是否是自己的锁但 token 不匹配
+            if cloudFS.fileExists(at: lockURL) {
+                do {
+                    let data = try cloudFS.readData(at: lockURL)
+                    if let lockData = try? JSONDecoder().decode(LockData.self, from: data) {
+                        if lockData.deviceId == deviceId {
+                            // 是自己的锁但 token 不匹配，强制删除旧锁后重新创建
+                            print("⚠️ 续期时发现自己的锁但 token 不匹配（云端: \(lockData.fencingToken), 本地: \(currentFencingToken)），强制删除后重新获取")
+                            try? cloudFS.removeItem(at: lockURL)
+                            Thread.sleep(forTimeInterval: 0.1)
+                            // 重新创建锁
+                            return acquireLock(cloudFS: cloudFS)
+                        }
+                    }
+                } catch {
+                    print("⚠️ 续期时读取锁文件失败: \(error.localizedDescription)")
+                }
+            }
             print("⚠️ 锁续期失败：不再持有锁")
             isHoldingLock = false
             currentFencingToken = 0
@@ -329,6 +363,32 @@ final class CloudLockService {
             return nil
         }
         return nil
+    }
+    
+    /// 获取锁文件的详细信息（用于日志记录）
+    func lockDebugInfo(cloudFS: CloudFileSystem) -> String {
+        let lockURL = lockFileURL(in: cloudFS)
+        var info = "当前状态: isHoldingLock=\(isHoldingLock), currentFencingToken=\(currentFencingToken), deviceId=\(deviceId.prefix(8))...; "
+        
+        guard cloudFS.fileExists(at: lockURL) else {
+            return info + "云端锁文件: 不存在"
+        }
+        
+        do {
+            let data = try cloudFS.readData(at: lockURL)
+            if let lockData = try? JSONDecoder().decode(LockData.self, from: data) {
+                let now = Date().timeIntervalSince1970
+                let isExpired = lockData.expiresAt <= now
+                let isOwn = lockData.deviceId == deviceId
+                let tokenMatch = lockData.fencingToken == currentFencingToken
+                info += "云端锁文件: deviceId=\(lockData.deviceId.prefix(8))..., fencingToken=\(lockData.fencingToken), expiresAt=\(lockData.expiresAt), 已过期=\(isExpired), 是自己的=\(isOwn), token匹配=\(tokenMatch)"
+            } else {
+                info += "云端锁文件: 无法解析"
+            }
+        } catch {
+            info += "云端锁文件: 读取失败 - \(error.localizedDescription)"
+        }
+        return info
     }
     
     // MARK: - App 生命周期

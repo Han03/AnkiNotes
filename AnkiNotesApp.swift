@@ -424,7 +424,8 @@ final class AppState: ObservableObject {
                 if !lockAcquired {
                     retryCount += 1
                     let holderInfo = CloudLockService.shared.lockHolderInfo(cloudFS: fs)
-                    SyncLogger.shared.warning("获取云端锁失败，第 \(retryCount) 次重试，holderInfo=\(holderInfo ?? "无")")
+                    let debugInfo = CloudLockService.shared.lockDebugInfo(cloudFS: fs)
+                    SyncLogger.shared.warning("获取云端锁失败，第 \(retryCount) 次重试，holderInfo=\(holderInfo ?? "无")。\(debugInfo)")
                     // 更新提示信息，保持同步窗口打开（静默同步也显示）
                     if let holderInfo = holderInfo {
                         DispatchQueue.main.async {
@@ -573,7 +574,8 @@ final class AppState: ObservableObject {
                 pushLockAcquired = CloudLockService.shared.acquireLock(cloudFS: fs)
                 if !pushLockAcquired {
                     pushRetryCount += 1
-                    SyncLogger.shared.warning("推送数据获取锁失败，第 \(pushRetryCount) 次重试")
+                    let debugInfo = CloudLockService.shared.lockDebugInfo(cloudFS: fs)
+                    SyncLogger.shared.warning("推送数据获取锁失败，第 \(pushRetryCount) 次重试。\(debugInfo)")
                     DispatchQueue.main.async {
                         self.providerStatus = "⏳ 等待云端锁释放以推送数据...（已等待 \(pushRetryCount * 5)秒）"
                         self.syncStep = "等待云端锁"
