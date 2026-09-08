@@ -91,6 +91,7 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
     
     private var sentences: [String] = []
     private var config: TTSConfig
+    private var actualProvider: TTSProvider = .edgeTTS  // 实际使用的 TTS 方案（可能因降级而与 config.provider 不同）
     private var onSentenceComplete: ((Int) -> Void)?
     private var onComplete: (() -> Void)?
     
@@ -102,6 +103,8 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
     
     func updateConfig(_ config: TTSConfig) {
         self.config = config
+        self.actualProvider = config.provider
+        print("🔊 TTSService.updateConfig: provider=\(config.provider.displayName), rate=\(config.rate)")
     }
     
     // MARK: - 文本分句
@@ -168,18 +171,20 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
     func pause() {
         guard isSpeaking else { return }
         isPaused = true
-        switch config.provider {
+        print("🔊 TTSService.pause: actualProvider=\(actualProvider.displayName)")
+        switch actualProvider {
         case .edgeTTS:
             audioPlayer?.pause()
         case .iOSNative:
-            synthesizer.pauseSpeaking(at: .word)
+            synthesizer.pauseSpeaking(at: .immediate)  // 使用 .immediate 立即暂停，而不是 .word
         }
     }
     
     func resume() {
         guard isSpeaking, isPaused else { return }
         isPaused = false
-        switch config.provider {
+        print("🔊 TTSService.resume: actualProvider=\(actualProvider.displayName)")
+        switch actualProvider {
         case .edgeTTS:
             audioPlayer?.play()
         case .iOSNative:
@@ -194,7 +199,7 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
         totalSentences = 0
         currentText = ""
         
-        switch config.provider {
+        switch actualProvider {
         case .edgeTTS:
             downloadTask?.cancel()
             audioPlayer?.stop()
@@ -223,7 +228,7 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
     }
     
     private func stopCurrentOnly() {
-        switch config.provider {
+        switch actualProvider {
         case .edgeTTS:
             downloadTask?.cancel()
             audioPlayer?.stop()
@@ -253,6 +258,7 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
     // MARK: - iOS 原生 TTS
     
     private func speakiOSNative(_ text: String) {
+        actualProvider = .iOSNative
         let utterance = AVSpeechUtterance(string: text)
         utterance.rate = Float(config.rate * 0.5) // AVSpeech 正常语速约 0.5
         utterance.pitchMultiplier = 1.0
@@ -269,6 +275,7 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
     // MARK: - Edge-TTS
     
     private func speakEdgeTTS(_ text: String) {
+        actualProvider = .edgeTTS
         let ssml = buildSSML(text: text)
         downloadTask?.cancel()
         
@@ -291,12 +298,15 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
             
             guard let data = data, !data.isEmpty else {
                 // Edge-TTS HTTP 方式可能不工作，降级到 iOS 原生
+                print("🔊 TTSService: Edge-TTS 请求失败，降级到 iOS 原生")
                 DispatchQueue.main.async {
+                    self.actualProvider = .iOSNative
                     self.speakiOSNative(text)
                 }
                 return
             }
             
+            print("🔊 TTSService: Edge-TTS 请求成功，音频大小 \(data.count) 字节")
             DispatchQueue.main.async {
                 self.playAudio(data: data)
             }
@@ -334,6 +344,8 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
             audioPlayer?.play()
         } catch {
             // 播放失败，降级到 iOS 原生
+            print("🔊 TTSService: Edge-TTS 播放失败，降级到 iOS 原生")
+            actualProvider = .iOSNative
             let sentence = currentText.isEmpty ? (currentSentenceIndex < sentences.count ? sentences[currentSentenceIndex] : "") : currentText
             if !sentence.isEmpty {
                 speakiOSNative(sentence)
