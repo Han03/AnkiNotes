@@ -60,8 +60,8 @@ final class CloudLockService {
     
     private func lockFileURL(in cloudFS: CloudFileSystem) -> URL {
         // 锁文件放在根目录下，避免隐藏目录同步问题
-        // 文件名使用 .ankinotes.lock，避免与其他文件冲突
-        return cloudFS.rootDirectory.appendingPathComponent(".ankinotes.lock")
+        // 文件名使用 .ankinotes.alock（.lock 后缀在坚果云不会同步，改用 .alock）
+        return cloudFS.rootDirectory.appendingPathComponent(".ankinotes.alock")
     }
     
     // MARK: - 锁数据结构

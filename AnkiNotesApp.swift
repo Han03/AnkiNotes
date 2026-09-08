@@ -366,6 +366,10 @@ final class AppState: ObservableObject {
             isSilentSyncing = true
         } else {
             isSyncing = true
+            // 立即显示准备同步状态
+            syncStep = "准备同步"
+            syncProgress = 0
+            syncDetail = "正在初始化同步..."
         }
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
@@ -392,6 +396,14 @@ final class AppState: ObservableObject {
                 completion?(StorageService.ImportReport())
                 return
             }
+            // 显示正在获取云端锁
+            if !silent {
+                DispatchQueue.main.async {
+                    self.syncStep = "获取云端锁"
+                    self.syncProgress = 1
+                    self.syncDetail = "正在获取云端分布式锁..."
+                }
+            }
             var lockAcquired = false
             var retryCount = 0
             while !lockAcquired {
@@ -402,10 +414,16 @@ final class AppState: ObservableObject {
                     if !silent, let holderInfo = CloudLockService.shared.lockHolderInfo(cloudFS: fs) {
                         DispatchQueue.main.async {
                             self.providerStatus = "⏳ 其他设备正在同步，等待中...（已等待 \(retryCount * 5)秒）\n\(holderInfo)\n\n将自动重试，无需关闭窗口"
+                            self.syncStep = "等待云端锁"
+                            self.syncProgress = 1
+                            self.syncDetail = "其他设备正在同步，已等待 \(retryCount * 5)秒"
                         }
                     } else if !silent {
                         DispatchQueue.main.async {
                             self.providerStatus = "⏳ 等待云端锁释放...（已等待 \(retryCount * 5)秒）\n\n将自动重试，无需关闭窗口"
+                            self.syncStep = "等待云端锁"
+                            self.syncProgress = 1
+                            self.syncDetail = "等待云端锁释放，已等待 \(retryCount * 5)秒"
                         }
                     }
                     // 等待5秒后重试
