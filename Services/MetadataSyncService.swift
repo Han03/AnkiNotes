@@ -18,11 +18,11 @@ final class MetadataSyncService {
     private let pushQueue = DispatchQueue(label: "com.ankinotes.metadata.push", qos: .utility)
     
     /// 需要同步的元数据文件名
+    /// 注意：quiz_questions.json 已废弃，题库现在按笔记文件夹结构存储在 Questions/ 目录
     private let metadataFiles: [String] = [
         "folders.json",
         "notes_index.json",
         "review_logs.json",
-        "quiz_questions.json",
         "quiz_generated_notes.json"
     ]
     

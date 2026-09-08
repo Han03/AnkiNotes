@@ -51,6 +51,13 @@ final class FileSystemService {
         try? cloudFS.createDirectoryIfNeeded(at: dir)
         return dir
     }
+    
+    /// 题库总目录（root/Questions，按笔记文件夹结构存储）
+    var questionsRootDirectory: URL {
+        let dir = rootDirectory.appendingPathComponent("Questions", isDirectory: true)
+        try? cloudFS.createDirectoryIfNeeded(at: dir)
+        return dir
+    }
 
     /// JSON 索引目录（root/.metadata，iCloud 下也会被自动同步，因为不是点开头会上传；
     /// 但我们在设置 URLResourceValues 隐藏仅是为了文件 App 不显示它）
@@ -98,6 +105,21 @@ final class FileSystemService {
         try? cloudFS.createDirectoryIfNeeded(at: currentURL)
         let safeTitle = sanitizeFileName(title)
         let fileName = "\(safeTitle).txt"
+        return currentURL.appendingPathComponent(fileName)
+    }
+    
+    /// 题库文件 URL（与笔记相同路径和名称，扩展名为 .json）
+    func questionFileURL(folderId: UUID?, title: String, folders: [Folder]) -> URL {
+        var currentURL = questionsRootDirectory
+        if let folderId = folderId {
+            let pathComponents = buildFolderPath(folderId: folderId, folders: folders)
+            for folderName in pathComponents.reversed() {
+                currentURL = currentURL.appendingPathComponent(folderName, isDirectory: true)
+            }
+        }
+        try? cloudFS.createDirectoryIfNeeded(at: currentURL)
+        let safeTitle = sanitizeFileName(title)
+        let fileName = "\(safeTitle).json"
         return currentURL.appendingPathComponent(fileName)
     }
 
@@ -207,6 +229,87 @@ final class FileSystemService {
             } catch {
                 print("⚠️ 讲稿云端写入失败: \(error.localizedDescription)")
             }
+        }
+    }
+
+    // MARK: - 题库本地缓存目录
+    
+    /// 题库本地缓存目录（Library/Caches/Questions）
+    private var questionCacheDirectory: URL {
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        let dir = caches.appendingPathComponent("Questions", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+    
+    private func questionCacheURL(folderId: UUID?, title: String, folders: [Folder]) -> URL {
+        var currentURL = questionCacheDirectory
+        if let folderId = folderId {
+            let pathComponents = buildFolderPath(folderId: folderId, folders: folders)
+            for folderName in pathComponents.reversed() {
+                currentURL = currentURL.appendingPathComponent(folderName, isDirectory: true)
+            }
+        }
+        try? FileManager.default.createDirectory(at: currentURL, withIntermediateDirectories: true)
+        let safeTitle = sanitizeFileName(title)
+        return currentURL.appendingPathComponent("\(safeTitle).json")
+    }
+
+    // MARK: - 题库 IO（带本地缓存）
+
+    func questionExists(folderId: UUID?, title: String, folders: [Folder]) -> Bool {
+        let cacheURL = questionCacheURL(folderId: folderId, title: title, folders: folders)
+        if FileManager.default.fileExists(atPath: cacheURL.path) {
+            return true
+        }
+        let url = questionFileURL(folderId: folderId, title: title, folders: folders)
+        return cloudFS.fileExists(at: url)
+    }
+
+    func readQuestions(folderId: UUID?, title: String, folders: [Folder]) throws -> [Question] {
+        let cacheURL = questionCacheURL(folderId: folderId, title: title, folders: folders)
+        // 优先从本地缓存读取
+        if let cacheData = try? Data(contentsOf: cacheURL),
+           let decoded = try? JSONDecoder().decode([Question].self, from: cacheData) {
+            return decoded
+        }
+        // 缓存不存在，从云端读取并写入缓存
+        let url = questionFileURL(folderId: folderId, title: title, folders: folders)
+        let data = try cloudFS.readData(at: url)
+        guard let decoded = try? JSONDecoder().decode([Question].self, from: data) else {
+            throw NSError(domain: "FileSystemService", code: -6, userInfo: [NSLocalizedDescriptionKey: "题库文件解析失败"])
+        }
+        // 写入本地缓存
+        try? data.write(to: cacheURL, options: .atomic)
+        return decoded
+    }
+
+    func writeQuestions(_ questions: [Question], folderId: UUID?, title: String, folders: [Folder]) throws {
+        let data = try JSONEncoder().encode(questions)
+        // 1. 先写本地缓存
+        let cacheURL = questionCacheURL(folderId: folderId, title: title, folders: folders)
+        try data.write(to: cacheURL, options: .atomic)
+        // 2. 异步写云端
+        let url = questionFileURL(folderId: folderId, title: title, folders: folders)
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self = self else { return }
+            do {
+                try self.cloudFS.writeData(data, to: url)
+            } catch {
+                print("⚠️ 题库云端写入失败: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    func deleteQuestions(folderId: UUID?, title: String, folders: [Folder]) {
+        // 删除本地缓存
+        let cacheURL = questionCacheURL(folderId: folderId, title: title, folders: folders)
+        try? FileManager.default.removeItem(at: cacheURL)
+        // 异步删除云端
+        let url = questionFileURL(folderId: folderId, title: title, folders: folders)
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self = self else { return }
+            try? self.cloudFS.removeItem(at: url)
         }
     }
 

@@ -37,16 +37,24 @@ final class QuizService {
     @Published var generatedCharCount: Int = 0  // 当前笔记已生成字数（实时进度）
     var onError: ((String) -> Void)?  // 生成题目报错回调
 
-    private let fileURL: URL
     private let generatedIdsURL: URL
-
     private let fileSystem: FileSystemService
+    
+    /// 所有笔记（用于查找 folderId 和 title，由 AppState 更新）
+    var notes: [Note] = []
+    /// 所有文件夹（用于计算路径，由 AppState 更新）
+    var folders: [Folder] = []
     
     init(fileSystem: FileSystemService) {
         self.fileSystem = fileSystem
-        self.fileURL = fileSystem.metadataDirectory.appendingPathComponent("quiz_questions.json")
         self.generatedIdsURL = fileSystem.metadataDirectory.appendingPathComponent("quiz_generated_notes.json")
         load()
+    }
+    
+    /// 更新笔记和文件夹列表（笔记变化时调用）
+    func updateNotes(_ notes: [Note], folders: [Folder]) {
+        self.notes = notes
+        self.folders = folders
     }
     
     /// 从本地缓存重新加载题库（元数据同步后调用）
@@ -57,12 +65,23 @@ final class QuizService {
     // MARK: - 持久化
 
     private func load() {
-        // 优先从本地缓存读取（通过 fileSystem）
-        // fileSystem.loadJSON 会自动处理缓存和云端同步
-        if let data = try? fileSystem.readNoteContent(from: fileURL).data(using: .utf8),
-           let decoded = try? JSONDecoder().decode([Question].self, from: data) {
-            questions = decoded
+        // 按笔记文件夹结构加载题目：遍历所有笔记，读取对应的 Questions/[路径]/[标题].json
+        var allQuestions: [Question] = []
+        for note in notes {
+            do {
+                let noteQuestions = try fileSystem.readQuestions(
+                    folderId: note.folderId,
+                    title: note.title,
+                    folders: folders
+                )
+                allQuestions.append(contentsOf: noteQuestions)
+            } catch {
+                // 该笔记没有题目文件，跳过
+            }
         }
+        questions = allQuestions
+        
+        // 加载已生成笔记 ID
         if let data = try? fileSystem.readNoteContent(from: generatedIdsURL).data(using: .utf8),
            let decoded = try? JSONDecoder().decode([UUID].self, from: data) {
             generatedNoteIds = Set(decoded)
@@ -70,10 +89,44 @@ final class QuizService {
     }
 
     private func save() {
-        if let data = try? JSONEncoder().encode(questions),
-           let str = String(data: data, encoding: .utf8) {
-            try? fileSystem.writeNoteContent(str, to: fileURL)
+        // 按笔记分组保存题目到 Questions/[路径]/[标题].json
+        let questionsByNote = Dictionary(grouping: questions) { $0.noteId }
+        
+        for (noteId, noteQuestions) in questionsByNote {
+            guard let note = notes.first(where: { $0.id == noteId }) else { continue }
+            do {
+                try fileSystem.writeQuestions(
+                    noteQuestions,
+                    folderId: note.folderId,
+                    title: note.title,
+                    folders: folders
+                )
+            } catch {
+                print("⚠️ 保存题目失败 \(note.title): \(error.localizedDescription)")
+            }
         }
+        
+        // 保存已生成笔记 ID
+        if let data = try? JSONEncoder().encode(Array(generatedNoteIds)),
+           let str = String(data: data, encoding: .utf8) {
+            try? fileSystem.writeNoteContent(str, to: generatedIdsURL)
+        }
+    }
+    
+    /// 只保存单个笔记的题目（生成题目时使用，提高性能）
+    private func saveQuestions(for note: Note) {
+        let noteQuestions = questions.filter { $0.noteId == note.id }
+        do {
+            try fileSystem.writeQuestions(
+                noteQuestions,
+                folderId: note.folderId,
+                title: note.title,
+                folders: folders
+            )
+        } catch {
+            print("⚠️ 保存题目失败 \(note.title): \(error.localizedDescription)")
+        }
+        // 保存已生成笔记 ID
         if let data = try? JSONEncoder().encode(Array(generatedNoteIds)),
            let str = String(data: data, encoding: .utf8) {
             try? fileSystem.writeNoteContent(str, to: generatedIdsURL)
@@ -88,8 +141,16 @@ final class QuizService {
         questions.removeAll { $0.noteId == noteId }
         generatedNoteIds.remove(noteId)
         failedNoteIds.remove(noteId)
+        // 删除对应的 .json 文件
+        if let note = notes.first(where: { $0.id == noteId }) {
+            fileSystem.deleteQuestions(folderId: note.folderId, title: note.title, folders: folders)
+        }
+        // 保存 generatedNoteIds
+        if let data = try? JSONEncoder().encode(Array(generatedNoteIds)),
+           let str = String(data: data, encoding: .utf8) {
+            try? fileSystem.writeNoteContent(str, to: generatedIdsURL)
+        }
         if questions.count != before {
-            save()
             print("🗑️ 删除笔记 \(noteId) 的题目: \(before - questions.count) 道")
         }
     }
@@ -101,8 +162,18 @@ final class QuizService {
         questions.removeAll { idSet.contains($0.noteId) }
         noteIds.forEach { generatedNoteIds.remove($0) }
         noteIds.forEach { failedNoteIds.remove($0) }
+        // 删除对应的 .json 文件
+        for noteId in noteIds {
+            if let note = notes.first(where: { $0.id == noteId }) {
+                fileSystem.deleteQuestions(folderId: note.folderId, title: note.title, folders: folders)
+            }
+        }
+        // 保存 generatedNoteIds
+        if let data = try? JSONEncoder().encode(Array(generatedNoteIds)),
+           let str = String(data: data, encoding: .utf8) {
+            try? fileSystem.writeNoteContent(str, to: generatedIdsURL)
+        }
         if questions.count != before {
-            save()
             print("🗑️ 删除多个笔记的题目: \(before - questions.count) 道")
         }
     }
@@ -284,8 +355,8 @@ final class QuizService {
                 }
                 processedNotes += 1
 
-                // 每完成一个笔记就立即保存，确保中断不丢失已生成题目
-                self.save()
+                // 每完成一个笔记就立即保存该笔记的题目，确保中断不丢失已生成题目
+                self.saveQuestions(for: note)
             }
 
             self.isGenerating = false

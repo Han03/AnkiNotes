@@ -522,6 +522,7 @@ final class StorageService: ObservableObject {
         
         // 同步课堂讲稿（Lecture 目录下的 .txt 文件）
         syncLecturesFromCloud(cloud: cloud, report: &report)
+        syncQuestionsFromCloud(cloud: cloud, report: &report)
         
         return report
     }
@@ -547,6 +548,32 @@ final class StorageService: ObservableObject {
                 report.lectureImportedCount += 1
             } catch {
                 report.lectureFailedCount += 1
+            }
+        }
+    }
+    
+    /// 从云端同步题库（Questions 目录，按笔记文件夹结构存储）
+    private func syncQuestionsFromCloud(cloud: CloudFileSystem, report: inout ImportReport) {
+        let questionsRoot = cloud.rootDirectory.appendingPathComponent("Questions", isDirectory: true)
+        var questionFiles: [URL] = []
+        collectFilesFromFS(cloud, at: questionsRoot, extensions: ["json"], skipNames: [], into: &questionFiles)
+        report.scannedQuestionFiles = questionFiles.count
+        for srcURL in questionFiles {
+            do {
+                let relativeComponents = relativePathComponents(of: srcURL, from: questionsRoot)
+                let folderComponents = Array(relativeComponents.dropLast())
+                let fileName = srcURL.lastPathComponent
+                let title = parseTitleFromFileName(fileName)
+                // 找到对应的文件夹
+                let folderId = getFolderId(for: folderComponents)
+                // 保存题库到本地缓存
+                let rawBody = try cloud.readData(at: srcURL)
+                if let questions = try? JSONDecoder().decode([Question].self, from: rawBody) {
+                    _ = try? fileSystem.writeQuestions(questions, folderId: folderId, title: title, folders: folders)
+                    report.questionImportedCount += 1
+                }
+            } catch {
+                report.questionFailedCount += 1
             }
         }
     }
@@ -741,6 +768,9 @@ final class StorageService: ObservableObject {
         var scannedLectureFiles: Int = 0
         var lectureImportedCount: Int = 0
         var lectureFailedCount: Int = 0
+        var scannedQuestionFiles: Int = 0
+        var questionImportedCount: Int = 0
+        var questionFailedCount: Int = 0
         var messages: [String] = []   // 简单说明 / 错误 / 导入的笔记标题样例 (最多前 10)
         var warningMessages: [String] = [] // 警告（如空文件）
     }

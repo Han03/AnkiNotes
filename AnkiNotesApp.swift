@@ -201,8 +201,12 @@ final class AppState: ObservableObject {
 
     func refreshStats() {
         todayDueCount = scheduler.getTodayDueCount()
-        totalNotes   = storage.getAllNotes().count
-        totalFolders = storage.getAllFolders().count
+        let allNotes = storage.getAllNotes()
+        let allFolders = storage.getAllFolders()
+        totalNotes   = allNotes.count
+        totalFolders = allFolders.count
+        // 更新 quizService 的笔记和文件夹列表（用于按文件夹结构存储题目）
+        quizService?.updateNotes(allNotes, folders: allFolders)
     }
 
     // MARK: - Provider 切换（UI 交互主入口）
@@ -531,6 +535,8 @@ final class AppState: ObservableObject {
         scheduler  = SchedulerService(storage: storage)
         quizService = QuizService(fileSystem: localFileSvc)
         storage.quizService = quizService  // 让删除笔记时能联动删除相关题目
+        // 更新 quizService 的笔记和文件夹列表（用于按文件夹结构存储题目）
+        quizService.updateNotes(storage.getAllNotes(), folders: storage.getAllFolders())
         refreshStats()
     }
 
