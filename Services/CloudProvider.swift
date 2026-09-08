@@ -271,14 +271,6 @@ final class LocalFS: CloudFileSystem {
         }
     }
 
-    func contentsOfDirectoryWithTypes(at url: URL) throws -> [(url: URL, isDirectory: Bool)] {
-        let urls = try fm.contentsOfDirectory(at: url, includingPropertiesForKeys: [.isDirectoryKey], options: [])
-        return urls.map { url in
-            let isDir = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
-            return (url, isDir)
-        }
-    }
-
     func readData(at url: URL) throws -> Data { try Data(contentsOf: url) }
 
     func writeData(_ data: Data, to url: URL) throws {
