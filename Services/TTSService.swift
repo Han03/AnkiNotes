@@ -91,6 +91,15 @@ private func generateMuid() -> String {
     return bytes.map { String(format: "%02X", $0) }.joined()
 }
 
+/// 生成 RFC 2616 格式的时间戳（如 "Tue, 08 Sep 2026 22:49:32 GMT"）
+private func rfc2616Timestamp() -> String {
+    let formatter = DateFormatter()
+    formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss 'GMT'"
+    formatter.timeZone = TimeZone(identifier: "GMT")
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    return formatter.string(from: Date())
+}
+
 /// 解析 Edge-TTS 二进制消息，提取音频数据
 /// 二进制消息格式：[2字节头部长度(大端序)][头部文本][\r\n\r\n][音频数据]
 private func parseEdgeTTSBinaryMessage(_ data: Data) -> Data? {
@@ -496,16 +505,7 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
     
     /// 构建 speech.config 消息（参考 edge-tts Python 库的 send_command_request）
     private func buildSpeechConfigMessage(requestId: String) -> String {
-        let timestamp = Date().formatted(.dateTime
-            .weekday(.abbreviated)
-            .day(.twoDigits)
-            .month(.abbreviated)
-            .year()
-            .hour(.twoDigits(amPM: .omitted))
-            .minute(.twoDigits)
-            .second(.twoDigits)
-            .timeZone(.identifier("GMT"))
-        )
+        let timestamp = rfc2616Timestamp()
         // os 信息必须与 User-Agent 一致（Windows/Edge）
         let configJSON = """
         {"context":{"synthesis":{"audio":{"metadataoptions":{"sentenceBoundaryEnabled":"true","wordBoundaryEnabled":"false"},"outputFormat":"audio-24khz-48kbitrate-mono-mp3"}}}}
@@ -515,16 +515,7 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
     
     /// 构建 ssml 消息（参考 edge-tts Python 库的 ssml_headers_plus_data）
     private func buildSSMLMessage(requestId: String, ssml: String) -> String {
-        let timestamp = Date().formatted(.dateTime
-            .weekday(.abbreviated)
-            .day(.twoDigits)
-            .month(.abbreviated)
-            .year()
-            .hour(.twoDigits(amPM: .omitted))
-            .minute(.twoDigits)
-            .second(.twoDigits)
-            .timeZone(.identifier("GMT"))
-        )
+        let timestamp = rfc2616Timestamp()
         return "X-Timestamp:\(timestamp)\r\nContent-Type:application/ssml+xml\r\nX-RequestId:\(requestId)\r\nPath:ssml\r\n\r\n\(ssml)"
     }
     
