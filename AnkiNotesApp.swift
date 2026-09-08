@@ -420,11 +420,40 @@ final class AppState: ObservableObject {
                     self.storage.triggerRefresh()
                 }
             }
-            // 获取云端锁（防止多端同时同步），若被占用则每隔5秒重试直到成功
+            // 【第1级：根目录级跳过】在获取锁之前检查根目录修改时间
+            // 注意：必须在获取锁之前检查，因为获取锁会写入锁文件，导致根目录修改时间更新
             guard let fs = self.activeFS else {
                 completion?(StorageService.ImportReport())
                 return
             }
+            SyncLogger.shared.stepStart("检查根目录更新状态（获取锁前）")
+            if self.syncSnapshotService.hasSnapshot {
+                do {
+                    let rootMeta = try fs.getItemMetadata(at: fs.rootDirectory)
+                    SyncLogger.shared.debug("根目录元数据: lastModified=\(rootMeta.lastModified)")
+                    if !self.syncSnapshotService.isRootDirectoryUpdated(lastModified: rootMeta.lastModified) {
+                        SyncLogger.shared.info("根目录无更新，跳过整个同步（获取锁前检查）")
+                        DispatchQueue.main.async {
+                            self.providerStatus = "✅ 云端无更新，跳过同步"
+                            self.syncStep = "同步完成"
+                            self.syncProgress = 100
+                            self.syncDetail = "根目录无更新，无需同步"
+                        }
+                        SyncLogger.shared.stepDone("检查根目录更新状态（获取锁前）")
+                        completion?(StorageService.ImportReport())
+                        return
+                    } else {
+                        SyncLogger.shared.info("根目录有更新，开始同步")
+                    }
+                } catch {
+                    SyncLogger.shared.error("无法获取根目录元数据，执行全量同步：\(error.localizedDescription)")
+                }
+            } else {
+                SyncLogger.shared.info("无同步快照，执行全量同步")
+            }
+            SyncLogger.shared.stepDone("检查根目录更新状态（获取锁前）")
+            
+            // 获取云端锁（防止多端同时同步），若被占用则每隔5秒重试直到成功
             // 显示正在获取云端锁（静默同步也显示）
             DispatchQueue.main.async {
                 self.syncStep = "获取云端锁"
@@ -529,32 +558,6 @@ final class AppState: ObservableObject {
                 }
             }
             
-            // 【第1级：根目录级跳过】检查根目录修改时间，如果无更新，直接跳过整个同步
-            SyncLogger.shared.stepStart("检查根目录更新状态")
-            if self.syncSnapshotService.hasSnapshot {
-                do {
-                    let rootMeta = try fs.getItemMetadata(at: fs.rootDirectory)
-                    SyncLogger.shared.debug("根目录元数据: lastModified=\(rootMeta.lastModified)")
-                    if !self.syncSnapshotService.isRootDirectoryUpdated(lastModified: rootMeta.lastModified) {
-                        SyncLogger.shared.info("根目录无更新，跳过整个同步")
-                        DispatchQueue.main.async {
-                            self.providerStatus = "✅ 云端无更新，跳过同步"
-                            self.syncStep = "同步完成"
-                            self.syncProgress = 100
-                            self.syncDetail = "根目录无更新，无需同步"
-                        }
-                        completion?(StorageService.ImportReport())
-                        return
-                    } else {
-                        SyncLogger.shared.info("根目录有更新，开始同步")
-                    }
-                } catch {
-                    SyncLogger.shared.error("无法获取根目录元数据，执行全量同步：\(error.localizedDescription)")
-                }
-            } else {
-                SyncLogger.shared.info("无同步快照，执行全量同步")
-            }
-            SyncLogger.shared.stepDone("检查根目录更新状态")
             // 同步前：先备份本地 noteMetas（包含未同步的 SRS 复习记录）
             let localNoteMetasBackup = MetadataSyncService.shared.readLocalNoteMetas()
             SyncLogger.shared.info("备份本地 noteMetas: \(localNoteMetasBackup.count) 条")
@@ -637,6 +640,57 @@ final class AppState: ObservableObject {
             self.syncSnapshotService.save()
             SyncLogger.shared.stepDone("保存同步快照")
             SyncLogger.shared.info("同步快照已保存，下次同步可增量跳过已同步内容")
+            
+            // 【优化】检查是否有需要推送的本地更改，如果没有则跳过推送数据（避免不必要的锁获取和限流）
+            // 检查本地元数据目录和知识点缓存目录是否有变化
+            let fileManager = FileManager.default
+            let metadataDir = self.storage.metadataDirectory
+            let knowledgeCacheDir = self.storage.rootDirectory.appendingPathComponent(".knowledge_cache")
+            
+            var hasLocalChanges = false
+            var metadataChanged = false
+            var knowledgeChanged = false
+            
+            // 检查元数据目录是否有变化（通过 notes_index.json 的修改时间判断）
+            let notesIndexURL = metadataDir.appendingPathComponent("notes_index.json")
+            if let indexAttributes = try? fileManager.attributesOfItem(atPath: notesIndexURL.path),
+               let indexModDate = indexAttributes[.modificationDate] as? Date {
+                // 如果 notes_index.json 的修改时间在同步开始后，说明有本地更改（SRS 数据合并等）
+                if indexModDate.timeIntervalSince(syncStartTime) > 0 {
+                    hasLocalChanges = true
+                    metadataChanged = true
+                }
+            }
+            
+            // 检查知识点缓存目录是否有变化
+            if let cacheAttributes = try? fileManager.attributesOfItem(atPath: knowledgeCacheDir.path),
+               let cacheModDate = cacheAttributes[.modificationDate] as? Date {
+                if cacheModDate.timeIntervalSince(syncStartTime) > 0 {
+                    hasLocalChanges = true
+                    knowledgeChanged = true
+                }
+            }
+            
+            if !hasLocalChanges {
+                SyncLogger.shared.info("本地无更改（元数据变化=\(metadataChanged)，知识点缓存变化=\(knowledgeChanged)），跳过推送数据，无需重新获取锁")
+                DispatchQueue.main.async {
+                    var status = "✅ 同步完成：新增 \(report.importedCount)，跳过 \(report.skippedCount)，失败 \(report.failedCount)，扫描到 \(report.scannedMarkdownFiles) 个 .md 文件"
+                    if report.scannedLectureFiles > 0 {
+                        status += "，讲稿 \(report.lectureImportedCount) 个"
+                    }
+                    status += "（本地无更改，跳过云端推送）"
+                    self.providerStatus = status
+                    self.syncStep = "同步完成"
+                    self.syncProgress = 100
+                    self.syncDetail = "同步已完成"
+                    self.refreshStats()
+                    completion?(report)
+                }
+                SyncLogger.shared.info("同步流程全部完成（跳过推送）")
+                return
+            }
+            
+            SyncLogger.shared.info("检测到本地更改（元数据变化=\(metadataChanged)，知识点缓存变化=\(knowledgeChanged)），需要推送数据到云端")
             
             // 本地处理完成，重新获取锁用于推送云端
             SyncLogger.shared.stepStart("重新获取云端锁（用于推送数据）")
