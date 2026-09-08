@@ -454,14 +454,14 @@ final class AppLogger {
         
         // 记录 Unix 信号
         let signals: [Int32] = [SIGABRT, SIGILL, SIGSEGV, SIGFPE, SIGBUS, SIGPIPE, SIGTRAP]
-        for signal in signals {
-            signal(signal) { sig in
+        for sigNum in signals {
+            Darwin.signal(sigNum) { sig in
                 AppLogger.fatal(.crash, "💀 收到致命信号: \(sig)", extra: [
                     "signalName": String(cString: strsignal(sig))
                 ])
                 AppLogger.flush()
                 // 重新抛出信号，让系统正常终止
-                signal(sig, SIG_DFL)
+                Darwin.signal(sig, SIG_DFL)
                 raise(sig)
             }
         }
@@ -469,35 +469,23 @@ final class AppLogger {
     
     // MARK: - 日志导出
     
-    /// 导出所有日志为 zip 文件
+    /// 导出日志（iOS 上没有 Process 类，无法创建 zip，直接返回最新的日志文件路径）
     static func exportLogs() -> URL? {
         flush()
         
         let logFiles = FileDestination.getAllLogFiles()
         guard !logFiles.isEmpty else { return nil }
         
-        let tempDir = NSTemporaryDirectory()
-        let zipPath = (tempDir as NSString).appendingPathComponent("AnkiNotes_logs_\(Int(Date().timeIntervalSince1970)).zip")
+        // 返回最新的日志文件路径
+        return URL(fileURLWithPath: logFiles[0])
+    }
+    
+    /// 获取所有日志文件路径（用于分享多个文件）
+    static func exportAllLogs() -> [URL] {
+        flush()
         
-        // 使用系统 zip 命令
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
-        task.arguments = ["-j", zipPath] + logFiles
-        
-        do {
-            try task.run()
-            task.waitUntilExit()
-            
-            if task.terminationStatus == 0 {
-                return URL(fileURLWithPath: zipPath)
-            } else {
-                // zip 失败，返回第一个日志文件
-                return URL(fileURLWithPath: logFiles[0])
-            }
-        } catch {
-            // zip 失败，返回第一个日志文件
-            return URL(fileURLWithPath: logFiles[0])
-        }
+        let logFiles = FileDestination.getAllLogFiles()
+        return logFiles.map { URL(fileURLWithPath: $0) }
     }
     
     /// 获取当前日志文件路径
