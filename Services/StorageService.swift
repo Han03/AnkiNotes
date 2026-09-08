@@ -246,6 +246,22 @@ final class StorageService: ObservableObject {
     }
 
     /// 获取指定文件夹的完整路径（从根目录开始）
+    /// 计算文件夹的完整路径（通用方法，可指定 folders 列表）
+    private func computeFolderPath(folderId: UUID?, folders: [Folder]) -> String {
+        guard let folderId = folderId else { return "" }
+        var components: [String] = []
+        var currentId: UUID? = folderId
+        while let fid = currentId {
+            if let folder = folders.first(where: { $0.id == fid }) {
+                components.insert(folder.name, at: 0)
+                currentId = folder.parentId
+            } else {
+                break
+            }
+        }
+        return components.joined(separator: "/")
+    }
+
     func getFolderPath(for folderId: UUID?) -> String {
         guard let folderId = folderId else { return "根目录" }
         var components: [String] = []
@@ -279,12 +295,14 @@ final class StorageService: ObservableObject {
     }
     
     @discardableResult
-    func createNote(title: String, folderId: UUID?, markdownContent: String = "", tags: [String] = [], skipCloudSync: Bool = false) -> Note {
+    func createNote(title: String, folderId: UUID?, markdownContent: String = "", tags: [String] = [], skipCloudSync: Bool = false, noteId: UUID? = nil, srs: SRSData? = nil) -> Note {
         let note = Note(
+            id: noteId ?? UUID(),
             title: title,
             folderId: folderId,
             markdownContent: markdownContent.isEmpty ? defaultMarkdown(for: title) : markdownContent,
-            tags: tags
+            tags: tags,
+            srs: srs ?? SRSData()
         )
         
         let fileURL = fileSystem.noteFileURL(noteId: note.id, folderId: folderId, title: title, folders: folders)
@@ -469,6 +487,28 @@ final class StorageService: ObservableObject {
             report.warningMessages.append("未配置云端同步")
             return report
         }
+        
+        // 加载从云端拉取的元数据（用于恢复 SRS 记忆数据）
+        // pullFromCloud 已将云端 .metadata 同步到本地，这里读取本地文件
+        let cloudCachedFolders = fileSystem.loadFolders()
+        let cloudCachedNoteMetas = fileSystem.loadNoteIndex()
+        // 建立 folderId -> 文件夹完整路径 的映射
+        var cloudFolderPathMap: [UUID: String] = [:]
+        for folder in cloudCachedFolders {
+            cloudFolderPathMap[folder.id] = computeFolderPath(folderId: folder.id, folders: cloudCachedFolders)
+        }
+        // 建立 "文件夹路径/笔记标题" -> noteMeta 的映射（用于恢复 SRS 数据）
+        var cloudNoteMetaMap: [String: NoteMeta] = [:]
+        for noteMeta in cloudCachedNoteMetas {
+            if let folderPath = cloudFolderPathMap[noteMeta.folderId] {
+                let key = "\(folderPath)/\(noteMeta.title.lowercased())"
+                cloudNoteMetaMap[key] = noteMeta
+            }
+        }
+        if !cloudNoteMetaMap.isEmpty {
+            print("📥 从云端元数据恢复记忆数据，共 \(cloudNoteMetaMap.count) 篇笔记的记忆记录")
+        }
+        
         let cloudRoot = cloud.rootDirectory.appendingPathComponent("Notes", isDirectory: true)
         let skipNames: Set<String> = [".metadata"]
         var cloudFiles: [URL] = []
@@ -507,7 +547,17 @@ final class StorageService: ObservableObject {
                     continue
                 }
                 let bodyToUse = parsed.body.isEmpty ? bodyStr : parsed.body
-                createNote(title: title, folderId: folderId, markdownContent: bodyToUse, tags: parsed.tags, skipCloudSync: true)
+                // 尝试从云端元数据中恢复 SRS 记忆数据（通过文件夹路径+标题匹配）
+                let folderPath = folderComponents.joined(separator: "/")
+                let matchKey = "\(folderPath)/\(title.lowercased())"
+                var recoveredNoteId: UUID? = nil
+                var recoveredSrs: SRSData? = nil
+                if let cloudNoteMeta = cloudNoteMetaMap[matchKey] {
+                    recoveredNoteId = cloudNoteMeta.id
+                    recoveredSrs = cloudNoteMeta.srs
+                    report.messages.append("📥 恢复记忆: \(title) (间隔:\(cloudNoteMeta.srs.interval)天 难度:\(String(format: "%.2f", cloudNoteMeta.srs.easeFactor)))")
+                }
+                createNote(title: title, folderId: folderId, markdownContent: bodyToUse, tags: parsed.tags, skipCloudSync: true, noteId: recoveredNoteId, srs: recoveredSrs)
                 report.importedCount += 1
                 if report.messages.count < 10 {
                     let prefix = folderComponents.isEmpty ? "" : folderComponents.joined(separator: "/") + "/"
