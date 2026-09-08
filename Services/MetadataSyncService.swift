@@ -73,9 +73,11 @@ final class MetadataSyncService {
         }
         
         let result = Array(merged.values)
-        let localOnly = local.filter { !cloud.contains($0.id) }.count
-        let cloudOnly = cloud.filter { !local.contains($0.id) }.count
-        let both = local.filter { cloud.contains($0.id) }.count
+        let cloudIds = Set(cloud.map { $0.id })
+        let localIds = Set(local.map { $0.id })
+        let localOnly = local.filter { !cloudIds.contains($0.id) }.count
+        let cloudOnly = cloud.filter { !localIds.contains($0.id) }.count
+        let both = local.filter { cloudIds.contains($0.id) }.count
         print("🔄 SRS数据合并: 本地\(local.count)篇 + 云端\(cloud.count)篇 → 合并\(result.count)篇 (仅本地\(localOnly), 仅云端\(cloudOnly), 两端都有\(both))")
         return result
     }

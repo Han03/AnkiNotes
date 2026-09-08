@@ -301,8 +301,8 @@ final class StorageService: ObservableObject {
             title: title,
             folderId: folderId,
             markdownContent: markdownContent.isEmpty ? defaultMarkdown(for: title) : markdownContent,
-            tags: tags,
-            srs: srs ?? SRSData()
+            srs: srs ?? SRSData(),
+            tags: tags
         )
         
         let fileURL = fileSystem.noteFileURL(noteId: note.id, folderId: folderId, title: title, folders: folders)
@@ -500,7 +500,7 @@ final class StorageService: ObservableObject {
         // 建立 "文件夹路径/笔记标题" -> noteMeta 的映射（用于恢复 SRS 数据）
         var cloudNoteMetaMap: [String: NoteMeta] = [:]
         for noteMeta in cloudCachedNoteMetas {
-            if let folderPath = cloudFolderPathMap[noteMeta.folderId] {
+            if let fid = noteMeta.folderId, let folderPath = cloudFolderPathMap[fid] {
                 let key = "\(folderPath)/\(noteMeta.title.lowercased())"
                 cloudNoteMetaMap[key] = noteMeta
             }
@@ -608,9 +608,11 @@ final class StorageService: ObservableObject {
         }
         
         let result = Array(merged.values)
-        let localOnly = local.filter { !cloud.contains($0.id) }.count
-        let cloudOnly = cloud.filter { !local.contains($0.id) }.count
-        let both = local.filter { cloud.contains($0.id) }.count
+        let cloudIds = Set(cloud.map { $0.id })
+        let localIds = Set(local.map { $0.id })
+        let localOnly = local.filter { !cloudIds.contains($0.id) }.count
+        let cloudOnly = cloud.filter { !localIds.contains($0.id) }.count
+        let both = local.filter { cloudIds.contains($0.id) }.count
         if !local.isEmpty || !cloud.isEmpty {
             print("🔄 题目数据合并: 本地\(local.count)题 + 云端\(cloud.count)题 → 合并\(result.count)题 (仅本地\(localOnly), 仅云端\(cloudOnly), 两端都有\(both))")
         }
