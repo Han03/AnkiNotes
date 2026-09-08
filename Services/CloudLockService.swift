@@ -97,39 +97,47 @@ final class CloudLockService {
         let now = Date().timeIntervalSince1970
         
         // 1. 检查锁是否存在且未过期
-        if cloudFS.fileExists(at: lockURL) {
-            do {
-                let data = try cloudFS.readData(at: lockURL)
-                if let lockData = try? JSONDecoder().decode(LockData.self, from: data) {
-                    // 检查锁是否过期
-                    if lockData.expiresAt > now {
-                        // 锁未过期
-                        if lockData.deviceId == deviceId {
-                            // 是自己持有的锁
-                            if lockData.fencingToken == currentFencingToken && currentFencingToken > 0 {
-                                // token 匹配，正常续期
-                                return renewLock(cloudFS: cloudFS)
-                            } else {
-                                // token 不匹配，说明是之前未正确释放的锁（如续期失败导致 token 被重置）
-                                // 强制删除旧锁，然后重新创建
-                                print("⚠️ 发现自己的旧锁但 token 不匹配（云端: \(lockData.fencingToken), 本地: \(currentFencingToken)），强制删除后重新获取")
-                                try? cloudFS.removeItem(at: lockURL)
-                                Thread.sleep(forTimeInterval: 0.1)
-                            }
+        // 注意：不使用 fileExists（PROPFIND），因为坚果云 WebDAV 的 PROPFIND 可能无法正确检测根目录文件
+        // 直接尝试 readData（GET），读取成功说明文件存在，读取失败说明文件不存在
+        do {
+            let data = try cloudFS.readData(at: lockURL)
+            if let lockData = try? JSONDecoder().decode(LockData.self, from: data) {
+                // 检查锁是否过期
+                if lockData.expiresAt > now {
+                    // 锁未过期
+                    if lockData.deviceId == deviceId {
+                        // 是自己持有的锁
+                        if lockData.fencingToken == currentFencingToken && currentFencingToken > 0 {
+                            // token 匹配，正常续期
+                            return renewLock(cloudFS: cloudFS)
                         } else {
-                            // 被其他设备持有，获取失败
-                            print("🔒 云端锁被设备 \(lockData.deviceId.prefix(8))... 持有，过期时间: \(Date(timeIntervalSince1970: lockData.expiresAt))")
-                            return false
+                            // token 不匹配，说明是之前未正确释放的锁（如续期失败导致 token 被重置）
+                            // 强制删除旧锁，然后重新创建
+                            print("⚠️ 发现自己的旧锁但 token 不匹配（云端: \(lockData.fencingToken), 本地: \(currentFencingToken)），强制删除后重新获取")
+                            try? cloudFS.removeItem(at: lockURL)
+                            Thread.sleep(forTimeInterval: 0.1)
                         }
+                    } else {
+                        // 被其他设备持有，获取失败
+                        print("🔒 云端锁被设备 \(lockData.deviceId.prefix(8))... 持有，过期时间: \(Date(timeIntervalSince1970: lockData.expiresAt))")
+                        return false
                     }
+                } else {
                     // 锁已过期，可以强制获取
                     print("🔓 云端锁已过期（token: \(lockData.fencingToken)），强制获取")
                     // 删除过期的锁文件
                     try? cloudFS.removeItem(at: lockURL)
+                    Thread.sleep(forTimeInterval: 0.1)
                 }
-            } catch {
-                print("⚠️ 读取锁文件失败，尝试强制获取: \(error.localizedDescription)")
+            } else {
+                // 锁文件无法解析，可能是损坏的，强制删除
+                print("⚠️ 锁文件无法解析，强制删除")
+                try? cloudFS.removeItem(at: lockURL)
+                Thread.sleep(forTimeInterval: 0.1)
             }
+        } catch {
+            // 读取锁文件失败，说明文件不存在，继续创建
+            print("📝 锁文件不存在（读取失败），准备创建新锁: \(error.localizedDescription)")
         }
         
         // 2. 原子创建锁文件（If-None-Match: *）
@@ -188,32 +196,34 @@ final class CloudLockService {
         // 只验证 deviceId，不验证 fencingToken
         // 原因：fencingToken 可能因为续期失败等原因被重置为 0，导致验证失败，锁文件无法删除
         // 只要是自己设备创建的锁，就应该可以删除
-        if cloudFS.fileExists(at: lockURL) {
-            do {
-                let data = try cloudFS.readData(at: lockURL)
-                if let lockData = try? JSONDecoder().decode(LockData.self, from: data) {
-                    if lockData.deviceId == deviceId {
-                        // 确认是自己的锁，删除
-                        try cloudFS.removeItem(at: lockURL)
-                        
-                        // 二次确认：检查是否删除成功
-                        Thread.sleep(forTimeInterval: 0.1)
-                        if cloudFS.fileExists(at: lockURL) {
-                            print("⚠️ 锁文件删除后仍然存在，可能有并发问题")
-                        } else {
-                            print("🔓 释放云端锁成功 (token: \(currentFencingToken))")
-                        }
-                    } else {
-                        print("⚠️ 锁不是当前设备持有（deviceId 不匹配），不释放")
+        // 注意：不使用 fileExists（PROPFIND），因为坚果云 WebDAV 的 PROPFIND 可能无法正确检测根目录文件
+        // 直接尝试 readData（GET），读取成功说明文件存在，读取失败说明文件不存在
+        do {
+            let data = try cloudFS.readData(at: lockURL)
+            if let lockData = try? JSONDecoder().decode(LockData.self, from: data) {
+                if lockData.deviceId == deviceId {
+                    // 确认是自己的锁，删除
+                    try cloudFS.removeItem(at: lockURL)
+                    
+                    // 二次确认：尝试读取，如果读取失败说明删除成功
+                    Thread.sleep(forTimeInterval: 0.1)
+                    do {
+                        _ = try cloudFS.readData(at: lockURL)
+                        print("⚠️ 锁文件删除后仍然存在，可能有并发问题")
+                    } catch {
+                        print("🔓 释放云端锁成功 (token: \(currentFencingToken))")
                     }
                 } else {
-                    // 锁文件无法解析，可能是损坏的，强制删除
-                    print("⚠️ 锁文件无法解析，强制删除")
-                    try? cloudFS.removeItem(at: lockURL)
+                    print("⚠️ 锁不是当前设备持有（deviceId 不匹配），不释放")
                 }
-            } catch {
-                print("⚠️ 释放锁失败: \(error.localizedDescription)")
+            } else {
+                // 锁文件无法解析，可能是损坏的，强制删除
+                print("⚠️ 锁文件无法解析，强制删除")
+                try? cloudFS.removeItem(at: lockURL)
             }
+        } catch {
+            // 读取失败，说明锁文件不存在，直接重置状态
+            print("📝 释放锁时锁文件不存在（读取失败），直接重置状态: \(error.localizedDescription)")
         }
         
         isHoldingLock = false
@@ -228,10 +238,8 @@ final class CloudLockService {
     func verifyLockOwnership(cloudFS: CloudFileSystem) -> Bool {
         let lockURL = lockFileURL(in: cloudFS)
         
-        guard cloudFS.fileExists(at: lockURL) else {
-            return false
-        }
-        
+        // 注意：不使用 fileExists（PROPFIND），因为坚果云 WebDAV 的 PROPFIND 可能无法正确检测根目录文件
+        // 直接尝试 readData（GET），读取成功说明文件存在，读取失败说明文件不存在
         do {
             let data = try cloudFS.readData(at: lockURL)
             guard let lockData = try? JSONDecoder().decode(LockData.self, from: data) else {
@@ -244,6 +252,7 @@ final class CloudLockService {
                    lockData.fencingToken == currentFencingToken &&
                    lockData.expiresAt > now
         } catch {
+            // 读取失败，说明锁文件不存在
             return false
         }
     }
@@ -333,8 +342,7 @@ final class CloudLockService {
     /// 检查云端锁是否被其他设备持有
     func isLockedByOtherDevice(cloudFS: CloudFileSystem) -> Bool {
         let lockURL = lockFileURL(in: cloudFS)
-        guard cloudFS.fileExists(at: lockURL) else { return false }
-        
+        // 注意：不使用 fileExists（PROPFIND），直接尝试 readData（GET）
         do {
             let data = try cloudFS.readData(at: lockURL)
             if let lockData = try? JSONDecoder().decode(LockData.self, from: data) {
@@ -342,7 +350,8 @@ final class CloudLockService {
                 return lockData.deviceId != deviceId && lockData.expiresAt > now
             }
         } catch {
-            print("⚠️ 检查锁状态失败: \(error.localizedDescription)")
+            // 读取失败，说明锁文件不存在
+            return false
         }
         return false
     }
@@ -350,8 +359,7 @@ final class CloudLockService {
     /// 获取锁持有者信息（用于 UI 提示）
     func lockHolderInfo(cloudFS: CloudFileSystem) -> String? {
         let lockURL = lockFileURL(in: cloudFS)
-        guard cloudFS.fileExists(at: lockURL) else { return nil }
-        
+        // 注意：不使用 fileExists（PROPFIND），直接尝试 readData（GET）
         do {
             let data = try cloudFS.readData(at: lockURL)
             if let lockData = try? JSONDecoder().decode(LockData.self, from: data) {
@@ -370,12 +378,9 @@ final class CloudLockService {
     /// 获取锁文件的详细信息（用于日志记录）
     func lockDebugInfo(cloudFS: CloudFileSystem) -> String {
         let lockURL = lockFileURL(in: cloudFS)
-        var info = "当前状态: isHoldingLock=\(isHoldingLock), currentFencingToken=\(currentFencingToken), deviceId=\(deviceId.prefix(8))...; "
+        var info = "当前状态: isHoldingLock=\(isHoldingLock), currentFencingToken=\(currentFencingToken), deviceId=\(deviceId.prefix(8))...; 锁文件URL: \(lockURL.absoluteString); "
         
-        guard cloudFS.fileExists(at: lockURL) else {
-            return info + "云端锁文件: 不存在"
-        }
-        
+        // 注意：不使用 fileExists（PROPFIND），直接尝试 readData（GET）
         do {
             let data = try cloudFS.readData(at: lockURL)
             if let lockData = try? JSONDecoder().decode(LockData.self, from: data) {
@@ -388,7 +393,7 @@ final class CloudLockService {
                 info += "云端锁文件: 无法解析"
             }
         } catch {
-            info += "云端锁文件: 读取失败 - \(error.localizedDescription)"
+            info += "云端锁文件: 不存在或读取失败 - \(error.localizedDescription)"
         }
         return info
     }
