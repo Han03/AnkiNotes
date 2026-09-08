@@ -194,13 +194,15 @@ struct ReviewSessionView: View {
         }
         // 讲稿阅读页面（使用 fullScreenCover 避免与其他 sheet 冲突）
         .fullScreenCover(isPresented: $showLecture) {
-            SyncLogger.shared.info("📖 ReviewSessionView fullScreenCover 闭包执行，lectureContent=\(lectureContent?.count ?? -1), currentIndex=\(currentIndex), queue.count=\(queue.count)")
             if currentIndex < queue.count {
                 LectureReaderView(
                     note: queue[currentIndex],
                     folderPath: appState.storage?.getNoteFolderPath(for: queue[currentIndex]) ?? "",
                     lectureContent: lectureContent ?? ""
                 )
+                .onAppear {
+                    SyncLogger.shared.info("📖 ReviewSessionView fullScreenCover 出现，lectureContent=\(lectureContent?.count ?? -1), currentIndex=\(currentIndex), queue.count=\(queue.count)")
+                }
             }
         }
     }
