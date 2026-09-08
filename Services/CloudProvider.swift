@@ -107,8 +107,10 @@ protocol CloudFileSystem: AnyObject {
     func createDirectoryIfNeeded(at url: URL) throws
     /// 列出目录中的直接子项 URL（用于 WebDAV 扫描，本地用 FileManager）
     func contentsOfDirectory(at url: URL) throws -> [URL]
-    /// 列出目录中的直接子项，同时返回是否是目录（避免对每个子项发起额外请求）
-    func contentsOfDirectoryWithTypes(at url: URL) throws -> [(url: URL, isDirectory: Bool)]
+    /// 列出目录中的直接子项，同时返回是否是目录和最后修改时间（避免对每个子项发起额外请求）
+    func contentsOfDirectoryWithMetadata(at url: URL) throws -> [(url: URL, isDirectory: Bool, lastModified: Date?)]
+    /// 获取单个文件/目录的元数据（最后修改时间），用于根目录级快速判断
+    func getItemMetadata(at url: URL) throws -> (isDirectory: Bool, lastModified: Date?)
     /// 读取数据
     func readData(at url: URL) throws -> Data
     /// 写入数据（atomic）
@@ -263,12 +265,19 @@ final class LocalFS: CloudFileSystem {
         try fm.contentsOfDirectory(at: url, includingPropertiesForKeys: nil, options: [])
     }
 
-    func contentsOfDirectoryWithTypes(at url: URL) throws -> [(url: URL, isDirectory: Bool)] {
-        let urls = try fm.contentsOfDirectory(at: url, includingPropertiesForKeys: [.isDirectoryKey], options: [])
+    func contentsOfDirectoryWithMetadata(at url: URL) throws -> [(url: URL, isDirectory: Bool, lastModified: Date?)] {
+        let urls = try fm.contentsOfDirectory(at: url, includingPropertiesForKeys: [.isDirectoryKey, .contentModificationDateKey], options: [])
         return urls.map { url in
-            let isDir = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
-            return (url, isDir)
+            let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .contentModificationDateKey])
+            let isDir = values?.isDirectory ?? false
+            let lastModified = values?.contentModificationDate
+            return (url, isDir, lastModified)
         }
+    }
+    
+    func getItemMetadata(at url: URL) throws -> (isDirectory: Bool, lastModified: Date?) {
+        let values = try url.resourceValues(forKeys: [.isDirectoryKey, .contentModificationDateKey])
+        return (values.isDirectory ?? false, values.contentModificationDate)
     }
 
     func readData(at url: URL) throws -> Data { try Data(contentsOf: url) }
@@ -349,12 +358,19 @@ final class ICloudFS: CloudFileSystem {
         try fm.contentsOfDirectory(at: url, includingPropertiesForKeys: nil, options: [])
     }
 
-    func contentsOfDirectoryWithTypes(at url: URL) throws -> [(url: URL, isDirectory: Bool)] {
-        let urls = try fm.contentsOfDirectory(at: url, includingPropertiesForKeys: [.isDirectoryKey], options: [])
+    func contentsOfDirectoryWithMetadata(at url: URL) throws -> [(url: URL, isDirectory: Bool, lastModified: Date?)] {
+        let urls = try fm.contentsOfDirectory(at: url, includingPropertiesForKeys: [.isDirectoryKey, .contentModificationDateKey], options: [])
         return urls.map { url in
-            let isDir = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
-            return (url, isDir)
+            let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .contentModificationDateKey])
+            let isDir = values?.isDirectory ?? false
+            let lastModified = values?.contentModificationDate
+            return (url, isDir, lastModified)
         }
+    }
+    
+    func getItemMetadata(at url: URL) throws -> (isDirectory: Bool, lastModified: Date?) {
+        let values = try url.resourceValues(forKeys: [.isDirectoryKey, .contentModificationDateKey])
+        return (values.isDirectory ?? false, values.contentModificationDate)
     }
 
     func readData(at url: URL) throws -> Data {
@@ -637,10 +653,25 @@ final class WebDAVFS: CloudFileSystem {
 
     // MARK: - PROPFIND XML 解析器（取 href + 区分 collection 文件夹）
     private final class DAVPropfindParser: NSObject, XMLParserDelegate {
-        struct Item { let href: String; let isCollection: Bool }
+        struct Item { 
+            let href: String 
+            let isCollection: Bool
+            let lastModified: Date?
+        }
+        // HTTP 日期格式解析器（如 "Mon, 08 Sep 2026 06:00:00 GMT"）
+        private static let httpDateFormatter: DateFormatter = {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = TimeZone(identifier: "GMT")
+            formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+            return formatter
+        }()
+        
         var items: [Item] = []
         private var inHref = false
+        private var inLastModified = false
         private var currentHref = ""
+        private var currentLastModified = ""
         private var currentIsCollection = false
 
         func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String: String] = [:]) {
@@ -649,18 +680,27 @@ final class WebDAVFS: CloudFileSystem {
                 inHref = true
                 currentHref = ""
             }
-            // 每个 <d:response> 开始时重置 collection 标记
+            if lower.hasSuffix("getlastmodified") {
+                inLastModified = true
+                currentLastModified = ""
+            }
+            // 每个 <d:response> 开始时重置标记
             if lower.hasSuffix("response") {
                 currentIsCollection = false
+                currentLastModified = ""
             }
         }
         func parser(_ parser: XMLParser, foundCharacters string: String) {
             if inHref { currentHref.append(string) }
+            if inLastModified { currentLastModified.append(string) }
         }
         func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
             let lower = elementName.lowercased()
             if lower.hasSuffix("href") {
                 inHref = false
+            }
+            if lower.hasSuffix("getlastmodified") {
+                inLastModified = false
             }
             // <d:collection/> 出现在 resourcetype 内 → 是文件夹
             if lower.hasSuffix("collection") {
@@ -669,17 +709,20 @@ final class WebDAVFS: CloudFileSystem {
             // 每个 <d:response> 结束时收集一条
             if lower.hasSuffix("response") {
                 if !currentHref.isEmpty {
+                    // 解析最后修改时间（HTTP 日期格式）
+                    let lastModified = DAVPropfindParser.httpDateFormatter.date(from: currentLastModified.trimmingCharacters(in: .whitespacesAndNewlines))
                     // ❗ 保留原始百分号编码，不解码（避免中文路径 URL(string:) 返回 nil）
-                    items.append(Item(href: currentHref, isCollection: currentIsCollection))
+                    items.append(Item(href: currentHref, isCollection: currentIsCollection, lastModified: lastModified))
                 }
                 currentHref = ""
                 currentIsCollection = false
+                currentLastModified = ""
             }
         }
     }
 
-    /// 列出目录子项，同时返回哪些是文件夹（供 StorageService 递归扫描用，避免靠 hack 判断）
-    func contentsOfDirectoryWithTypes(at url: URL) throws -> [(url: URL, isDirectory: Bool)] {
+    /// 列出目录子项，同时返回哪些是文件夹和最后修改时间（供 StorageService 递归扫描用，避免靠 hack 判断）
+    func contentsOfDirectoryWithMetadata(at url: URL) throws -> [(url: URL, isDirectory: Bool, lastModified: Date?)] {
         let req = request(url: url, method: "PROPFIND", headers: ["Depth": "1"])
         let data = try sendBlockingRequest(req, allowedStatus: [200, 207])
         let delegate = DAVPropfindParser()
@@ -698,8 +741,22 @@ final class WebDAVFS: CloudFileSystem {
             // ✅ 正确的直接子项判断：子项的父路径 == 当前目录路径
             let parentPath = (fullURL.path as NSString).deletingLastPathComponent + "/"
             guard parentPath == selfPath else { return nil }
-            return (fullURL, item.isCollection)
+            return (fullURL, item.isCollection, item.lastModified)
         }
+    }
+    
+    /// 获取单个文件/目录的元数据（最后修改时间），用于根目录级快速判断
+    func getItemMetadata(at url: URL) throws -> (isDirectory: Bool, lastModified: Date?) {
+        let req = request(url: url, method: "PROPFIND", headers: ["Depth": "0"])
+        let data = try sendBlockingRequest(req, allowedStatus: [200, 207])
+        let delegate = DAVPropfindParser()
+        let parser = XMLParser(data: data)
+        parser.delegate = delegate
+        parser.parse()
+        guard let item = delegate.items.first else {
+            throw NSError(domain: "WebDAVFS", code: -1, userInfo: [NSLocalizedDescriptionKey: "无法获取项目元数据"])
+        }
+        return (item.isCollection, item.lastModified)
     }
 }
 

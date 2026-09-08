@@ -19,6 +19,8 @@ final class StorageService: ObservableObject {
     
     /// 同步进度回调（step: 当前步骤, progress: 0-100, detail: 详情）
     var syncProgressCallback: ((_ step: String, _ progress: Double, _ detail: String) -> Void)?
+    /// 同步快照服务（用于增量同步）
+    weak var syncSnapshotService: SyncSnapshotService?
     
     init(fileSystem: FileSystemService) {
         self.fileSystem = fileSystem
@@ -515,9 +517,10 @@ final class StorageService: ObservableObject {
         let cloudRoot = cloud.rootDirectory.appendingPathComponent("Notes", isDirectory: true)
         let skipNames: Set<String> = [".metadata"]
         var cloudFiles: [URL] = []
-        collectMarkdownFilesFromFS(cloud, at: cloudRoot, skipNames: skipNames, into: &cloudFiles)
+        // 传入快照和根目录，支持目录级和文件级跳过
+        collectMarkdownFilesFromFS(cloud, at: cloudRoot, skipNames: skipNames, into: &cloudFiles, rootURL: cloudRoot, snapshot: syncSnapshotService)
         report.scannedMarkdownFiles = cloudFiles.count
-        syncProgressCallback?("扫描云端文件", 5, "发现 \(cloudFiles.count) 篇笔记")
+        syncProgressCallback?("扫描云端文件", 5, "发现 \(cloudFiles.count) 篇需要更新的笔记")
         guard report.scannedMarkdownFiles > 0 else {
             report.warningMessages.append("云端 Notes 目录没有发现 .md 文件")
             return report
@@ -572,6 +575,13 @@ final class StorageService: ObservableObject {
                     let prefix = folderComponents.isEmpty ? "" : folderComponents.joined(separator: "/") + "/"
                     report.messages.append("✅ \(prefix)\(title)")
                 }
+                // 更新快照中的文件修改时间
+                if let snap = syncSnapshotService {
+                    let relativePath = snap.relativePath(for: srcURL, rootURL: cloudRoot)
+                    if let meta = try? cloud.getItemMetadata(at: srcURL) {
+                        snap.updateFile(relativePath: relativePath, lastModified: meta.lastModified)
+                    }
+                }
             } catch {
                 report.failedCount += 1
                 if report.warningMessages.count < 5 {
@@ -588,9 +598,9 @@ final class StorageService: ObservableObject {
         
         // 同步课堂讲稿（Lecture 目录下的 .txt 文件）
         syncProgressCallback?("同步讲稿", 55, "正在扫描云端讲稿...")
-        syncLecturesFromCloud(cloud: cloud, report: &report)
+        syncLecturesFromCloud(cloud: cloud, report: &report, snapshot: syncSnapshotService)
         syncProgressCallback?("同步题库", 75, "正在扫描云端题库...")
-        syncQuestionsFromCloud(cloud: cloud, report: &report)
+        syncQuestionsFromCloud(cloud: cloud, report: &report, snapshot: syncSnapshotService)
         syncProgressCallback?("同步完成", 100, "笔记 \(report.importedCount) 篇，讲稿 \(report.lectureImportedCount) 个，题库已同步")
         
         return report
@@ -632,12 +642,13 @@ final class StorageService: ObservableObject {
     }
 
     /// 从云端同步课堂讲稿
-    private func syncLecturesFromCloud(cloud: CloudFileSystem, report: inout ImportReport) {
+    private func syncLecturesFromCloud(cloud: CloudFileSystem, report: inout ImportReport, snapshot: SyncSnapshotService? = nil) {
         let lectureRoot = cloud.rootDirectory.appendingPathComponent("Lecture", isDirectory: true)
         var lectureFiles: [URL] = []
-        collectFilesFromFS(cloud, at: lectureRoot, extensions: ["txt"], skipNames: [], into: &lectureFiles)
+        // 传入快照和根目录，支持目录级和文件级跳过
+        collectFilesFromFS(cloud, at: lectureRoot, extensions: ["txt"], skipNames: [], into: &lectureFiles, rootURL: lectureRoot, snapshot: snapshot)
         report.scannedLectureFiles = lectureFiles.count
-        print("📖 讲稿同步: 扫描到 \(lectureFiles.count) 个讲稿文件")
+        print("📖 讲稿同步: 扫描到 \(lectureFiles.count) 个需要更新的讲稿文件")
         for srcURL in lectureFiles {
             do {
                 let relativeComponents = relativePathComponents(of: srcURL, from: lectureRoot)
@@ -658,6 +669,14 @@ final class StorageService: ObservableObject {
                     try fileSystem.writeLecture(bodyStr, folderId: folderId, title: title, folders: folders, skipCloudSync: true)
                     report.lectureImportedCount += 1
                     print("✅ 讲稿同步: 导入 \(title) (\(bodyStr.count) 字符)")
+                    // 更新快照中的文件修改时间
+                    if let snap = snapshot {
+                        let relativePath = snap.relativePath(for: srcURL, rootURL: lectureRoot)
+                        // 重新获取文件的修改时间
+                        if let meta = try? cloud.getItemMetadata(at: srcURL) {
+                            snap.updateFile(relativePath: relativePath, lastModified: meta.lastModified)
+                        }
+                    }
                 } catch {
                     print("❌ 讲稿同步: 写入失败 \(title): \(error.localizedDescription)")
                     report.lectureFailedCount += 1
@@ -670,10 +689,11 @@ final class StorageService: ObservableObject {
     }
     
     /// 从云端同步题库（Questions 目录，按笔记文件夹结构存储）
-    private func syncQuestionsFromCloud(cloud: CloudFileSystem, report: inout ImportReport) {
+    private func syncQuestionsFromCloud(cloud: CloudFileSystem, report: inout ImportReport, snapshot: SyncSnapshotService? = nil) {
         let questionsRoot = cloud.rootDirectory.appendingPathComponent("Questions", isDirectory: true)
         var questionFiles: [URL] = []
-        collectFilesFromFS(cloud, at: questionsRoot, extensions: ["json"], skipNames: [], into: &questionFiles)
+        // 传入快照和根目录，支持目录级和文件级跳过
+        collectFilesFromFS(cloud, at: questionsRoot, extensions: ["json"], skipNames: [], into: &questionFiles, rootURL: questionsRoot, snapshot: snapshot)
         report.scannedQuestionFiles = questionFiles.count
         print("📚 题库同步: 扫描到 \(questionFiles.count) 个题目文件")
         for srcURL in questionFiles {
@@ -708,6 +728,13 @@ final class StorageService: ObservableObject {
                     try fileSystem.writeQuestions(mergedQuestions, folderId: folderId, title: title, folders: folders, skipCloudSync: true)
                     report.questionImportedCount += 1
                     print("✅ 题库同步: 导入 \(title) (\(mergedQuestions.count)题)")
+                    // 更新快照中的文件修改时间
+                    if let snap = snapshot {
+                        let relativePath = snap.relativePath(for: srcURL, rootURL: questionsRoot)
+                        if let meta = try? cloud.getItemMetadata(at: srcURL) {
+                            snap.updateFile(relativePath: relativePath, lastModified: meta.lastModified)
+                        }
+                    }
                 } catch {
                     print("❌ 题库同步: 写入失败 \(title): \(error.localizedDescription)")
                     report.questionFailedCount += 1
@@ -810,23 +837,37 @@ final class StorageService: ObservableObject {
     }
 
     /// 从指定 FS 递归扫描 .md 文件
-    private func collectMarkdownFilesFromFS(_ fs: CloudFileSystem, at url: URL, skipNames: Set<String>, into result: inout [URL]) {
-        collectFilesFromFS(fs, at: url, extensions: ["md", "markdown"], skipNames: skipNames, into: &result)
+    private func collectMarkdownFilesFromFS(_ fs: CloudFileSystem, at url: URL, skipNames: Set<String>, into result: inout [URL], rootURL: URL? = nil, snapshot: SyncSnapshotService? = nil) {
+        collectFilesFromFS(fs, at: url, extensions: ["md", "markdown"], skipNames: skipNames, into: &result, rootURL: rootURL, snapshot: snapshot)
     }
     
-    private func collectFilesFromFS(_ fs: CloudFileSystem, at url: URL, extensions: [String], skipNames: Set<String>, into result: inout [URL]) {
-        // 使用 contentsOfDirectoryWithTypes 一次获取子项和类型，避免对每个子项发起额外请求
+    private func collectFilesFromFS(_ fs: CloudFileSystem, at url: URL, extensions: [String], skipNames: Set<String>, into result: inout [URL], rootURL: URL? = nil, snapshot: SyncSnapshotService? = nil) {
+        // 使用 contentsOfDirectoryWithMetadata 一次获取子项和类型及修改时间，避免对每个子项发起额外请求
         // （WebDAV 下 contentsOfDirectory 是网络请求，逐个调用容易超时失败导致目录被跳过）
-        let children: [(url: URL, isDirectory: Bool)]
-        do { children = try fs.contentsOfDirectoryWithTypes(at: url) } catch { return }
-        for (child, isDirectory) in children {
+        let children: [(url: URL, isDirectory: Bool, lastModified: Date?)]
+        do { children = try fs.contentsOfDirectoryWithMetadata(at: url) } catch { return }
+        for (child, isDirectory, lastModified) in children {
             let name = child.lastPathComponent
             if skipNames.contains(name) { continue }
             let ext = child.pathExtension.lowercased()
             if extensions.contains(ext) {
+                // 文件级跳过：如果文件无更新，跳过
+                if let root = rootURL, let snap = snapshot {
+                    let relativePath = snap.relativePath(for: child, rootURL: root)
+                    if !snap.isFileUpdated(relativePath: relativePath, lastModified: lastModified) {
+                        continue  // 文件无更新，跳过
+                    }
+                }
                 result.append(child)
             } else if isDirectory {
-                collectFilesFromFS(fs, at: child, extensions: extensions, skipNames: skipNames, into: &result)
+                // 目录级跳过：如果目录无更新，跳过整个目录
+                if let root = rootURL, let snap = snapshot {
+                    let relativePath = snap.relativePath(for: child, rootURL: root)
+                    if !snap.isDirectoryUpdated(relativePath: relativePath, lastModified: lastModified) {
+                        continue  // 目录无更新，跳过
+                    }
+                }
+                collectFilesFromFS(fs, at: child, extensions: extensions, skipNames: skipNames, into: &result, rootURL: rootURL, snapshot: snapshot)
             }
         }
     }
@@ -1010,24 +1051,15 @@ final class StorageService: ObservableObject {
 
     /// 递归扫描目录树，收集所有 .md/.markdown 文件 URL（通过 cloudFS 协议，兼容 WebDAV/iCloud/本机）
     private func collectMarkdownFiles(at url: URL, skipNames: Set<String>, into result: inout [URL]) {
-        // ✅ 优先用带类型的列举（WebDAVFS 实现了 contentsOfDirectoryWithTypes），
+        // ✅ 优先用带类型和修改时间的列举（contentsOfDirectoryWithMetadata），
         //    不再靠"尝试 PROPFIND 成不成功"来猜是不是文件夹
-        let children: [(url: URL, isDirectory: Bool)]
+        let children: [(url: URL, isDirectory: Bool, lastModified: Date?)]
         do {
-            if let webdav = fileSystem.cloudFS as? WebDAVFS {
-                children = try webdav.contentsOfDirectoryWithTypes(at: url)
-            } else {
-                // 本地 / iCloud：FileManager 可以直接拿 isDirectory
-                let urls = try fileSystem.cloudFS.contentsOfDirectory(at: url)
-                children = urls.map { u in
-                    let isDir = (try? u.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
-                    return (u, isDir)
-                }
-            }
+            children = try fileSystem.cloudFS.contentsOfDirectoryWithMetadata(at: url)
         } catch {
             return
         }
-        for (child, isDirectory) in children {
+        for (child, isDirectory, _) in children {
             let name = child.lastPathComponent
             // 跳过内部目录
             if skipNames.contains(name) { continue }

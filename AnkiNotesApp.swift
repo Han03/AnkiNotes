@@ -117,6 +117,7 @@ final class AppState: ObservableObject {
 
     // MARK: - 题库
     private(set) var quizService: QuizService!
+    private(set) var syncSnapshotService: SyncSnapshotService!
     @Published var isGeneratingQuestions = false
     @Published var generationProgress: (current: Int, total: Int, noteTitle: String)?
     @Published var quizError: String? = nil  // 生成题目报错信息
@@ -427,6 +428,32 @@ final class AppState: ObservableObject {
                     self?.syncDetail = detail
                 }
             }
+            
+            // 【第1级：根目录级跳过】检查根目录修改时间，如果无更新，直接跳过整个同步
+            if self.syncSnapshotService.hasSnapshot {
+                do {
+                    let rootMeta = try fs.getItemMetadata(at: fs.rootDirectory)
+                    if !self.syncSnapshotService.isRootDirectoryUpdated(lastModified: rootMeta.lastModified) {
+                        print("⏭️ 根目录无更新，跳过整个同步")
+                        DispatchQueue.main.async {
+                            if !silent {
+                                self.providerStatus = "✅ 云端无更新，跳过同步"
+                                self.syncStep = "同步完成"
+                                self.syncProgress = 100
+                                self.syncDetail = "根目录无更新，无需同步"
+                            }
+                        }
+                        completion?(StorageService.ImportReport())
+                        return
+                    } else {
+                        print("🔄 根目录有更新，开始同步")
+                    }
+                } catch {
+                    print("⚠️ 无法获取根目录元数据，执行全量同步：\(error.localizedDescription)")
+                }
+            } else {
+                print("📸 无同步快照，执行全量同步")
+            }
             // 同步前：先备份本地 noteMetas（包含未同步的 SRS 复习记录）
             let localNoteMetasBackup = MetadataSyncService.shared.readLocalNoteMetas()
             // 同步前：从云端拉取元数据和知识点缓存到本地缓存（不加载到内存）
@@ -509,6 +536,9 @@ final class AppState: ObservableObject {
             if knowledgePushed > 0 {
                 print("📤 同步后知识点缓存推送: \(knowledgePushed) 个文件")
             }
+            // 同步完成后保存快照
+            self.syncSnapshotService.save()
+            
             DispatchQueue.main.async {
                 if !silent {
                     if report.scannedMarkdownFiles == 0 {
@@ -668,6 +698,10 @@ final class AppState: ObservableObject {
         scheduler  = SchedulerService(storage: storage)
         quizService = QuizService(fileSystem: localFileSvc)
         storage.quizService = quizService  // 让删除笔记时能联动删除相关题目
+        // 初始化同步快照服务（用于增量同步）
+        syncSnapshotService = SyncSnapshotService(fileSystem: localFileSvc)
+        syncSnapshotService.load()
+        storage.syncSnapshotService = syncSnapshotService
         // 设置云端文件系统（用于锁验证）
         quizService.cloudFS = webDAVFS ?? localFS
         // 更新 quizService 的笔记和文件夹列表（用于按文件夹结构存储题目）
