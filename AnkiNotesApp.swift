@@ -218,7 +218,8 @@ final class AppState: ObservableObject {
                     self.refreshStats()
                 }
             }
-            // 拉取知识点缓存
+            // 清理异常目录（private 嵌套等），然后拉取知识点缓存
+            MetadataSyncService.shared.cleanupAbnormalDirectories(cloudFS: fs)
             let knowledgePulled = MetadataSyncService.shared.pullKnowledgeCache(cloudFS: fs)
             if knowledgePulled > 0 {
                 print("📥 启动时知识点缓存同步: 拉取 \(knowledgePulled) 个文件")
@@ -594,6 +595,8 @@ final class AppState: ObservableObject {
             }
             SyncLogger.shared.stepStart("拉取知识点缓存")
             let knowledgePullStartTime = Date()
+            // 先清理异常目录（private 嵌套等）
+            MetadataSyncService.shared.cleanupAbnormalDirectories(cloudFS: fs)
             let knowledgePulled = MetadataSyncService.shared.pullKnowledgeCache(cloudFS: fs)
             let knowledgePullDuration = Date().timeIntervalSince(knowledgePullStartTime)
             SyncLogger.shared.stepDone("拉取知识点缓存", duration: knowledgePullDuration)

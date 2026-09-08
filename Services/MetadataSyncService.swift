@@ -249,11 +249,22 @@ final class MetadataSyncService {
         let cloudDir = cloudFS.rootDirectory.appendingPathComponent(".knowledge_cache", isDirectory: true)
         var pulledCount = 0
         
-        // 扫描云端 .knowledge_cache 目录
-        let cloudFiles = listFilesRecursive(cloudFS: cloudFS, at: cloudDir)
+        // 扫描云端 .knowledge_cache 目录（限制最大深度，防止无限嵌套）
+        let cloudFiles = listFilesRecursive(cloudFS: cloudFS, at: cloudDir, maxDepth: 5)
         for cloudURL in cloudFiles {
             do {
-                let relativePath = cloudURL.path.replacingOccurrences(of: cloudDir.path, with: "")
+                // 使用安全的相对路径计算方式（避免 replacingOccurrences 因符号链接失败）
+                let relativePath = safeRelativePath(from: cloudDir, to: cloudURL)
+                guard !relativePath.isEmpty else {
+                    print("⚠️ 知识点缓存拉取: 无法计算相对路径，跳过 \(cloudURL.lastPathComponent)")
+                    continue
+                }
+                // 跳过异常路径（包含 private 等符号链接导致的嵌套）
+                guard !isAbnormalPath(relativePath) else {
+                    print("⚠️ 知识点缓存拉取: 跳过异常路径 \(relativePath)")
+                    continue
+                }
+                
                 let localURL = localKnowledgeCacheDir.appendingPathComponent(relativePath)
                 
                 guard cloudFS.fileExists(at: cloudURL) else { continue }
@@ -269,7 +280,7 @@ final class MetadataSyncService {
                 try? fileManager.createDirectory(at: localURL.deletingLastPathComponent(), withIntermediateDirectories: true)
                 try cloudData.write(to: localURL, options: .atomic)
                 pulledCount += 1
-                print("📥 知识点缓存同步: 拉取 \(cloudURL.lastPathComponent)")
+                print("📥 知识点缓存同步: 拉取 \(relativePath)")
             } catch {
                 print("⚠️ 知识点缓存拉取失败 \(cloudURL.lastPathComponent): \(error.localizedDescription)")
             }
@@ -283,11 +294,22 @@ final class MetadataSyncService {
         try? cloudFS.createDirectoryIfNeeded(at: cloudDir)
         var pushedCount = 0
         
-        // 扫描本地 .knowledge_cache 目录
-        let localFiles = listLocalFilesRecursive(at: localKnowledgeCacheDir)
+        // 扫描本地 .knowledge_cache 目录（限制最大深度，防止无限嵌套）
+        let localFiles = listLocalFilesRecursive(at: localKnowledgeCacheDir, maxDepth: 5)
         for localURL in localFiles {
             do {
-                let relativePath = localURL.path.replacingOccurrences(of: localKnowledgeCacheDir.path, with: "")
+                // 使用安全的相对路径计算方式（避免 replacingOccurrences 因符号链接失败）
+                let relativePath = safeRelativePath(from: localKnowledgeCacheDir, to: localURL)
+                guard !relativePath.isEmpty else {
+                    print("⚠️ 知识点缓存推送: 无法计算相对路径，跳过 \(localURL.lastPathComponent)")
+                    continue
+                }
+                // 跳过异常路径（包含 private 等符号链接导致的嵌套）
+                guard !isAbnormalPath(relativePath) else {
+                    print("⚠️ 知识点缓存推送: 跳过异常路径 \(relativePath)")
+                    continue
+                }
+                
                 let cloudURL = cloudDir.appendingPathComponent(relativePath)
                 
                 guard fileManager.fileExists(atPath: localURL.path) else { continue }
@@ -303,7 +325,7 @@ final class MetadataSyncService {
                 try? cloudFS.createDirectoryIfNeeded(at: cloudURL.deletingLastPathComponent())
                 try cloudFS.writeData(localData, to: cloudURL)
                 pushedCount += 1
-                print("📤 知识点缓存同步: 推送 \(localURL.lastPathComponent)")
+                print("📤 知识点缓存同步: 推送 \(relativePath)")
             } catch {
                 print("⚠️ 知识点缓存推送失败 \(localURL.lastPathComponent): \(error.localizedDescription)")
             }
@@ -311,13 +333,138 @@ final class MetadataSyncService {
         return pushedCount
     }
     
+    // MARK: - 安全路径计算工具
+    
+    /// 安全计算相对路径（使用 pathComponents，避免 replacingOccurrences 因符号链接失败）
+    private func safeRelativePath(from rootURL: URL, to targetURL: URL) -> String {
+        // 规范化路径，消除符号链接（如 /var -> /private/var）
+        let standardizedRoot = rootURL.standardizedFileURL
+        let standardizedTarget = targetURL.standardizedFileURL
+        
+        let rootComponents = standardizedRoot.pathComponents
+        let targetComponents = standardizedTarget.pathComponents
+        
+        // 找到公共前缀的长度
+        var commonLength = 0
+        while commonLength < rootComponents.count &&
+              commonLength < targetComponents.count &&
+              rootComponents[commonLength] == targetComponents[commonLength] {
+            commonLength += 1
+        }
+        
+        // 如果 target 不在 root 下面，返回空字符串
+        guard commonLength == rootComponents.count else {
+            return ""
+        }
+        
+        // 构建相对路径
+        let relativeComponents = Array(targetComponents[commonLength...])
+        return relativeComponents.joined(separator: "/")
+    }
+    
+    /// 检查是否是异常路径（包含 private 等符号链接导致的嵌套）
+    private func isAbnormalPath(_ relativePath: String) -> Bool {
+        let components = relativePath.components(separatedBy: "/")
+        // 包含 private 目录（iOS 符号链接导致的异常嵌套）
+        if components.contains("private") {
+            return true
+        }
+        // 路径深度超过 5 层（正常知识点缓存只有 1-2 层）
+        if components.count > 5 {
+            return true
+        }
+        return false
+    }
+    
+    // MARK: - 清理异常目录
+    
+    /// 清理本地和云端的异常目录（private 嵌套等）
+    func cleanupAbnormalDirectories(cloudFS: CloudFileSystem) {
+        // 清理本地异常目录
+        cleanupLocalAbnormalDirectory(at: localKnowledgeCacheDir)
+        
+        // 清理云端异常目录
+        let cloudDir = cloudFS.rootDirectory.appendingPathComponent(".knowledge_cache", isDirectory: true)
+        cleanupCloudAbnormalDirectory(cloudFS: cloudFS, at: cloudDir)
+    }
+    
+    /// 清理本地异常目录
+    private func cleanupLocalAbnormalDirectory(at url: URL) {
+        guard let children = try? fileManager.contentsOfDirectory(at: url, includingPropertiesForKeys: nil) else { return }
+        
+        for child in children {
+            if isAbnormalPath(child.lastPathComponent) {
+                // 删除异常目录
+                try? fileManager.removeItem(at: child)
+                print("🧹 知识点缓存清理: 删除本地异常目录 \(child.lastPathComponent)")
+            } else {
+                // 递归检查子目录
+                var isDir: ObjCBool = false
+                if fileManager.fileExists(atPath: child.path, isDirectory: &isDir), isDir.boolValue {
+                    cleanupLocalAbnormalDirectory(at: child)
+                }
+            }
+        }
+    }
+    
+    /// 清理云端异常目录
+    private func cleanupCloudAbnormalDirectory(cloudFS: CloudFileSystem, at url: URL) {
+        guard let children = try? cloudFS.contentsOfDirectory(at: url) else { return }
+        
+        for child in children {
+            if isAbnormalPath(child.lastPathComponent) {
+                // 删除异常目录（递归删除）
+                deleteCloudDirectoryRecursive(cloudFS: cloudFS, at: child)
+                print("🧹 知识点缓存清理: 删除云端异常目录 \(child.lastPathComponent)")
+            } else {
+                // 递归检查子目录
+                if let subChildren = try? cloudFS.contentsOfDirectory(at: child), !subChildren.isEmpty {
+                    cleanupCloudAbnormalDirectory(cloudFS: cloudFS, at: child)
+                }
+            }
+        }
+    }
+    
+    /// 递归删除云端目录
+    private func deleteCloudDirectoryRecursive(cloudFS: CloudFileSystem, at url: URL) {
+        guard let children = try? cloudFS.contentsOfDirectory(at: url) else {
+            // 可能是文件，直接删除
+            try? cloudFS.removeItem(at: url)
+            return
+        }
+        
+        for child in children {
+            if let subChildren = try? cloudFS.contentsOfDirectory(at: child), !subChildren.isEmpty {
+                // 是目录，递归删除
+                deleteCloudDirectoryRecursive(cloudFS: cloudFS, at: child)
+            } else {
+                // 是文件，直接删除
+                try? cloudFS.removeItem(at: child)
+            }
+        }
+        
+        // 删除空目录
+        try? cloudFS.removeItem(at: url)
+    }
+    
     // MARK: - 递归扫描文件工具
     
-    private func listFilesRecursive(cloudFS: CloudFileSystem, at url: URL) -> [URL] {
+    private func listFilesRecursive(cloudFS: CloudFileSystem, at url: URL, maxDepth: Int = 10, currentDepth: Int = 0) -> [URL] {
         var result: [URL] = []
+        guard currentDepth < maxDepth else {
+            print("⚠️ 知识点缓存扫描: 达到最大深度 \(maxDepth)，停止递归 \(url.lastPathComponent)")
+            return result
+        }
+        
         let children: [URL]
         do { children = try cloudFS.contentsOfDirectory(at: url) } catch { return result }
         for child in children {
+            // 跳过异常目录（private 等）
+            if isAbnormalPath(child.lastPathComponent) {
+                print("⚠️ 知识点缓存扫描: 跳过异常目录 \(child.lastPathComponent)")
+                continue
+            }
+            
             var subChildren: [URL] = []
             do { subChildren = try cloudFS.contentsOfDirectory(at: child) } catch {}
             if subChildren.isEmpty {
@@ -325,20 +472,31 @@ final class MetadataSyncService {
                 result.append(child)
             } else {
                 // 是目录，递归
-                result.append(contentsOf: listFilesRecursive(cloudFS: cloudFS, at: child))
+                result.append(contentsOf: listFilesRecursive(cloudFS: cloudFS, at: child, maxDepth: maxDepth, currentDepth: currentDepth + 1))
             }
         }
         return result
     }
     
-    private func listLocalFilesRecursive(at url: URL) -> [URL] {
+    private func listLocalFilesRecursive(at url: URL, maxDepth: Int = 10, currentDepth: Int = 0) -> [URL] {
         var result: [URL] = []
+        guard currentDepth < maxDepth else {
+            print("⚠️ 知识点缓存扫描: 达到最大深度 \(maxDepth)，停止递归 \(url.lastPathComponent)")
+            return result
+        }
+        
         guard let children = try? fileManager.contentsOfDirectory(at: url, includingPropertiesForKeys: nil) else { return result }
         for child in children {
+            // 跳过异常目录（private 等）
+            if isAbnormalPath(child.lastPathComponent) {
+                print("⚠️ 知识点缓存扫描: 跳过异常目录 \(child.lastPathComponent)")
+                continue
+            }
+            
             var isDir: ObjCBool = false
             if fileManager.fileExists(atPath: child.path, isDirectory: &isDir) {
                 if isDir.boolValue {
-                    result.append(contentsOf: listLocalFilesRecursive(at: child))
+                    result.append(contentsOf: listLocalFilesRecursive(at: child, maxDepth: maxDepth, currentDepth: currentDepth + 1))
                 } else {
                     result.append(child)
                 }
