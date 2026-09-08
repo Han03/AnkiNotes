@@ -42,12 +42,12 @@ final class SyncLogger {
                 self.fileHandle?.seekToEndOfFile()
                 self.logFilePath = filePath
                 
-                self.writeLine("=" * 60)
+                self.writeLine(String(repeating: "=", count: 60))
                 self.writeLine("同步日志会话开始")
                 self.writeLine("时间: \(Date().description)")
                 self.writeLine("日志文件: \(filePath)")
                 self.writeLine("设备: \(UIDevice.current.model) \(UIDevice.current.systemVersion)")
-                self.writeLine("=" * 60)
+                self.writeLine(String(repeating: "=", count: 60))
             } catch {
                 print("⚠️ SyncLogger: 创建日志文件失败: \(error)")
             }
@@ -58,9 +58,9 @@ final class SyncLogger {
     func endSession() {
         queue.async { [weak self] in
             guard let self = self else { return }
-            self.writeLine("=" * 60)
+            self.writeLine(String(repeating: "=", count: 60))
             self.writeLine("同步日志会话结束: \(Date().description)")
-            self.writeLine("=" * 60)
+            self.writeLine(String(repeating: "=", count: 60))
             self.fileHandle?.closeFile()
             self.fileHandle = nil
         }
