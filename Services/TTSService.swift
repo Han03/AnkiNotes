@@ -83,6 +83,10 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
     private var audioPlayer: AVAudioPlayer?
     private var downloadTask: URLSessionDataTask?
     
+    // Edge-TTS WebSocket 相关
+    private var edgeTTSWebSocketTask: URLSessionWebSocketTask?
+    private var edgeTTSAudioData = Data()
+    
     @Published private(set) var isSpeaking = false
     @Published private(set) var isPaused = false
     @Published private(set) var currentSentenceIndex = 0
@@ -202,6 +206,9 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
         switch actualProvider {
         case .edgeTTS:
             downloadTask?.cancel()
+            edgeTTSWebSocketTask?.cancel()
+            edgeTTSWebSocketTask = nil
+            edgeTTSAudioData = Data()
             audioPlayer?.stop()
             audioPlayer = nil
         case .iOSNative:
@@ -231,6 +238,9 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
         switch actualProvider {
         case .edgeTTS:
             downloadTask?.cancel()
+            edgeTTSWebSocketTask?.cancel()
+            edgeTTSWebSocketTask = nil
+            edgeTTSAudioData = Data()
             audioPlayer?.stop()
             audioPlayer = nil
         case .iOSNative:
@@ -272,33 +282,40 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
         synthesizer.speak(utterance)
     }
     
-    // MARK: - Edge-TTS
+    // MARK: - Edge-TTS (WebSocket)
     
     private func speakEdgeTTS(_ text: String) {
         actualProvider = .edgeTTS
         let ssml = buildSSML(text: text)
+        
+        // 取消之前的任务
         downloadTask?.cancel()
+        edgeTTSWebSocketTask?.cancel()
+        edgeTTSWebSocketTask = nil
+        edgeTTSAudioData = Data()
         
         // Edge-TTS WebSocket URL
-        let urlString = "https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=6A5AA1D4EAFF4E9FB37E23D68491D6F4"
+        let urlString = "wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=6A5AA1D4EAFF4E9FB37E23D68491D6F4"
+        guard let url = URL(string: urlString) else {
+            print("🔊 Edge-TTS: URL 无效，降级到 iOS 原生")
+            actualProvider = .iOSNative
+            speakiOSNative(text)
+            return
+        }
         
-        // 使用 HTTP POST 方式获取音频（简化实现）
-        var request = URLRequest(url: URL(string: urlString)!)
-        request.httpMethod = "POST"
-        request.setValue("application/ssml+xml", forHTTPHeaderField: "Content-Type")
-        request.setValue("ringtone", forHTTPHeaderField: "X-Microsoft-OutputFormat")
-        request.httpBody = ssml.data(using: .utf8)
+        let requestId = UUID().uuidString
+        let task = URLSession.shared.webSocketTask(with: url)
+        edgeTTSWebSocketTask = task
+        task.resume()
         
-        downloadTask = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+        print("🔊 Edge-TTS: 正在建立 WebSocket 连接...")
+        
+        // 发送 speech.config 消息
+        let speechConfigMessage = buildSpeechConfigMessage(requestId: requestId)
+        task.send(.string(speechConfigMessage)) { [weak self] error in
             guard let self = self else { return }
-            
-            if let error = error as NSError?, error.code == NSURLErrorCancelled {
-                return
-            }
-            
-            guard let data = data, !data.isEmpty else {
-                // Edge-TTS HTTP 方式可能不工作，降级到 iOS 原生
-                print("🔊 TTSService: Edge-TTS 请求失败，降级到 iOS 原生")
+            if let error = error {
+                print("🔊 Edge-TTS: 发送 speech.config 失败 - \(error.localizedDescription)")
                 DispatchQueue.main.async {
                     self.actualProvider = .iOSNative
                     self.speakiOSNative(text)
@@ -306,12 +323,97 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
                 return
             }
             
-            print("🔊 TTSService: Edge-TTS 请求成功，音频大小 \(data.count) 字节")
-            DispatchQueue.main.async {
-                self.playAudio(data: data)
+            // 发送 ssml 消息
+            let ssmlMessage = buildSSMLMessage(requestId: requestId, ssml: ssml)
+            task.send(.string(ssmlMessage)) { [weak self] error in
+                guard let self = self else { return }
+                if let error = error {
+                    print("🔊 Edge-TTS: 发送 ssml 失败 - \(error.localizedDescription)")
+                    DispatchQueue.main.async {
+                        self.actualProvider = .iOSNative
+                        self.speakiOSNative(text)
+                    }
+                    return
+                }
+                
+                print("🔊 Edge-TTS: 消息已发送，开始接收音频数据...")
+                // 开始接收消息
+                self.receiveEdgeTTSMessages(task: task, originalText: text)
             }
         }
-        downloadTask?.resume()
+    }
+    
+    /// 构建 speech.config 消息
+    private func buildSpeechConfigMessage(requestId: String) -> String {
+        let configJSON = """
+        {"context":{"system":{"name":"SpeechSDK","version":"1.12.1-rc.1","build":"JavaScript","lang":"JavaScript","os":{"platform":"Browser/Linux x86_64","name":"Mozilla/5.0 (X11; Linux x86_64; rv:78.0) Gecko/20100101 Firefox/78.0","version":"5.0"}}}}
+        """
+        return "Path: speech.config\r\nX-RequestId: \(requestId)\r\nContent-Type: application/json\r\n\r\n\(configJSON)"
+    }
+    
+    /// 构建 ssml 消息
+    private func buildSSMLMessage(requestId: String, ssml: String) -> String {
+        return "Path: ssml\r\nX-RequestId: \(requestId)\r\nContent-Type: application/ssml+xml\r\n\r\n\(ssml)"
+    }
+    
+    /// 循环接收 Edge-TTS 消息
+    private func receiveEdgeTTSMessages(task: URLSessionWebSocketTask, originalText: String) {
+        task.receive { [weak self] result in
+            guard let self = self else { return }
+            
+            // 检查任务是否已被取消
+            if task.state == .canceling || task.state == .completed {
+                return
+            }
+            
+            switch result {
+            case .success(let message):
+                switch message {
+                case .string(let text):
+                    // 解析文本消息
+                    if text.contains("Path: turn.end") {
+                        // 合成结束，播放音频
+                        print("🔊 Edge-TTS: 合成结束，音频大小 \(self.edgeTTSAudioData.count) 字节")
+                        DispatchQueue.main.async {
+                            if !self.edgeTTSAudioData.isEmpty {
+                                self.playAudio(data: self.edgeTTSAudioData)
+                            } else {
+                                print("🔊 Edge-TTS: 音频数据为空，降级到 iOS 原生")
+                                self.actualProvider = .iOSNative
+                                self.speakiOSNative(originalText)
+                            }
+                        }
+                        return
+                    } else if text.contains("Path: turn.start") {
+                        print("🔊 Edge-TTS: 开始合成")
+                    }
+                    // 其他文本消息（audio.metadata 等）忽略
+                    
+                case .data(let data):
+                    // 音频数据，累积起来
+                    self.edgeTTSAudioData.append(data)
+                    if self.edgeTTSAudioData.count % 10000 < 1000 {
+                        print("🔊 Edge-TTS: 已接收音频数据 \(self.edgeTTSAudioData.count) 字节")
+                    }
+                }
+                
+                // 继续接收下一条消息
+                self.receiveEdgeTTSMessages(task: task, originalText: originalText)
+                
+            case .failure(let error):
+                print("🔊 Edge-TTS: 接收消息失败 - \(error.localizedDescription)")
+                DispatchQueue.main.async {
+                    if !self.edgeTTSAudioData.isEmpty {
+                        // 即使失败了，如果有已接收的音频数据，也尝试播放
+                        print("🔊 Edge-TTS: 接收失败但有部分音频数据，尝试播放 \(self.edgeTTSAudioData.count) 字节")
+                        self.playAudio(data: self.edgeTTSAudioData)
+                    } else {
+                        self.actualProvider = .iOSNative
+                        self.speakiOSNative(originalText)
+                    }
+                }
+            }
+        }
     }
     
     private func buildSSML(text: String) -> String {
