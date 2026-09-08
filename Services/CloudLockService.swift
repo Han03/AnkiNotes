@@ -59,9 +59,9 @@ final class CloudLockService {
     // MARK: - 锁文件路径
     
     private func lockFileURL(in cloudFS: CloudFileSystem) -> URL {
-        let metadataDir = cloudFS.rootDirectory.appendingPathComponent(".metadata", isDirectory: true)
-        try? cloudFS.createDirectoryIfNeeded(at: metadataDir)
-        return metadataDir.appendingPathComponent(".lock")
+        // 锁文件放在根目录下，避免隐藏目录同步问题
+        // 文件名使用 .ankinotes.lock，避免与其他文件冲突
+        return cloudFS.rootDirectory.appendingPathComponent(".ankinotes.lock")
     }
     
     // MARK: - 锁数据结构

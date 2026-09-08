@@ -353,7 +353,8 @@ final class WebDAVFS: CloudFileSystem {
         let cfg = URLSessionConfiguration.default
         cfg.httpAdditionalHeaders = WebDAVFS.makeAuthHeaders(config: config)
         cfg.requestCachePolicy = .reloadIgnoringLocalCacheData
-        cfg.timeoutIntervalForRequest = 15
+        cfg.timeoutIntervalForRequest = 60   // 单次请求超时 60 秒
+        cfg.timeoutIntervalForResource = 120  // 整个资源请求超时 120 秒（含重试）
         // 自建 NAS 自签名证书场景
         let delegate = WebDAVTLSDelegate(allowSelfSigned: config.trustSelfSigned)
         self.session = URLSession(configuration: cfg, delegate: delegate, delegateQueue: nil)
@@ -516,7 +517,12 @@ final class WebDAVFS: CloudFileSystem {
             outData = d; outResp = r; outError = e
             sema.signal()
         }.resume()
-        sema.wait()
+        // 增加超时保护：90 秒后如果还没回调，强制超时，避免无限等待
+        let timeoutResult = sema.wait(timeout: .now() + 90)
+        if timeoutResult == .timedOut {
+            print("⚠️ WebDAV 请求超时（90秒）: \(request.httpMethod ?? "") \(request.url?.lastPathComponent ?? "")")
+            throw NSError(domain: "WebDAVFS", code: -1, userInfo: [NSLocalizedDescriptionKey: "WebDAV 请求超时，请检查网络连接"])
+        }
         if let e = outError { throw e }
         guard let http = outResp as? HTTPURLResponse else {
             throw WebDAVError.httpError(0, "No HTTP response")
