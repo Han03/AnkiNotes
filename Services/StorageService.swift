@@ -17,6 +17,9 @@ final class StorageService: ObservableObject {
     @Published private(set) var noteMetas: [NoteMeta] = []
     @Published private(set) var reviewLogs: [ReviewLog] = []
     
+    /// 同步进度回调（step: 当前步骤, progress: 0-100, detail: 详情）
+    var syncProgressCallback: ((_ step: String, _ progress: Double, _ detail: String) -> Void)?
+    
     init(fileSystem: FileSystemService) {
         self.fileSystem = fileSystem
         self.folders = fileSystem.loadFolders()
@@ -514,11 +517,17 @@ final class StorageService: ObservableObject {
         var cloudFiles: [URL] = []
         collectMarkdownFilesFromFS(cloud, at: cloudRoot, skipNames: skipNames, into: &cloudFiles)
         report.scannedMarkdownFiles = cloudFiles.count
+        syncProgressCallback?("扫描云端文件", 5, "发现 \(cloudFiles.count) 篇笔记")
         guard report.scannedMarkdownFiles > 0 else {
             report.warningMessages.append("云端 Notes 目录没有发现 .md 文件")
             return report
         }
         for (idx, srcURL) in cloudFiles.enumerated() {
+            // 更新同步进度（笔记导入占 5%-50%）
+            let noteProgress = 5.0 + Double(idx) / Double(cloudFiles.count) * 45.0
+            if idx % 5 == 0 || idx == cloudFiles.count - 1 {
+                syncProgressCallback?("导入笔记", noteProgress, "\(idx + 1)/\(cloudFiles.count) - \(srcURL.lastPathComponent)")
+            }
             do {
                 let relativeComponents = relativePathComponents(of: srcURL, from: cloudRoot)
                 let folderComponents = Array(relativeComponents.dropLast())
@@ -578,8 +587,11 @@ final class StorageService: ObservableObject {
         persistNoteIndex()
         
         // 同步课堂讲稿（Lecture 目录下的 .txt 文件）
+        syncProgressCallback?("同步讲稿", 55, "正在扫描云端讲稿...")
         syncLecturesFromCloud(cloud: cloud, report: &report)
+        syncProgressCallback?("同步题库", 75, "正在扫描云端题库...")
         syncQuestionsFromCloud(cloud: cloud, report: &report)
+        syncProgressCallback?("同步完成", 100, "笔记 \(report.importedCount) 篇，讲稿 \(report.lectureImportedCount) 个，题库已同步")
         
         return report
     }
@@ -625,6 +637,7 @@ final class StorageService: ObservableObject {
         var lectureFiles: [URL] = []
         collectFilesFromFS(cloud, at: lectureRoot, extensions: ["txt"], skipNames: [], into: &lectureFiles)
         report.scannedLectureFiles = lectureFiles.count
+        print("📖 讲稿同步: 扫描到 \(lectureFiles.count) 个讲稿文件")
         for srcURL in lectureFiles {
             do {
                 let relativeComponents = relativePathComponents(of: srcURL, from: lectureRoot)
@@ -634,12 +647,23 @@ final class StorageService: ObservableObject {
                 let title = fileName.lowercased().hasSuffix(".txt") ? String(fileName.dropLast(4)) : fileName
                 // 找到对应的文件夹
                 let folderId = getFolderId(for: folderComponents)
+                if folderId == nil && !folderComponents.isEmpty {
+                    print("⚠️ 讲稿同步: 文件夹未找到 \(folderComponents.joined(separator: "/"))，讲稿 \(title) 将写到根目录")
+                }
                 // 保存讲稿到本地
                 let rawBody = try cloud.readData(at: srcURL)
                 let bodyStr = String(data: rawBody, encoding: .utf8) ?? ""
-                _ = try? fileSystem.writeLecture(bodyStr, folderId: folderId, title: title, folders: folders, skipCloudSync: true)
-                report.lectureImportedCount += 1
+                // 不使用 try?，捕获错误并打印
+                do {
+                    try fileSystem.writeLecture(bodyStr, folderId: folderId, title: title, folders: folders, skipCloudSync: true)
+                    report.lectureImportedCount += 1
+                    print("✅ 讲稿同步: 导入 \(title) (\(bodyStr.count) 字符)")
+                } catch {
+                    print("❌ 讲稿同步: 写入失败 \(title): \(error.localizedDescription)")
+                    report.lectureFailedCount += 1
+                }
             } catch {
+                print("❌ 讲稿同步: 读取失败 \(srcURL.lastPathComponent): \(error.localizedDescription)")
                 report.lectureFailedCount += 1
             }
         }

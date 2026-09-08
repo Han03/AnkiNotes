@@ -68,21 +68,40 @@ struct LectureReaderView: View {
                             Divider()
                             
                             // 讲稿内容（按句子显示，当前朗读句子高亮）
-                            LazyVStack(alignment: .leading, spacing: 8) {
-                                ForEach(Array(sentences.enumerated()), id: \.offset) { index, sentence in
-                                    Text(sentence)
-                                        .font(.body)
-                                        .foregroundColor(index == currentSentenceIndex && isPlaying ? .orange : .primary)
-                                        .background(index == currentSentenceIndex && isPlaying ? Color.orange.opacity(0.1) : Color.clear)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .id(index)
-                                        .onTapGesture {
-                                            jumpToSentence(index)
-                                        }
+                            if sentences.isEmpty {
+                                VStack(spacing: 12) {
+                                    Image(systemName: "doc.text")
+                                        .font(.system(size: 40))
+                                        .foregroundColor(.secondary)
+                                    Text("讲稿内容为空")
+                                        .font(.headline)
+                                        .foregroundColor(.secondary)
+                                    if lectureContent.isEmpty {
+                                        Text("讲稿文件可能未同步到本地，请先在笔记菜单下拉同步")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                            .multilineTextAlignment(.center)
+                                    }
                                 }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 60)
+                            } else {
+                                LazyVStack(alignment: .leading, spacing: 8) {
+                                    ForEach(Array(sentences.enumerated()), id: \.offset) { index, sentence in
+                                        Text(sentence)
+                                            .font(.body)
+                                            .foregroundColor(index == currentSentenceIndex && isPlaying ? .orange : .primary)
+                                            .background(index == currentSentenceIndex && isPlaying ? Color.orange.opacity(0.1) : Color.clear)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .id(index)
+                                            .onTapGesture {
+                                                jumpToSentence(index)
+                                            }
+                                    }
+                                }
+                                .padding(.horizontal)
+                                .padding(.bottom, 20)
                             }
-                            .padding(.horizontal)
-                            .padding(.bottom, 20)
                         }
                     }
                     .onChange(of: currentSentenceIndex) { _ in

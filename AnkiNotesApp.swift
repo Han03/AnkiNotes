@@ -125,6 +125,9 @@ final class AppState: ObservableObject {
     @Published var iCloudContainerAvailable: Bool = false
     @Published var isSyncing: Bool = false  // ✅ 正在同步/导入中（UI 显示加载提示）
     @Published var isSilentSyncing: Bool = false  // 后台静默同步中（不显示 UI 提示）
+    @Published var syncProgress: Double = 0  // 同步进度 0-100
+    @Published var syncStep: String = ""  // 当前同步步骤
+    @Published var syncDetail: String = ""  // 同步详情
 
     // MARK: - 全局文字缩放倍率
 
@@ -367,13 +370,18 @@ final class AppState: ObservableObject {
             guard let self = self else { return }
             defer {
                 self.syncLock.unlock()
-                // 释放云端锁
-                if let fs = self.activeFS {
+                // 释放云端锁（如果还持有锁的话）
+                if let fs = self.activeFS, CloudLockService.shared.isHoldingLock {
                     CloudLockService.shared.releaseLock(cloudFS: fs)
                 }
+                // 清除进度回调
+                self.storage.syncProgressCallback = nil
                 DispatchQueue.main.async {
                     self.isSyncing = false
                     self.isSilentSyncing = false
+                    self.syncProgress = 0
+                    self.syncStep = ""
+                    self.syncDetail = ""
                     self.refreshStats()
                     self.storage.triggerRefresh()
                 }
@@ -406,12 +414,28 @@ final class AppState: ObservableObject {
             if !silent {
                 DispatchQueue.main.async {
                     self.providerStatus = "✅ 获取云端锁成功，开始同步..."
+                    self.syncStep = "获取云端锁"
+                    self.syncProgress = 2
+                    self.syncDetail = "锁获取成功，开始同步"
+                }
+            }
+            // 设置同步进度回调
+            self.storage.syncProgressCallback = { [weak self] step, progress, detail in
+                DispatchQueue.main.async {
+                    self?.syncStep = step
+                    self?.syncProgress = progress
+                    self?.syncDetail = detail
                 }
             }
             // 同步前：先备份本地 noteMetas（包含未同步的 SRS 复习记录）
             let localNoteMetasBackup = MetadataSyncService.shared.readLocalNoteMetas()
             // 同步前：从云端拉取元数据和知识点缓存到本地缓存（不加载到内存）
             // 注意：不调用 reloadFromCache，避免云端索引提前加载导致 importFromCloud 全部判定为重复跳过
+            DispatchQueue.main.async {
+                self.syncStep = "拉取云端元数据"
+                self.syncProgress = 3
+                self.syncDetail = "正在从云端下载 .metadata..."
+            }
             let pulled = MetadataSyncService.shared.pullFromCloud(cloudFS: fs)
             if pulled > 0 {
                 print("📥 同步前元数据拉取到缓存: \(pulled) 个文件")
@@ -423,34 +447,64 @@ final class AppState: ObservableObject {
                 MetadataSyncService.shared.writeLocalNoteMetas(mergedNoteMetas)
             }
             // 拉取知识点缓存
+            DispatchQueue.main.async {
+                self.syncStep = "拉取知识点缓存"
+                self.syncProgress = 4
+                self.syncDetail = "正在从云端下载 .knowledge_cache..."
+            }
             let knowledgePulled = MetadataSyncService.shared.pullKnowledgeCache(cloudFS: fs)
             if knowledgePulled > 0 {
                 print("📥 同步前知识点缓存拉取: \(knowledgePulled) 个文件")
             }
             // 从云端扫描并导入到本地（此时内存中的索引为空，会创建所有笔记）
             let report = self.storage.importFromCloud()
+            // 云端读写完成，释放锁（本地处理不需要锁，缩短锁占用时间）
+            CloudLockService.shared.releaseLock(cloudFS: fs)
+            print("🔓 云端读写完成，释放锁，开始本地处理")
+            DispatchQueue.main.async {
+                self.syncStep = "本地处理"
+                self.syncProgress = 90
+                self.syncDetail = "正在更新本地索引..."
+            }
             // 导入完成后，再从本地缓存加载元数据（合并本地和云端的索引）
             self.storage.reloadFromCache()
             // 先更新 quizService 的笔记和文件夹列表，否则 reloadFromCache 时遍历空数组读不到题目
             self.quizService.updateNotes(self.storage.getAllNotes(), folders: self.storage.getAllFolders())
             self.quizService.reloadFromCache()
-            // 推送前验证锁的所有权（防止锁过期后被其他设备抢占）
-            guard CloudLockService.shared.verifyLockOwnership(cloudFS: fs) else {
-                print("⚠️ 同步中断：云端锁已失效，可能被其他设备抢占")
-                DispatchQueue.main.async {
+            // 本地处理完成，重新获取锁用于推送云端
+            var pushLockAcquired = false
+            var pushRetryCount = 0
+            while !pushLockAcquired {
+                pushLockAcquired = CloudLockService.shared.acquireLock(cloudFS: fs)
+                if !pushLockAcquired {
+                    pushRetryCount += 1
                     if !silent {
-                        self.providerStatus = "⚠️ 同步中断：云端锁已失效，请稍后重试"
+                        DispatchQueue.main.async {
+                            self.providerStatus = "⏳ 等待云端锁释放以推送数据...（已等待 \(pushRetryCount * 5)秒）"
+                            self.syncStep = "等待云端锁"
+                            self.syncDetail = "正在等待其他设备完成同步..."
+                        }
                     }
+                    Thread.sleep(forTimeInterval: 5)
                 }
-                completion?(StorageService.ImportReport())
-                return
             }
+            print("🔒 重新获取云端锁，开始推送数据")
             // 同步后：推送本地元数据和知识点缓存到云端
+            DispatchQueue.main.async {
+                self.syncStep = "推送元数据到云端"
+                self.syncProgress = 96
+                self.syncDetail = "正在上传 .metadata 到云端..."
+            }
             let pushed = MetadataSyncService.shared.pushToCloud(cloudFS: fs)
             if pushed > 0 {
                 print("📤 同步后元数据推送: \(pushed) 个文件")
             }
             // 推送知识点缓存
+            DispatchQueue.main.async {
+                self.syncStep = "推送知识点缓存"
+                self.syncProgress = 98
+                self.syncDetail = "正在上传 .knowledge_cache 到云端..."
+            }
             let knowledgePushed = MetadataSyncService.shared.pushKnowledgeCache(cloudFS: fs)
             if knowledgePushed > 0 {
                 print("📤 同步后知识点缓存推送: \(knowledgePushed) 个文件")
