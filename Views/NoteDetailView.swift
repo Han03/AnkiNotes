@@ -20,8 +20,7 @@ struct NoteDetailView: View {
     @State private var knowledgePoints: [KnowledgePoint] = []  // 已提取的知识点
     @State private var selectedKnowledgePoint: KnowledgePoint? = nil  // 选中的知识点（用于弹出详解）
     @State private var isExtractingKnowledge = false  // 正在提取知识点
-    @State private var showLecture = false  // 是否显示讲稿阅读页面
-    @State private var lectureContent: String? = nil  // 讲稿内容
+    @State private var lectureItem: LectureItem? = nil  // 讲稿阅读页面数据（使用 item 方式确保数据正确传递）
     
     var body: some View {
         Group {
@@ -71,16 +70,13 @@ struct NoteDetailView: View {
                         config: appState.bailianConfig
                     )
                 }
-                // 讲稿阅读界面（使用 fullScreenCover 避免与知识点详解的 sheet 冲突）
-                .fullScreenCover(isPresented: $showLecture) {
+                // 讲稿阅读界面（使用 fullScreenCover item 方式，确保数据正确传递）
+                .fullScreenCover(item: $lectureItem) { item in
                     LectureReaderView(
-                        note: note,
-                        folderPath: appState.storage?.getNoteFolderPath(for: note) ?? "",
-                        lectureContent: lectureContent ?? ""
+                        note: item.note,
+                        folderPath: item.folderPath,
+                        lectureContent: item.content
                     )
-                    .onAppear {
-                        SyncLogger.shared.info("📖 NoteDetailView fullScreenCover 出现，lectureContent=\(lectureContent?.count ?? -1)")
-                    }
                 }
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -385,15 +381,23 @@ struct NoteDetailView: View {
         SyncLogger.shared.info("📖 openLecture: note.title=\(note.title), folderId=\(note.folderId?.uuidString ?? "nil")")
         do {
             let content = try storage.readLecture(for: note)
-            SyncLogger.shared.info("📖 openLecture: 读取成功，内容长度=\(content.count)")
-            lectureContent = content
-            showLecture = true
+            let folderPath = storage.getNoteFolderPath(for: note) ?? ""
+            SyncLogger.shared.info("📖 openLecture: 读取成功，内容长度=\(content.count), folderPath=\(folderPath)")
+            lectureItem = LectureItem(note: note, folderPath: folderPath, content: content)
         } catch {
             SyncLogger.shared.error("📖 openLecture: 读取失败 - \(error.localizedDescription)")
-            lectureContent = "读取讲稿失败：\(error.localizedDescription)"
-            showLecture = true
+            let folderPath = storage.getNoteFolderPath(for: note) ?? ""
+            lectureItem = LectureItem(note: note, folderPath: folderPath, content: "读取讲稿失败：\(error.localizedDescription)")
         }
     }
+}
+
+// MARK: - 讲稿数据项（用于 fullScreenCover item 传递）
+struct LectureItem: Identifiable {
+    let id = UUID()
+    let note: Note
+    let folderPath: String
+    let content: String
 }
 
 // MARK: - InfoChip

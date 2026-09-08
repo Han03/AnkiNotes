@@ -29,8 +29,7 @@ struct ReviewSessionView: View {
     // 知识点
     @State private var knowledgePoints: [KnowledgePoint] = []  // 当前笔记的知识点
     @State private var selectedKnowledgePoint: KnowledgePoint? = nil  // 选中的知识点
-    @State private var showLecture = false  // 是否显示讲稿阅读页面
-    @State private var lectureContent: String? = nil  // 讲稿内容
+    @State private var lectureItem: LectureItem? = nil  // 讲稿阅读页面数据（使用 item 方式确保数据正确传递）
     
     var body: some View {
         Group {
@@ -192,18 +191,13 @@ struct ReviewSessionView: View {
                 )
             }
         }
-        // 讲稿阅读页面（使用 fullScreenCover 避免与其他 sheet 冲突）
-        .fullScreenCover(isPresented: $showLecture) {
-            if currentIndex < queue.count {
-                LectureReaderView(
-                    note: queue[currentIndex],
-                    folderPath: appState.storage?.getNoteFolderPath(for: queue[currentIndex]) ?? "",
-                    lectureContent: lectureContent ?? ""
-                )
-                .onAppear {
-                    SyncLogger.shared.info("📖 ReviewSessionView fullScreenCover 出现，lectureContent=\(lectureContent?.count ?? -1), currentIndex=\(currentIndex), queue.count=\(queue.count)")
-                }
-            }
+        // 讲稿阅读页面（使用 fullScreenCover item 方式，确保数据正确传递）
+        .fullScreenCover(item: $lectureItem) { item in
+            LectureReaderView(
+                note: item.note,
+                folderPath: item.folderPath,
+                lectureContent: item.content
+            )
         }
     }
     
@@ -355,13 +349,13 @@ struct ReviewSessionView: View {
         SyncLogger.shared.info("📖 ReviewSessionView openLecture: note.title=\(note.title), folderId=\(note.folderId?.uuidString ?? "nil")")
         do {
             let content = try storage.readLecture(for: note)
-            SyncLogger.shared.info("📖 ReviewSessionView openLecture: 读取成功，内容长度=\(content.count)")
-            lectureContent = content
-            showLecture = true
+            let folderPath = storage.getNoteFolderPath(for: note) ?? ""
+            SyncLogger.shared.info("📖 ReviewSessionView openLecture: 读取成功，内容长度=\(content.count), folderPath=\(folderPath)")
+            lectureItem = LectureItem(note: note, folderPath: folderPath, content: content)
         } catch {
             SyncLogger.shared.error("📖 ReviewSessionView openLecture: 读取失败 - \(error.localizedDescription)")
-            lectureContent = "读取讲稿失败：\(error.localizedDescription)"
-            showLecture = true
+            let folderPath = storage.getNoteFolderPath(for: note) ?? ""
+            lectureItem = LectureItem(note: note, folderPath: folderPath, content: "读取讲稿失败：\(error.localizedDescription)")
         }
     }
     
