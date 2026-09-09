@@ -26,6 +26,9 @@ struct ReviewSessionView: View {
     // 测评
     @State private var showReviewQuiz = false  // 是否显示测评界面
     
+    // 评级弹窗
+    @State private var showRatingDialog = false  // 是否显示评级选择弹窗
+    
     // 知识点
     @StateObject private var knowledgeStore = KnowledgePointsStore()  // 知识点状态（使用 ObservableObject 解决异步更新问题）
     @State private var selectedKnowledgePoint: KnowledgePoint? = nil  // 选中的知识点
@@ -50,8 +53,7 @@ struct ReviewSessionView: View {
                 reviewFlowView
             }
         }
-        .navigationTitle(folderId == nil ? "复习" : "文件夹复习")
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarHidden(true)  // 隐藏系统导航栏，使用自定义顶部栏
         .onAppear { bootstrap() }
         .onDisappear { appState.refreshStats() }
     }
@@ -147,11 +149,19 @@ struct ReviewSessionView: View {
             )
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
+            
+            // 底部操作栏（主按钮+图标按钮组合，背景延伸至屏幕底部）
+            bottomOperationBar(note: note, scheduler: scheduler)
         }
         .background(Color(.systemGroupedBackground))
-        // 底部操作栏（使用 safeAreaInset 自动适配底部安全区域，消除圆弧角导致的空白）
-        .safeAreaInset(edge: .bottom) {
-            bottomOperationBar(note: note, scheduler: scheduler)
+        // 评级选择弹窗
+        .confirmationDialog("请选择掌握程度评级", isPresented: $showRatingDialog) {
+            ForEach(ReviewRating.allCases) { rating in
+                Button("\(rating.description)（\(scheduler.previewNextInterval(note: queue[currentIndex], rating: rating))）") {
+                    applyRating(rating)
+                }
+            }
+            Button("取消", role: .cancel) {}
         }
         // 测评界面
         .sheet(isPresented: $showReviewQuiz) {
@@ -207,100 +217,123 @@ struct ReviewSessionView: View {
             .cornerRadius(6)
     }
     
-    // MARK: - 底部操作栏（评级按钮 + 讲稿入口）
+    // MARK: - 底部操作栏（主按钮+图标按钮组合布局）
     
     @ViewBuilder
     private func bottomOperationBar(note: Note, scheduler: SchedulerService) -> some View {
-        VStack(spacing: 10) {
-            // 顶部分割线，区分内容区和操作栏
+        let hasQuiz = appState.quizService.generatedNoteIds.contains(note.id)
+        let hasLecture = appState.storage?.hasLecture(for: note) ?? false
+        
+        VStack(spacing: 0) {
+            // 顶部分割线
             Divider()
-                .padding(.top, 8)
-            
-            Text("请根据对笔记内容的掌握程度选择评级")
-                .textStyle(.secondaryText)
-                .foregroundColor(.secondary)
             
             HStack(spacing: 8) {
-                ForEach(ReviewRating.allCases) { rating in
-                    Button {
-                        applyRating(rating)
-                    } label: {
-                        VStack(spacing: 4) {
-                            Text(rating.description)
-                                .textStyle(.subsectionTitle)
-                            Text(scheduler.previewNextInterval(note: note, rating: rating))
-                                .textStyle(.miniText)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(Color(hex: rating.color).opacity(0.14))
-                        .foregroundColor(Color(hex: rating.color))
-                        .cornerRadius(12)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(Color(hex: rating.color).opacity(0.35), lineWidth: 1)
-                        )
-                    }
-                    .buttonStyle(.plain)
+                // 评级主按钮（始终显示，占剩余空间）
+                ratingButton(note: note, scheduler: scheduler)
+                    .frame(maxWidth: .infinity)
+                
+                // 测评按钮（有题目时显示）
+                if hasQuiz {
+                    quizButton()
+                        .frame(width: hasLecture ? 48 : 56)
                 }
                 
-                // 测评按钮：仅当该笔记已生成题目时显示，放在右侧
-                if appState.quizService.generatedNoteIds.contains(note.id) {
-                    Button {
-                        showReviewQuiz = true
-                    } label: {
-                        VStack(spacing: 4) {
-                            Image(systemName: "doc.questionmark")
-                                .font(.subheadline)
-                            Text("测评")
-                                .textStyle(.subsectionTitle)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(Color.purple.opacity(0.14))
-                        .foregroundColor(.purple)
-                        .cornerRadius(12)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(Color.purple.opacity(0.35), lineWidth: 1)
-                        )
-                    }
-                    .buttonStyle(.plain)
+                // 讲稿按钮（有讲稿时显示）
+                if hasLecture {
+                    lectureButton(note: note)
+                        .frame(width: hasQuiz ? 48 : 56)
                 }
             }
-            
-            // 阅读讲稿按钮（只有有讲稿时显示，全宽按钮）
-            if let storage = appState.storage, storage.hasLecture(for: note) {
-                Button {
-                    openLecture(note: note)
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "book.closed.fill")
-                            .font(.subheadline)
-                        Text("阅读课堂讲稿")
-                            .textStyle(.primaryText)
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .padding(.horizontal, 16)
-                    .background(Color.orange.opacity(0.12))
-                    .foregroundColor(.orange)
-                    .cornerRadius(12)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(Color.orange.opacity(0.3), lineWidth: 1)
-                    )
-                }
-                .buttonStyle(.plain)
-            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .padding(.bottom, 14)  // 进入 Safe Area 约 20pt
         }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 8)
-        .background(Color(.systemBackground))
+        .background(
+            Color(.systemBackground)
+                .ignoresSafeArea(edges: .bottom)  // 背景延伸到屏幕底部
+        )
+    }
+    
+    // MARK: - 评级主按钮
+    
+    private func ratingButton(note: Note, scheduler: SchedulerService) -> some View {
+        // 推荐评级：默认良好，或根据笔记状态选择
+        let recommendedRating = ReviewRating.good
+        let previewText = scheduler.previewNextInterval(note: note, rating: recommendedRating)
+        
+        return Button {
+            showRatingDialog = true
+        } label: {
+            VStack(spacing: 2) {
+                Text("评级")
+                    .font(.headline)
+                Text("\(recommendedRating.description) · \(previewText)")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .background(Color.blue.opacity(0.14))
+            .foregroundColor(.blue)
+            .cornerRadius(10)
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(Color.blue.opacity(0.35), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+    
+    // MARK: - 测评图标按钮
+    
+    private func quizButton() -> some View {
+        Button {
+            showReviewQuiz = true
+        } label: {
+            VStack(spacing: 2) {
+                Image(systemName: "doc.questionmark")
+                    .font(.subheadline)
+                Text("测评")
+                    .font(.caption2)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .background(Color.purple.opacity(0.14))
+            .foregroundColor(.purple)
+            .cornerRadius(10)
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(Color.purple.opacity(0.35), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+    
+    // MARK: - 讲稿图标按钮
+    
+    private func lectureButton(note: Note) -> some View {
+        Button {
+            openLecture(note: note)
+        } label: {
+            VStack(spacing: 2) {
+                Image(systemName: "book.closed.fill")
+                    .font(.subheadline)
+                Text("讲稿")
+                    .font(.caption2)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .background(Color.orange.opacity(0.14))
+            .foregroundColor(.orange)
+            .cornerRadius(10)
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(Color.orange.opacity(0.35), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
     }
     
     // MARK: - 操作

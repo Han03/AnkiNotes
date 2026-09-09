@@ -11,6 +11,7 @@ import SwiftUI
 struct ReviewHomeView: View {
     @EnvironmentObject var appState: AppState
     @State private var showingReview = false
+    @State private var selectedFolderId: UUID? = nil  // 选中的文件夹（用于文件夹复习）
     @State private var stats = StatsSummary()
     @State private var folderDisplayCount = 10  // 文件夹列表分页
     @State private var isLoadingFolders = false  // 是否正在加载更多文件夹
@@ -153,8 +154,8 @@ struct ReviewHomeView: View {
                     ForEach(displayedFolders) { folder in
                         let count = scheduler.getTodayDueCount(in: folder.id)
                         let folderPath = storage.getFolderPath(for: folder.id)
-                        NavigationLink {
-                            ReviewSessionView(folderId: folder.id)
+                        Button {
+                            selectedFolderId = folder.id
                         } label: {
                             HStack(spacing: 12) {
                                 Image(systemName: "folder.fill")
@@ -240,10 +241,13 @@ struct ReviewHomeView: View {
                 }
             }
         }
+        // 开始复习（全部笔记）
         .fullScreenCover(isPresented: $showingReview) {
-            NavigationStack {
-                ReviewSessionView(folderId: nil)
-            }
+            ReviewSessionView(folderId: nil)
+        }
+        // 文件夹复习
+        .fullScreenCover(item: $selectedFolderId) { folderId in
+            ReviewSessionView(folderId: folderId)
         }
     }
     
@@ -281,4 +285,10 @@ struct ReviewHomeView: View {
             }
         }
     }
+}
+
+// MARK: - UUID Identifiable 扩展（用于 fullScreenCover item）
+
+extension UUID: Identifiable {
+    public var id: UUID { self }
 }
