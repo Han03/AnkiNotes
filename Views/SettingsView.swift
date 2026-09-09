@@ -336,9 +336,7 @@ struct SettingsView: View {
     private var ttsDescriptionText: String {
         switch appState.ttsConfig.provider {
         case .edgeTTSService:
-            return "Edge-TTS 服务通过 Cloudflare Workers 部署，稳定可靠，音质较好，需联网"
-        case .edgeTTS:
-            return "Edge-TTS 直连微软服务器，音质较好，但可能不稳定，需联网"
+            return "Edge-TTS 在线语音合成，音质较好，需联网使用"
         case .iOSNative:
             return "iOS 原生 TTS 完全离线，使用系统自带音色"
         }
@@ -373,10 +371,10 @@ struct SettingsView: View {
                 .pickerStyle(.segmented)
             }
 
-            // Edge-TTS 音色选择（WebSocket 和服务都使用）
-            if appState.ttsConfig.provider == .edgeTTS || appState.ttsConfig.provider == .edgeTTSService {
+            // Edge-TTS 音色选择
+            if appState.ttsConfig.provider == .edgeTTSService {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(appState.ttsConfig.provider == .edgeTTSService ? "Edge-TTS 服务音色" : "Edge-TTS 音色")
+                    Text("Edge-TTS 音色")
                         .textStyle(.secondaryText)
                         .foregroundColor(.secondary)
                     Picker("音色", selection: $appState.ttsConfig.edgeVoice) {
@@ -385,22 +383,6 @@ struct SettingsView: View {
                         }
                     }
                     .pickerStyle(.menu)
-                }
-            }
-            
-            // Edge-TTS 服务 URL 配置
-            if appState.ttsConfig.provider == .edgeTTSService {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("TTS 服务地址")
-                        .textStyle(.secondaryText)
-                        .foregroundColor(.secondary)
-                    TextField("https://your-worker.workers.dev", text: $appState.ttsConfig.serviceURL)
-                        .textFieldStyle(.roundedBorder)
-                        .autocapitalization(.none)
-                        .disableAutocorrection(true)
-                    Text("部署好的 Cloudflare Workers 地址，无需末尾斜杠")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
                 }
             }
 

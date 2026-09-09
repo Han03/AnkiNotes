@@ -115,17 +115,28 @@ private func parseEdgeTTSBinaryMessage(_ data: Data) -> Data? {
 // MARK: - TTS 配置
 
 enum TTSProvider: String, Codable, CaseIterable, Identifiable {
-    case edgeTTS = "edge"
-    case edgeTTSService = "edge_service"  // Edge-TTS HTTP 服务（Cloudflare Workers 部署）
+    case edgeTTSService = "edge_service"  // Edge-TTS HTTP 服务
     case iOSNative = "ios"
     
     var id: String { rawValue }
     
     var displayName: String {
         switch self {
-        case .edgeTTS: return "Edge-TTS（在线，高质量）"
-        case .edgeTTSService: return "Edge-TTS 服务（推荐，稳定）"
+        case .edgeTTSService: return "Edge-TTS（在线，高质量）"
         case .iOSNative: return "iOS 原生（离线，系统音色）"
+        }
+    }
+    
+    // 兼容旧数据：旧版本的 edgeTTS("edge") 映射为 edgeTTSService
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let rawValue = try container.decode(String.self)
+        if rawValue == "edge" {
+            self = .edgeTTSService
+        } else if let provider = TTSProvider(rawValue: rawValue) {
+            self = provider
+        } else {
+            self = .edgeTTSService
         }
     }
 }
@@ -145,7 +156,7 @@ struct TTSConfig: Codable, Hashable {
          iOSVoice: String = "",
          rate: Double = 1.0,
          pitch: Double = 0,
-         serviceURL: String = "https://tts-voice-magic.hanzhu123456.workers.dev") {
+         serviceURL: String = "https://tts.maxh.ccwu.cc") {
         self.provider = provider
         self.edgeVoice = edgeVoice
         self.iOSVoice = iOSVoice
@@ -287,8 +298,6 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
         SyncLogger.shared.info("🔊 speakCurrentSentence: index=\(currentSentenceIndex)/\(sentences.count), provider=\(config.provider.displayName)")
         
         switch config.provider {
-        case .edgeTTS:
-            speakEdgeTTS(sentence)
         case .edgeTTSService:
             speakEdgeTTSService(sentence)
         case .iOSNative:
@@ -301,7 +310,7 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
         isPaused = true
         SyncLogger.shared.info("🔊 TTSService.pause: provider=\(config.provider.displayName)")
         switch config.provider {
-        case .edgeTTS, .edgeTTSService:
+        case .edgeTTSService:
             audioPlayer?.pause()
         case .iOSNative:
             synthesizer.pauseSpeaking(at: .immediate)
@@ -313,7 +322,7 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
         isPaused = false
         SyncLogger.shared.info("🔊 TTSService.resume: provider=\(config.provider.displayName)")
         switch config.provider {
-        case .edgeTTS, .edgeTTSService:
+        case .edgeTTSService:
             audioPlayer?.play()
         case .iOSNative:
             synthesizer.continueSpeaking()
@@ -328,7 +337,7 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
         currentText = ""
         
         switch config.provider {
-        case .edgeTTS, .edgeTTSService:
+        case .edgeTTSService:
             downloadTask?.cancel()
             edgeTTSWebSocketTask?.cancel()
             edgeTTSWebSocketTask = nil
@@ -360,7 +369,7 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
     
     private func stopCurrentOnly() {
         switch config.provider {
-        case .edgeTTS, .edgeTTSService:
+        case .edgeTTSService:
             downloadTask?.cancel()
             edgeTTSWebSocketTask?.cancel()
             edgeTTSWebSocketTask = nil
