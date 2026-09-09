@@ -116,6 +116,7 @@ private func parseEdgeTTSBinaryMessage(_ data: Data) -> Data? {
 
 enum TTSProvider: String, Codable, CaseIterable, Identifiable {
     case edgeTTS = "edge"
+    case edgeTTSService = "edge_service"  // Edge-TTS HTTP 服务（Cloudflare Workers 部署）
     case iOSNative = "ios"
     
     var id: String { rawValue }
@@ -123,6 +124,7 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
     var displayName: String {
         switch self {
         case .edgeTTS: return "Edge-TTS（在线，高质量）"
+        case .edgeTTSService: return "Edge-TTS 服务（推荐，稳定）"
         case .iOSNative: return "iOS 原生（离线，系统音色）"
         }
     }
@@ -134,19 +136,22 @@ struct TTSConfig: Codable, Hashable {
     var iOSVoice: String        // iOS 原生音色
     var rate: Double            // 语速 0.5 - 2.0
     var pitch: Double           // 音调 -50 到 +50（Edge-TTS）
+    var serviceURL: String      // Edge-TTS 服务 URL（Cloudflare Workers）
     
-    enum CodingKeys: CodingKey { case provider, edgeVoice, iOSVoice, rate, pitch }
+    enum CodingKeys: CodingKey { case provider, edgeVoice, iOSVoice, rate, pitch, serviceURL }
     
-    init(provider: TTSProvider = .edgeTTS,
+    init(provider: TTSProvider = .edgeTTSService,
          edgeVoice: String = "zh-CN-YunxiNeural",
          iOSVoice: String = "",
          rate: Double = 1.0,
-         pitch: Double = 0) {
+         pitch: Double = 0,
+         serviceURL: String = "https://tts-voice-magic.hanzhu123456.workers.dev") {
         self.provider = provider
         self.edgeVoice = edgeVoice
         self.iOSVoice = iOSVoice
         self.rate = rate
         self.pitch = pitch
+        self.serviceURL = serviceURL
     }
 }
 
@@ -284,6 +289,8 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
         switch config.provider {
         case .edgeTTS:
             speakEdgeTTS(sentence)
+        case .edgeTTSService:
+            speakEdgeTTSService(sentence)
         case .iOSNative:
             speakiOSNative(sentence)
         }
@@ -292,9 +299,9 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
     func pause() {
         guard isSpeaking else { return }
         isPaused = true
-        SyncLogger.shared.info("🔊 TTSService.pause: provider=\(config.provider.displayName)")
-        switch config.provider {
-        case .edgeTTS:
+        SyncLogger.shared.info("🔊 TTSService.pause: actualProvider=\(actualProvider.displayName)")
+        switch actualProvider {
+        case .edgeTTS, .edgeTTSService:
             audioPlayer?.pause()
         case .iOSNative:
             synthesizer.pauseSpeaking(at: .immediate)
@@ -304,9 +311,9 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
     func resume() {
         guard isSpeaking, isPaused else { return }
         isPaused = false
-        SyncLogger.shared.info("🔊 TTSService.resume: provider=\(config.provider.displayName)")
-        switch config.provider {
-        case .edgeTTS:
+        SyncLogger.shared.info("🔊 TTSService.resume: actualProvider=\(actualProvider.displayName)")
+        switch actualProvider {
+        case .edgeTTS, .edgeTTSService:
             audioPlayer?.play()
         case .iOSNative:
             synthesizer.continueSpeaking()
@@ -320,8 +327,8 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
         totalSentences = 0
         currentText = ""
         
-        switch config.provider {
-        case .edgeTTS:
+        switch actualProvider {
+        case .edgeTTS, .edgeTTSService:
             downloadTask?.cancel()
             edgeTTSWebSocketTask?.cancel()
             edgeTTSWebSocketTask = nil
@@ -352,8 +359,8 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
     }
     
     private func stopCurrentOnly() {
-        switch config.provider {
-        case .edgeTTS:
+        switch actualProvider {
+        case .edgeTTS, .edgeTTSService:
             downloadTask?.cancel()
             edgeTTSWebSocketTask?.cancel()
             edgeTTSWebSocketTask = nil
@@ -396,6 +403,102 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
         }
         
         synthesizer.speak(utterance)
+    }
+    
+    // MARK: - Edge-TTS 服务（HTTP API，Cloudflare Workers 部署）
+    
+    /// 使用 Edge-TTS HTTP 服务合成语音
+    /// API 文档: POST /v1/audio/speech
+    /// 请求体: { input, voice, speed, pitch, style, volume }
+    /// 响应: MP3 音频二进制数据
+    private func speakEdgeTTSService(_ text: String) {
+        actualProvider = .edgeTTSService
+        
+        let serviceURL = config.serviceURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !serviceURL.isEmpty, let url = URL(string: "\(serviceURL)/v1/audio/speech") else {
+            SyncLogger.shared.warning("🔊 Edge-TTS 服务: URL 无效，降级到 iOS 原生")
+            fallbackToiOSNative(text: text)
+            return
+        }
+        
+        SyncLogger.shared.info("🔊 Edge-TTS 服务: 开始合成，URL=\(url.absoluteString)")
+        SyncLogger.shared.info("🔊 Edge-TTS 服务: 文本前50字=\(String(text.prefix(50)))")
+        
+        // 构建请求体
+        let body: [String: Any] = [
+            "input": text,
+            "voice": config.edgeVoice,
+            "speed": config.rate,
+            "pitch": "\(Int(config.pitch))",
+            "style": "general",
+            "volume": "0"
+        ]
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 30
+        
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        } catch {
+            SyncLogger.shared.warning("🔊 Edge-TTS 服务: 请求体编码失败，降级到 iOS 原生")
+            fallbackToiOSNative(text: text)
+            return
+        }
+        
+        // 使用 URLSessionDataTask 下载音频
+        downloadTask?.cancel()
+        
+        let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            guard let self = self else { return }
+            
+            if let error = error {
+                SyncLogger.shared.warning("🔊 Edge-TTS 服务: 请求失败 - \(error.localizedDescription)，降级到 iOS 原生")
+                self.fallbackToiOSNative(text: text)
+                return
+            }
+            
+            guard let httpResponse = response as? HTTPURLResponse else {
+                SyncLogger.shared.warning("🔊 Edge-TTS 服务: 无效响应，降级到 iOS 原生")
+                self.fallbackToiOSNative(text: text)
+                return
+            }
+            
+            guard httpResponse.statusCode == 200 else {
+                let errorBody = data.flatMap { String(data: $0, encoding: .utf8) } ?? "无"
+                SyncLogger.shared.warning("🔊 Edge-TTS 服务: HTTP \(httpResponse.statusCode)，响应体=\(errorBody.prefix(200))，降级到 iOS 原生")
+                self.fallbackToiOSNative(text: text)
+                return
+            }
+            
+            guard let audioData = data, !audioData.isEmpty else {
+                SyncLogger.shared.warning("🔊 Edge-TTS 服务: 音频数据为空，降级到 iOS 原生")
+                self.fallbackToiOSNative(text: text)
+                return
+            }
+            
+            SyncLogger.shared.info("🔊 Edge-TTS 服务: 合成成功，音频大小=\(audioData.count) 字节")
+            
+            // 播放音频
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                do {
+                    self.audioPlayer?.stop()
+                    self.audioPlayer = try AVAudioPlayer(data: audioData)
+                    self.audioPlayer?.delegate = self
+                    self.audioPlayer?.prepareToPlay()
+                    self.audioPlayer?.play()
+                    SyncLogger.shared.info("🔊 Edge-TTS 服务: 开始播放")
+                } catch {
+                    SyncLogger.shared.warning("🔊 Edge-TTS 服务: 音频播放失败 - \(error.localizedDescription)，降级到 iOS 原生")
+                    self.fallbackToiOSNative(text: text)
+                }
+            }
+        }
+        
+        downloadTask = task
+        task.resume()
     }
     
     // MARK: - Edge-TTS (WebSocket)
