@@ -257,7 +257,7 @@ struct ReviewSessionView: View {
                 GeometryReader { geometry in
                     ZStack(alignment: .leading) {
                         Color.gray.opacity(0.1)
-                        Color.orange
+                        Color.brandPrimary
                             .frame(width: geometry.size.width * CGFloat(lecturePlayProgress))
                     }
                 }
@@ -268,7 +268,7 @@ struct ReviewSessionView: View {
             Divider()
                 .opacity(0.2)
             
-            HStack(spacing: 8) {
+            HStack(spacing: AppSpacing.sm) {
                 // 评级主按钮（始终显示，占主要空间）
                 ratingButton(note: note, scheduler: scheduler)
                     .frame(maxWidth: .infinity)
@@ -291,12 +291,12 @@ struct ReviewSessionView: View {
                         .frame(width: 52)
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, AppSpacing.lg)
             .padding(.vertical, 10)
             .padding(.bottom, 14)  // 进入 Safe Area 约 20pt
         }
         .background(
-            Color(.systemBackground)
+            Color.bgCard
                 .ignoresSafeArea(edges: .bottom)  // 背景延伸到屏幕底部
         )
     }
@@ -312,16 +312,16 @@ struct ReviewSessionView: View {
         } label: {
             VStack(spacing: 3) {
                 Text("评级")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.appSubheading)
                 Text("\(recommendedRating.description) · \(previewText)")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
+                    .font(.appTag)
+                    .foregroundColor(.textSecondary)
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 44)  // 统一44pt高度（HIG标准）
-            .background(Color.orange.opacity(0.1))  // 极浅橙背景
-            .foregroundColor(.orange)  // 橙色主色调
-            .cornerRadius(10)
+            .frame(height: AppButtonHeight.standard)  // 统一44pt高度（HIG标准）
+            .background(Color.brandPrimaryLight)  // 极浅橙背景
+            .foregroundColor(.brandPrimary)  // 橙色主色调
+            .cornerRadius(AppCornerRadius.standard)
         }
         .buttonStyle(.plain)
     }
@@ -336,13 +336,13 @@ struct ReviewSessionView: View {
                 Image(systemName: "doc.questionmark")
                     .font(.system(size: 16))
                 Text("测评")
-                    .font(.system(size: 10))
+                    .font(.appMicro)
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 44)  // 统一44pt高度
+            .frame(height: AppButtonHeight.standard)  // 统一44pt高度
             .background(Color.gray.opacity(0.08))  // 统一极浅灰背景
-            .foregroundColor(.primary)  // 中性色
-            .cornerRadius(10)
+            .foregroundColor(.textPrimary)  // 中性色
+            .cornerRadius(AppCornerRadius.standard)
         }
         .buttonStyle(.plain)
     }
@@ -357,13 +357,13 @@ struct ReviewSessionView: View {
                 Image(systemName: "book.closed.fill")
                     .font(.system(size: 16))
                 Text("讲稿")
-                    .font(.system(size: 10))
+                    .font(.appMicro)
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 44)  // 统一44pt高度
+            .frame(height: AppButtonHeight.standard)  // 统一44pt高度
             .background(Color.gray.opacity(0.08))  // 统一极浅灰背景
-            .foregroundColor(.primary)  // 中性色
-            .cornerRadius(10)
+            .foregroundColor(.textPrimary)  // 中性色
+            .cornerRadius(AppCornerRadius.standard)
         }
         .buttonStyle(.plain)
     }
@@ -377,10 +377,10 @@ struct ReviewSessionView: View {
             Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                 .font(.system(size: 20))
                 .frame(maxWidth: .infinity)
-                .frame(height: 44)  // 统一44pt高度
-                .background(isPlaying ? Color.orange.opacity(0.1) : Color.gray.opacity(0.08))
-                .foregroundColor(isPlaying ? .orange : .primary)
-                .cornerRadius(10)
+                .frame(height: AppButtonHeight.standard)  // 统一44pt高度
+                .background(isPlaying ? Color.brandPrimaryLight : Color.gray.opacity(0.08))
+                .foregroundColor(isPlaying ? .brandPrimary : .textPrimary)
+                .cornerRadius(AppCornerRadius.standard)
         }
         .buttonStyle(.plain)
     }
