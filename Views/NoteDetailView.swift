@@ -71,11 +71,13 @@ struct NoteDetailView: View {
                     )
                 }
                 // 讲稿阅读界面（使用 fullScreenCover item 方式，确保数据正确传递）
+                // 笔记页面打开的讲稿：点完成时暂停播放
                 .fullScreenCover(item: $lectureItem) { item in
                     LectureReaderView(
                         note: item.note,
                         folderPath: item.folderPath,
-                        lectureContent: item.content
+                        lectureContent: item.content,
+                        stopOnDismiss: true
                     )
                 }
                 .toolbar {

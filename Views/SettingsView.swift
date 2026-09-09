@@ -75,7 +75,7 @@ struct SettingsView: View {
     private var statusIcon: String {
         if let msg = appState.providerStatus {
             if msg.contains("失败") { return "xmark.circle.fill" }
-            if msg.contains("迁移") || msg.contains("⚠️") { return "exclamationmark.triangle.fill" }
+            if msg.contains("⚠️") { return "exclamationmark.triangle.fill" }
         }
         return "checkmark.circle.fill"
     }
@@ -83,7 +83,7 @@ struct SettingsView: View {
     private var statusColor: Color {
         if let msg = appState.providerStatus {
             if msg.contains("失败") { return .red }
-            if msg.contains("迁移") || msg.contains("⚠️") { return .orange }
+            if msg.contains("⚠️") { return .orange }
         }
         return .green
     }
@@ -220,7 +220,7 @@ struct SettingsView: View {
         if let msg = appState.providerStatus {
             testResult = (ok, msg)
         } else if ok {
-            testResult = (true, "已成功切换为 WebDAV 并完成数据迁移。")
+            testResult = (true, "已成功切换为 WebDAV。请到笔记页下拉同步，从云端拉取笔记。")
         } else {
             testResult = (false, "切换失败，请查看状态提示。")
         }

@@ -15,6 +15,7 @@ struct LectureReaderView: View {
     let note: Note
     let folderPath: String
     let lectureContent: String
+    let stopOnDismiss: Bool  // 关闭页面时是否停止播放（笔记页面true，复习页面false）
     
     @State private var isPlaying = false
     @State private var isPaused = false
@@ -120,7 +121,11 @@ struct LectureReaderView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("完成") {
-                        stopPlaying()
+                        // 复习页面打开的讲稿：点完成不暂停播放，关闭复习页面时才暂停
+                        // 笔记页面打开的讲稿：点完成时暂停播放
+                        if stopOnDismiss {
+                            stopPlaying()
+                        }
                         dismiss()
                     }
                 }

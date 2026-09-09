@@ -215,11 +215,13 @@ struct ReviewSessionView: View {
             }
         }
         // 讲稿阅读页面（使用 fullScreenCover item 方式，确保数据正确传递）
+        // 复习页面打开的讲稿：点完成不暂停播放，关闭复习页面时才暂停
         .fullScreenCover(item: $lectureItem) { item in
             LectureReaderView(
                 note: item.note,
                 folderPath: item.folderPath,
-                lectureContent: item.content
+                lectureContent: item.content,
+                stopOnDismiss: false
             )
         }
     }
