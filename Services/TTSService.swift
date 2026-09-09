@@ -600,7 +600,7 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
                 case .string(let text):
                     // 解析文本消息
                     SyncLogger.shared.info("🔊 Edge-TTS: 收到文本消息，大小=\(text.count)字符，前100字=\(String(text.prefix(100)))")
-                    if text.contains("Path: turn.end") {
+                    if text.contains("Path:turn.end") {
                         // 合成结束，播放累积的音频数据
                         SyncLogger.shared.info("🔊 Edge-TTS: 合成结束，累积音频数据大小=\(self.edgeTTSAudioData.count)字节")
                         if !self.edgeTTSAudioData.isEmpty {
@@ -610,9 +610,9 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
                             self.fallbackToiOSNative(text: originalText)
                         }
                         return
-                    } else if text.contains("Path: turn.start") {
+                    } else if text.contains("Path:turn.start") {
                         SyncLogger.shared.info("🔊 Edge-TTS: 开始合成")
-                    } else if text.contains("Path: response.end") {
+                    } else if text.contains("Path:response.end") {
                         SyncLogger.shared.info("🔊 Edge-TTS: 响应结束")
                     }
                     // 其他文本消息（audio.metadata 等）忽略
