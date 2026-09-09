@@ -299,8 +299,8 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
     func pause() {
         guard isSpeaking else { return }
         isPaused = true
-        SyncLogger.shared.info("🔊 TTSService.pause: actualProvider=\(actualProvider.displayName)")
-        switch actualProvider {
+        SyncLogger.shared.info("🔊 TTSService.pause: provider=\(config.provider.displayName)")
+        switch config.provider {
         case .edgeTTS, .edgeTTSService:
             audioPlayer?.pause()
         case .iOSNative:
@@ -311,8 +311,8 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
     func resume() {
         guard isSpeaking, isPaused else { return }
         isPaused = false
-        SyncLogger.shared.info("🔊 TTSService.resume: actualProvider=\(actualProvider.displayName)")
-        switch actualProvider {
+        SyncLogger.shared.info("🔊 TTSService.resume: provider=\(config.provider.displayName)")
+        switch config.provider {
         case .edgeTTS, .edgeTTSService:
             audioPlayer?.play()
         case .iOSNative:
@@ -327,7 +327,7 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
         totalSentences = 0
         currentText = ""
         
-        switch actualProvider {
+        switch config.provider {
         case .edgeTTS, .edgeTTSService:
             downloadTask?.cancel()
             edgeTTSWebSocketTask?.cancel()
@@ -359,7 +359,7 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
     }
     
     private func stopCurrentOnly() {
-        switch actualProvider {
+        switch config.provider {
         case .edgeTTS, .edgeTTSService:
             downloadTask?.cancel()
             edgeTTSWebSocketTask?.cancel()
@@ -412,12 +412,10 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
     /// 请求体: { input, voice, speed, pitch, style, volume }
     /// 响应: MP3 音频二进制数据
     private func speakEdgeTTSService(_ text: String) {
-        actualProvider = .edgeTTSService
-        
         let serviceURL = config.serviceURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !serviceURL.isEmpty, let url = URL(string: "\(serviceURL)/v1/audio/speech") else {
-            SyncLogger.shared.warning("🔊 Edge-TTS 服务: URL 无效，降级到 iOS 原生")
-            fallbackToiOSNative(text: text)
+            SyncLogger.shared.warning("🔊 Edge-TTS 服务: URL 无效，跳过当前句子")
+            sentenceFinished()
             return
         }
         
@@ -442,8 +440,8 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
         do {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
         } catch {
-            SyncLogger.shared.warning("🔊 Edge-TTS 服务: 请求体编码失败，降级到 iOS 原生")
-            fallbackToiOSNative(text: text)
+            SyncLogger.shared.warning("🔊 Edge-TTS 服务: 请求体编码失败，跳过当前句子")
+            sentenceFinished()
             return
         }
         
@@ -454,27 +452,27 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
             guard let self = self else { return }
             
             if let error = error {
-                SyncLogger.shared.warning("🔊 Edge-TTS 服务: 请求失败 - \(error.localizedDescription)，降级到 iOS 原生")
-                self.fallbackToiOSNative(text: text)
+                SyncLogger.shared.warning("🔊 Edge-TTS 服务: 请求失败 - \(error.localizedDescription)，跳过当前句子")
+                self.sentenceFinished()
                 return
             }
             
             guard let httpResponse = response as? HTTPURLResponse else {
-                SyncLogger.shared.warning("🔊 Edge-TTS 服务: 无效响应，降级到 iOS 原生")
-                self.fallbackToiOSNative(text: text)
+                SyncLogger.shared.warning("🔊 Edge-TTS 服务: 无效响应，跳过当前句子")
+                self.sentenceFinished()
                 return
             }
             
             guard httpResponse.statusCode == 200 else {
                 let errorBody = data.flatMap { String(data: $0, encoding: .utf8) } ?? "无"
-                SyncLogger.shared.warning("🔊 Edge-TTS 服务: HTTP \(httpResponse.statusCode)，响应体=\(errorBody.prefix(200))，降级到 iOS 原生")
-                self.fallbackToiOSNative(text: text)
+                SyncLogger.shared.warning("🔊 Edge-TTS 服务: HTTP \(httpResponse.statusCode)，响应体=\(errorBody.prefix(200))，跳过当前句子")
+                self.sentenceFinished()
                 return
             }
             
             guard let audioData = data, !audioData.isEmpty else {
-                SyncLogger.shared.warning("🔊 Edge-TTS 服务: 音频数据为空，降级到 iOS 原生")
-                self.fallbackToiOSNative(text: text)
+                SyncLogger.shared.warning("🔊 Edge-TTS 服务: 音频数据为空，跳过当前句子")
+                self.sentenceFinished()
                 return
             }
             
@@ -491,8 +489,8 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
                     self.audioPlayer?.play()
                     SyncLogger.shared.info("🔊 Edge-TTS 服务: 开始播放")
                 } catch {
-                    SyncLogger.shared.warning("🔊 Edge-TTS 服务: 音频播放失败 - \(error.localizedDescription)，降级到 iOS 原生")
-                    self.fallbackToiOSNative(text: text)
+                    SyncLogger.shared.warning("🔊 Edge-TTS 服务: 音频播放失败 - \(error.localizedDescription)，跳过当前句子")
+                    self.sentenceFinished()
                 }
             }
         }
