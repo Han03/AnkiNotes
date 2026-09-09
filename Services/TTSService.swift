@@ -613,12 +613,6 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
         let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
             guard let self = self else { return }
             
-            // 检查任务是否已被取消
-            guard task.state != .canceling else {
-                SyncLogger.shared.info("🔊 Edge-TTS 服务: 任务已取消，忽略回调")
-                return
-            }
-            
             if let error = error {
                 // 如果是取消错误，忽略
                 if (error as NSError).code == NSURLErrorCancelled {
