@@ -330,7 +330,8 @@ final class StorageService: ObservableObject {
         )
         
         let fileURL = fileSystem.noteFileURL(noteId: note.id, folderId: folderId, title: title, folders: folders)
-        try? fileSystem.writeNoteContent(note.markdownContent, to: fileURL, skipCloudSync: skipCloudSync)
+        // 只写本地，不隐式上传（下方统一由 cloudNoteURL 路径显式上传，避免双重上传）
+        try? fileSystem.writeNoteContent(note.markdownContent, to: fileURL, skipCloudSync: true)
         
         let meta = NoteMeta(
             id: note.id, title: note.title, folderId: note.folderId,
@@ -384,8 +385,8 @@ final class StorageService: ObservableObject {
             try? fileSystem.deleteNoteFile(at: oldFileURL)
         }
         
-        // 写新内容
-        try? fileSystem.writeNoteContent(note.markdownContent, to: fileURL)
+        // 写新内容（只写本地，不隐式上传，下方统一由 cloudNoteURL 路径显式上传，避免双重上传）
+        try? fileSystem.writeNoteContent(note.markdownContent, to: fileURL, skipCloudSync: true)
         
         let meta = NoteMeta(
             id: note.id, title: note.title, folderId: note.folderId,
@@ -536,8 +537,10 @@ final class StorageService: ObservableObject {
         let cloudRoot = cloud.rootDirectory.appendingPathComponent("Notes", isDirectory: true)
         let skipNames: Set<String> = [".metadata"]
         var cloudFiles: [URL] = []
+        // 收集目录的云端修改时间（下载成功后用于更新快照目录记录）
+        var directoryTimes: [String: Date] = [:]
         // 传入快照和根目录，支持目录级和文件级跳过
-        collectMarkdownFilesFromFS(cloud, at: cloudRoot, skipNames: skipNames, into: &cloudFiles, rootURL: cloudRoot, snapshot: syncSnapshotService)
+        collectMarkdownFilesFromFS(cloud, at: cloudRoot, skipNames: skipNames, into: &cloudFiles, rootURL: cloudRoot, snapshot: syncSnapshotService, directoryTimes: &directoryTimes)
         report.scannedMarkdownFiles = cloudFiles.count
         syncProgressCallback?("扫描云端文件", 5, "发现 \(cloudFiles.count) 篇需要更新的笔记")
         guard report.scannedMarkdownFiles > 0 else {
@@ -594,12 +597,9 @@ final class StorageService: ObservableObject {
                     let prefix = folderComponents.isEmpty ? "" : folderComponents.joined(separator: "/") + "/"
                     report.messages.append("✅ \(prefix)\(title)")
                 }
-                // 更新快照中的文件修改时间
+                // 更新快照中的文件修改时间（下载成功后才更新，失败文件下次同步可重试）
                 if let snap = syncSnapshotService {
-                    let relativePath = snap.relativePath(for: srcURL, rootURL: cloudRoot)
-                    if let meta = try? cloud.getItemMetadata(at: srcURL) {
-                        snap.updateFile(relativePath: relativePath, lastModified: meta.lastModified)
-                    }
+                    updateSnapshotAfterFileSync(cloud: cloud, snap: snap, rootURL: cloudRoot, fileURL: srcURL, directoryTimes: directoryTimes)
                 }
             } catch {
                 report.failedCount += 1
@@ -664,8 +664,10 @@ final class StorageService: ObservableObject {
     private func syncLecturesFromCloud(cloud: CloudFileSystem, report: inout ImportReport, snapshot: SyncSnapshotService? = nil) {
         let lectureRoot = cloud.rootDirectory.appendingPathComponent("Lecture", isDirectory: true)
         var lectureFiles: [URL] = []
+        // 收集目录的云端修改时间（下载成功后用于更新快照目录记录）
+        var directoryTimes: [String: Date] = [:]
         // 传入快照和根目录，支持目录级和文件级跳过
-        collectFilesFromFS(cloud, at: lectureRoot, extensions: ["txt"], skipNames: [], into: &lectureFiles, rootURL: lectureRoot, snapshot: snapshot)
+        collectFilesFromFS(cloud, at: lectureRoot, extensions: ["txt"], skipNames: [], into: &lectureFiles, rootURL: lectureRoot, snapshot: snapshot, directoryTimes: &directoryTimes)
         report.scannedLectureFiles = lectureFiles.count
         print("📖 讲稿同步: 扫描到 \(lectureFiles.count) 个需要更新的讲稿文件")
         for srcURL in lectureFiles {
@@ -688,13 +690,9 @@ final class StorageService: ObservableObject {
                     try fileSystem.writeLecture(bodyStr, folderId: folderId, title: title, folders: folders, skipCloudSync: true)
                     report.lectureImportedCount += 1
                     print("✅ 讲稿同步: 导入 \(title) (\(bodyStr.count) 字符)")
-                    // 更新快照中的文件修改时间
+                    // 更新快照中的文件修改时间（下载成功后才更新，失败文件下次同步可重试）
                     if let snap = snapshot {
-                        let relativePath = snap.relativePath(for: srcURL, rootURL: lectureRoot)
-                        // 重新获取文件的修改时间
-                        if let meta = try? cloud.getItemMetadata(at: srcURL) {
-                            snap.updateFile(relativePath: relativePath, lastModified: meta.lastModified)
-                        }
+                        updateSnapshotAfterFileSync(cloud: cloud, snap: snap, rootURL: lectureRoot, fileURL: srcURL, directoryTimes: directoryTimes)
                     }
                 } catch {
                     print("❌ 讲稿同步: 写入失败 \(title): \(error.localizedDescription)")
@@ -711,8 +709,10 @@ final class StorageService: ObservableObject {
     private func syncQuestionsFromCloud(cloud: CloudFileSystem, report: inout ImportReport, snapshot: SyncSnapshotService? = nil) {
         let questionsRoot = cloud.rootDirectory.appendingPathComponent("Questions", isDirectory: true)
         var questionFiles: [URL] = []
+        // 收集目录的云端修改时间（下载成功后用于更新快照目录记录）
+        var directoryTimes: [String: Date] = [:]
         // 传入快照和根目录，支持目录级和文件级跳过
-        collectFilesFromFS(cloud, at: questionsRoot, extensions: ["json"], skipNames: [], into: &questionFiles, rootURL: questionsRoot, snapshot: snapshot)
+        collectFilesFromFS(cloud, at: questionsRoot, extensions: ["json"], skipNames: [], into: &questionFiles, rootURL: questionsRoot, snapshot: snapshot, directoryTimes: &directoryTimes)
         report.scannedQuestionFiles = questionFiles.count
         print("📚 题库同步: 扫描到 \(questionFiles.count) 个题目文件")
         for srcURL in questionFiles {
@@ -747,12 +747,9 @@ final class StorageService: ObservableObject {
                     try fileSystem.writeQuestions(mergedQuestions, folderId: folderId, title: title, folders: folders, skipCloudSync: true)
                     report.questionImportedCount += 1
                     print("✅ 题库同步: 导入 \(title) (\(mergedQuestions.count)题)")
-                    // 更新快照中的文件修改时间
+                    // 更新快照中的文件修改时间（下载成功后才更新，失败文件下次同步可重试）
                     if let snap = snapshot {
-                        let relativePath = snap.relativePath(for: srcURL, rootURL: questionsRoot)
-                        if let meta = try? cloud.getItemMetadata(at: srcURL) {
-                            snap.updateFile(relativePath: relativePath, lastModified: meta.lastModified)
-                        }
+                        updateSnapshotAfterFileSync(cloud: cloud, snap: snap, rootURL: questionsRoot, fileURL: srcURL, directoryTimes: directoryTimes)
                     }
                 } catch {
                     print("❌ 题库同步: 写入失败 \(title): \(error.localizedDescription)")
@@ -813,7 +810,8 @@ final class StorageService: ObservableObject {
                 createdAt: updatedNote.createdAt, updatedAt: updatedNote.updatedAt, tags: updatedNote.tags
             )
             noteMetas[idx] = meta
-            try? fileSystem.writeNoteContent(updatedNote.markdownContent, to: localFileURL)
+            // 只更新本地内容，不触发云端上传（避免循环：上传会刷新云端修改时间，导致下次同步又拉取）
+            try? fileSystem.writeNoteContent(updatedNote.markdownContent, to: localFileURL, skipCloudSync: true)
             persistNoteIndex()
             return true
         } catch {
@@ -856,11 +854,11 @@ final class StorageService: ObservableObject {
     }
 
     /// 从指定 FS 递归扫描 .md 文件
-    private func collectMarkdownFilesFromFS(_ fs: CloudFileSystem, at url: URL, skipNames: Set<String>, into result: inout [URL], rootURL: URL? = nil, snapshot: SyncSnapshotService? = nil) {
-        collectFilesFromFS(fs, at: url, extensions: ["md", "markdown"], skipNames: skipNames, into: &result, rootURL: rootURL, snapshot: snapshot)
+    private func collectMarkdownFilesFromFS(_ fs: CloudFileSystem, at url: URL, skipNames: Set<String>, into result: inout [URL], rootURL: URL? = nil, snapshot: SyncSnapshotService? = nil, directoryTimes: inout [String: Date]) {
+        collectFilesFromFS(fs, at: url, extensions: ["md", "markdown"], skipNames: skipNames, into: &result, rootURL: rootURL, snapshot: snapshot, directoryTimes: &directoryTimes)
     }
     
-    private func collectFilesFromFS(_ fs: CloudFileSystem, at url: URL, extensions: [String], skipNames: Set<String>, into result: inout [URL], rootURL: URL? = nil, snapshot: SyncSnapshotService? = nil) {
+    private func collectFilesFromFS(_ fs: CloudFileSystem, at url: URL, extensions: [String], skipNames: Set<String>, into result: inout [URL], rootURL: URL? = nil, snapshot: SyncSnapshotService? = nil, directoryTimes: inout [String: Date]) {
         // 使用 contentsOfDirectoryWithMetadata 一次获取子项和类型及修改时间，避免对每个子项发起额外请求
         // （WebDAV 下 contentsOfDirectory 是网络请求，逐个调用容易超时失败导致目录被跳过）
         let children: [(url: URL, isDirectory: Bool, lastModified: Date?)]
@@ -870,27 +868,61 @@ final class StorageService: ObservableObject {
             if skipNames.contains(name) { continue }
             let ext = child.pathExtension.lowercased()
             if extensions.contains(ext) {
-                // 文件级跳过：如果文件无更新，跳过
+                // 文件级跳过：基于【上次】快照判断，有更新才加入下载列表
+                // 【修复】不在扫描阶段写入快照（旧逻辑先 updateFile 再 isFileUpdated 导致永远判定无更新被跳过）
+                // 快照只在文件实际下载成功后更新，避免下载失败的文件被永久跳过
                 if let root = rootURL, let snap = snapshot {
                     let relativePath = snap.relativePath(for: child, rootURL: root)
-                    // 记录文件的修改时间到快照（不管是否跳过，都记录，下次同步可用于文件级跳过）
-                    snap.updateFile(relativePath: relativePath, lastModified: lastModified)
-                    if !snap.isFileUpdated(relativePath: relativePath, lastModified: lastModified) {
+                    // key 加根目录前缀，避免 Notes/Lecture/Questions 下同名子目录互相覆盖
+                    let prefixedPath = root.lastPathComponent + "/" + relativePath
+                    if !snap.isFileUpdated(relativePath: prefixedPath, lastModified: lastModified) {
                         continue  // 文件无更新，跳过
                     }
                 }
                 result.append(child)
             } else if isDirectory {
-                // 目录级跳过：如果目录无更新，跳过整个目录
+                // 目录级跳过：仅当快照中已有该目录记录且无更新时才跳过
+                // 快照目录记录只在目录下有文件下载成功时写入，避免上次同步失败后目录被误跳过
                 if let root = rootURL, let snap = snapshot {
                     let relativePath = snap.relativePath(for: child, rootURL: root)
-                    // 记录目录的修改时间到快照（下次同步时可用于目录级跳过）
-                    snap.updateDirectory(relativePath: relativePath, lastModified: lastModified)
-                    if !snap.isDirectoryUpdated(relativePath: relativePath, lastModified: lastModified) {
-                        continue  // 目录无更新，跳过
+                    let prefixedPath = root.lastPathComponent + "/" + relativePath
+                    // 收集目录的云端修改时间（下载成功后用于更新快照目录记录，支持下次目录级跳过）
+                    if let modified = lastModified {
+                        directoryTimes[prefixedPath] = modified
+                    }
+                    if !snap.isDirectoryUpdated(relativePath: prefixedPath, lastModified: lastModified) {
+                        continue  // 目录无更新且已有成功记录，跳过
                     }
                 }
-                collectFilesFromFS(fs, at: child, extensions: extensions, skipNames: skipNames, into: &result, rootURL: rootURL, snapshot: snapshot)
+                collectFilesFromFS(fs, at: child, extensions: extensions, skipNames: skipNames, into: &result, rootURL: rootURL, snapshot: snapshot, directoryTimes: &directoryTimes)
+            }
+        }
+    }
+    
+    /// 文件下载成功后更新快照（文件级 + 父目录级）
+    /// - 快照 key 带根目录前缀（Notes/Lecture/Questions），避免同名子目录互相覆盖
+    /// - 只有下载成功才更新，失败文件下次同步可重试
+    private func updateSnapshotAfterFileSync(cloud: CloudFileSystem, snap: SyncSnapshotService, rootURL: URL, fileURL: URL, directoryTimes: [String: Date]) {
+        let rootName = rootURL.lastPathComponent
+        let relativePath = snap.relativePath(for: fileURL, rootURL: rootURL)
+        let prefixedPath = rootName + "/" + relativePath
+        
+        // 文件记录（用云端元数据的修改时间）
+        if let meta = try? cloud.getItemMetadata(at: fileURL), let time = meta.lastModified {
+            snap.updateFile(relativePath: prefixedPath, lastModified: time)
+        }
+        
+        // 更新所有父目录记录（用扫描时收集的云端目录修改时间，支持下次目录级跳过）
+        var dirPath = String(prefixedPath.dropLast(fileURL.lastPathComponent.count))
+        if dirPath.hasSuffix("/") { dirPath = String(dirPath.dropLast()) }
+        while !dirPath.isEmpty {
+            if let dirTime = directoryTimes[dirPath] {
+                snap.updateDirectory(relativePath: dirPath, lastModified: dirTime)
+            }
+            if let idx = dirPath.lastIndex(of: "/") {
+                dirPath = String(dirPath[..<idx])
+            } else {
+                break
             }
         }
     }
@@ -941,9 +973,9 @@ final class StorageService: ObservableObject {
                 continue
             }
             
-            // 情况3：文件确实丢失，重新写入空内容
+            // 情况3：文件确实丢失，重新写入空内容（只重建本地，不隐式上传，避免用空模板覆盖云端真实内容）
             let content = defaultMarkdown(for: meta.title)
-            try? fileSystem.writeNoteContent(content, to: newURL)
+            try? fileSystem.writeNoteContent(content, to: newURL, skipCloudSync: true)
             var newMeta = meta
             newMeta.fileName = newURL.lastPathComponent
             noteMetas[idx] = newMeta
