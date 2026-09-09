@@ -87,12 +87,12 @@ struct LectureReaderView: View {
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 60)
                             } else {
-                                LazyVStack(alignment: .leading, spacing: 8) {
+                                LazyVStack(alignment: .leading, spacing: AppSpacing.sm) {
                                     ForEach(Array(sentences.enumerated()), id: \.offset) { index, sentence in
                                         Text(sentence)
-                                            .font(.body)
-                                            .foregroundColor(index == currentSentenceIndex ? .orange : .primary)
-                                            .background(index == currentSentenceIndex ? Color.orange.opacity(0.1) : Color.clear)
+                                            .font(.appBody)
+                                            .foregroundColor(index == currentSentenceIndex ? .brandPrimary : .textPrimary)
+                                            .background(index == currentSentenceIndex ? Color.brandPrimaryLight : Color.clear)
                                             .frame(maxWidth: .infinity, alignment: .leading)
                                             .id(index)
                                             .onTapGesture {
@@ -191,9 +191,9 @@ struct LectureReaderView: View {
     // MARK: - 播放控制栏
     
     private var playerControlBar: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: AppSpacing.md) {
             // 进度条（可拖动）
-            VStack(spacing: 4) {
+            VStack(spacing: AppSpacing.xs) {
                 if totalSentences > 1 {
                     Slider(
                         value: Binding(
@@ -207,26 +207,26 @@ struct LectureReaderView: View {
                         ),
                         in: 0...1
                     )
-                    .tint(.orange)
+                    .tint(.brandPrimary)
                 } else {
                     ProgressView(value: totalSentences > 0 ? 1.0 : 0)
-                        .tint(.orange)
+                        .tint(.brandPrimary)
                 }
                 HStack {
                     Text("\(currentSentenceIndex + 1) / \(totalSentences) 句")
                         .font(.caption2)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(.textSecondary)
                     Spacer()
                     if isPlaying {
                         Text(currentSentence.isEmpty ? "正在加载..." : "正在朗读")
                             .font(.caption2)
-                            .foregroundColor(.orange)
+                            .foregroundColor(.brandPrimary)
                     }
                 }
             }
             
             // 控制按钮
-            HStack(spacing: 24) {
+            HStack(spacing: AppSpacing.xxl) {
                 // 语速按钮
                 Button {
                     showSpeedMenu = true
@@ -237,7 +237,7 @@ struct LectureReaderView: View {
                         Text("\(String(format: "%.1f", appState.ttsConfig.rate))x")
                             .font(.caption2)
                     }
-                    .foregroundColor(.secondary)
+                    .foregroundColor(.textSecondary)
                     .frame(width: 44, height: 44)
                 }
                 .confirmationDialog("选择语速", isPresented: $showSpeedMenu) {
@@ -258,7 +258,7 @@ struct LectureReaderView: View {
                 } label: {
                     Image(systemName: "backward.fill")
                         .font(.title2)
-                        .foregroundColor(.primary)
+                        .foregroundColor(.textPrimary)
                 }
                 .frame(width: 44, height: 44)
                 .disabled(currentSentenceIndex <= 0)
@@ -269,7 +269,7 @@ struct LectureReaderView: View {
                 } label: {
                     ZStack {
                         Circle()
-                            .fill(Color.orange)
+                            .fill(Color.brandPrimary)
                             .frame(width: 56, height: 56)
                         if isLoading {
                             // 加载状态：旋转动画
@@ -292,7 +292,7 @@ struct LectureReaderView: View {
                 } label: {
                     Image(systemName: "forward.fill")
                         .font(.title2)
-                        .foregroundColor(.primary)
+                        .foregroundColor(.textPrimary)
                 }
                 .frame(width: 44, height: 44)
                 .disabled(currentSentenceIndex >= totalSentences - 1)
@@ -305,15 +305,15 @@ struct LectureReaderView: View {
                 } label: {
                     Image(systemName: "stop.fill")
                         .font(.title3)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(.textSecondary)
                 }
                 .frame(width: 44, height: 44)
                 .disabled(!isPlaying && !isPaused)
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 12)
-        .background(Color(.systemBackground))
+        .padding(.horizontal, AppSpacing.xl)
+        .padding(.vertical, AppSpacing.md)
+        .background(Color.bgCard)
         .shadow(color: .black.opacity(0.1), radius: 8, y: -4)
     }
     

@@ -89,16 +89,16 @@ struct SettingsView: View {
     private var webDAVConfigForm: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Image(systemName: "network").foregroundStyle(.orange)
+                Image(systemName: "network").foregroundStyle(.brandPrimary)
                 Text("WebDAV 连接配置")
                     .textStyle(.subsectionTitle)
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(.textPrimary)
                 Spacer()
             }
             // 新 UX：先占位显示表单 → 填完地址/用户/密码 → 点 💾保存并应用 才真的把 activeFS 重写为 WebDAV 后端
             Text("填写以下配置后，点击底部「保存并应用 WebDAV 配置」按钮完成切换。可先点击「测试连接」确认连通性。")
                 .textStyle(.miniText)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.textSecondary)
                 .padding(.top, -2)
 
             GroupBox {
@@ -107,20 +107,20 @@ struct SettingsView: View {
                           text: $appState.webDAVConfig.serverURL)
                     field(label: "用户名（必填）", placeholder: "your@mail.com",
                           text: $appState.webDAVConfig.username)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("密码（必填，Keychain 加密保存）").textStyle(.miniText).foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                        Text("密码（必填，Keychain 加密保存）").textStyle(.miniText).foregroundStyle(.textSecondary)
                         SecureField("应用专用密码：如坚果云「安全选项 → 添加应用 → 生成」",
                                     text: $appState.pendingWebDAVPassword)
                             .textStyle(.body)
                             .padding(10)
-                            .background(RoundedRectangle(cornerRadius: 10).fill(Color(.secondarySystemBackground)))
+                            .background(RoundedRectangle(cornerRadius: AppCornerRadius.standard).fill(Color.bgInput))
                     }
                     field(label: "远端根路径", placeholder: "/AnkiNotes",
                           text: $appState.webDAVConfig.rootPath)
                     Toggle("允许自签名证书（NAS/内网场景）",
                            isOn: $appState.webDAVConfig.trustSelfSigned)
                     .textStyle(.secondaryText)
-                    .tint(.orange)
+                    .tint(.brandPrimary)
                 }
             }
 
@@ -135,7 +135,7 @@ struct SettingsView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 14)
-                .background(RoundedRectangle(cornerRadius: 14).fill(Color.orange.gradient))
+                .background(RoundedRectangle(cornerRadius: AppCornerRadius.xl).fill(Color.brandPrimary.gradient))
                 .foregroundStyle(.white)
             }
             .buttonStyle(.plain)
@@ -152,8 +152,8 @@ struct SettingsView: View {
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
-                    .background(RoundedRectangle(cornerRadius: 12).fill(Color.orange.opacity(0.15)))
-                    .foregroundStyle(.orange)
+                    .background(RoundedRectangle(cornerRadius: AppCornerRadius.lg).fill(Color.brandPrimaryMedium))
+                    .foregroundStyle(.brandPrimary)
                 }
                 .buttonStyle(.plain)
                 .disabled(isTesting)
@@ -281,14 +281,14 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
                 Image(systemName: "brain.head.profile")
-                    .foregroundColor(.orange)
+                    .foregroundColor(.brandPrimary)
                     .font(.title2)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("百炼大模型平台")
                         .textStyle(.subsectionTitle)
                     Text("配置后可自动为笔记生成选择题和填空题")
                         .textStyle(.secondaryText)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(.textSecondary)
                 }
                 Spacer()
             }
@@ -296,7 +296,7 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("API Key")
                     .textStyle(.secondaryText)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(.textSecondary)
                 SecureField("sk-xxxxxxxxxxxxxxxx", text: $appState.bailianConfig.apiKey)
                     .textFieldStyle(.roundedBorder)
                     .autocapitalization(.none)
@@ -306,14 +306,14 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("模型编码")
                     .textStyle(.secondaryText)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(.textSecondary)
                 TextField("qwen-plus", text: $appState.bailianConfig.modelCode)
                     .textFieldStyle(.roundedBorder)
                     .autocapitalization(.none)
                     .disableAutocorrection(true)
                 Text("常用模型：qwen-plus、qwen-turbo、qwen-max、qwen-long")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                    .font(.appCaption)
+                    .foregroundColor(.textSecondary)
             }
 
             if appState.bailianConfig.isConfigured {
@@ -327,7 +327,7 @@ struct SettingsView: View {
             }
         }
         .padding(18)
-        .background(RoundedRectangle(cornerRadius: 18).fill(Color(.systemBackground)))
+        .background(RoundedRectangle(cornerRadius: AppCornerRadius.huge).fill(Color.bgCard))
         .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
     }
 
@@ -346,14 +346,14 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
                 Image(systemName: "speaker.wave.2.fill")
-                    .foregroundColor(.orange)
+                    .foregroundColor(.brandPrimary)
                     .font(.title2)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("语音朗读（TTS）")
                         .textStyle(.subsectionTitle)
                     Text("讲稿阅读时使用的语音合成方案")
                         .textStyle(.secondaryText)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(.textSecondary)
                 }
                 Spacer()
             }
@@ -362,7 +362,7 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("朗读方案")
                     .textStyle(.secondaryText)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(.textSecondary)
                 Picker("朗读方案", selection: $appState.ttsConfig.provider) {
                     ForEach(TTSProvider.allCases) { provider in
                         Text(provider.displayName).tag(provider)
@@ -376,7 +376,7 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Edge-TTS 音色")
                         .textStyle(.secondaryText)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(.textSecondary)
                     Picker("音色", selection: $appState.ttsConfig.edgeVoice) {
                         ForEach(EdgeTTSVoice.allCases) { voice in
                             Text(voice.displayName).tag(voice.rawValue)
@@ -390,21 +390,21 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("语速：\(String(format: "%.1f", appState.ttsConfig.rate))x")
                     .textStyle(.secondaryText)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(.textSecondary)
                 Slider(value: $appState.ttsConfig.rate, in: 0.5...2.0, step: 0.1)
             }
 
             // 说明
             HStack {
                 Image(systemName: "info.circle")
-                    .foregroundColor(.secondary)
+                    .foregroundColor(.textSecondary)
                 Text(ttsDescriptionText)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                    .font(.appCaption)
+                    .foregroundColor(.textSecondary)
             }
         }
         .padding(18)
-        .background(RoundedRectangle(cornerRadius: 18).fill(Color(.systemBackground)))
+        .background(RoundedRectangle(cornerRadius: AppCornerRadius.huge).fill(Color.bgCard))
         .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
     }
 

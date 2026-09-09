@@ -71,9 +71,9 @@ struct MainTabView: View {
                 ZStack {
                     Color.black.opacity(0.4)
                         .ignoresSafeArea()
-                    VStack(spacing: 16) {
+                    VStack(spacing: AppSpacing.lg) {
                         // 图标 + 标题
-                        HStack(spacing: 12) {
+                        HStack(spacing: AppSpacing.md) {
                             if appState.syncProgress > 0 && appState.syncProgress < 100 {
                                 // 显示进度环
                                 ZStack {
@@ -81,7 +81,7 @@ struct MainTabView: View {
                                         .stroke(Color.white.opacity(0.3), lineWidth: 3)
                                     Circle()
                                         .trim(from: 0, to: CGFloat(appState.syncProgress / 100.0))
-                                        .stroke(Color.orange, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                                        .stroke(Color.brandPrimary, style: StrokeStyle(lineWidth: 3, lineCap: .round))
                                         .rotationEffect(.degrees(-90))
                                     Text("\(Int(appState.syncProgress))%")
                                         .font(.caption2)
@@ -100,8 +100,8 @@ struct MainTabView: View {
                                     .foregroundColor(.white)
                                 if !appState.syncStep.isEmpty {
                                     Text(appState.syncStep)
-                                        .font(.subheadline)
-                                        .foregroundColor(.orange)
+                                        .font(.appBody)
+                                        .foregroundColor(.brandPrimary)
                                 }
                             }
                         }
@@ -109,21 +109,21 @@ struct MainTabView: View {
                         // 进度条
                         if appState.syncProgress > 0 {
                             ProgressView(value: appState.syncProgress / 100.0)
-                                .tint(.orange)
+                                .tint(.brandPrimary)
                                 .frame(maxWidth: 280)
                         }
                         
                         // 详情
                         if !appState.syncDetail.isEmpty {
                             Text(appState.syncDetail)
-                                .font(.caption)
+                                .font(.appCaption)
                                 .foregroundColor(.white.opacity(0.8))
                                 .multilineTextAlignment(.center)
                                 .frame(maxWidth: 280)
                                 .lineLimit(2)
                         } else if let status = appState.providerStatus, !status.isEmpty {
                             Text(status)
-                                .font(.caption)
+                                .font(.appCaption)
                                 .foregroundColor(.white.opacity(0.8))
                                 .multilineTextAlignment(.center)
                                 .frame(maxWidth: 280)
@@ -135,20 +135,20 @@ struct MainTabView: View {
                             appState.requestCancelSync()
                         }) {
                             Text("取消同步")
-                                .font(.subheadline)
+                                .font(.appBody)
                                 .fontWeight(.medium)
                                 .foregroundColor(.white)
                                 .padding(.horizontal, 24)
                                 .padding(.vertical, 8)
                                 .background(
-                                    RoundedRectangle(cornerRadius: 8)
+                                    RoundedRectangle(cornerRadius: AppCornerRadius.md)
                                         .fill(Color.red.opacity(0.8))
                                 )
                         }
-                        .padding(.top, 4)
+                        .padding(.top, AppSpacing.xs)
                     }
-                    .padding(24)
-                    .background(RoundedRectangle(cornerRadius: 16).fill(Color(.systemGray6).opacity(0.95)))
+                    .padding(AppSpacing.xxl)
+                    .background(RoundedRectangle(cornerRadius: AppCornerRadius.xxl).fill(Color(.systemGray6).opacity(0.95)))
                 }
                 .transition(.opacity)
             }

@@ -21,7 +21,7 @@ struct KnowledgeExplainView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: AppSpacing.lg) {
                     // 知识点标题
                     HStack {
                         Image(systemName: "lightbulb.fill")
@@ -32,20 +32,20 @@ struct KnowledgeExplainView: View {
                     }
                     .padding()
                     .background(Color.yellow.opacity(0.1))
-                    .cornerRadius(12)
+                    .cornerRadius(AppCornerRadius.lg)
                     
                     // 详解内容
                     if explanationStore.isLoading && explanationStore.displayedText.isEmpty {
                         HStack {
                             ProgressView()
                             Text("正在生成详解...")
-                                .foregroundColor(.secondary)
+                                .foregroundColor(.textSecondary)
                         }
                         .padding(.vertical, 40)
                         .frame(maxWidth: .infinity)
                     } else {
                         Text(explanationStore.displayedText)
-                            .font(.body)
+                            .font(.appBody)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -56,15 +56,15 @@ struct KnowledgeExplainView: View {
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundColor(.green)
                             Text("详解已生成并缓存")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
+                                .font(.appCaption)
+                                .foregroundColor(.textSecondary)
                         }
                         .padding(.top, 8)
                     }
                 }
                 .padding()
             }
-            .background(Color(.systemGroupedBackground))
+            .background(Color.bgPage)
             .navigationTitle("知识点详解")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
