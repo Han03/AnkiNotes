@@ -472,6 +472,7 @@ private struct NoteRow: View {
             .foregroundColor(.brandPrimary)
             .cornerRadius(AppCornerRadius.xs)
     }
+}
 
 // MARK: - 搜索高亮文本
 
