@@ -174,7 +174,7 @@ struct SettingsView: View {
             // 关键提示（只保留一条）
             HStack(alignment: .top, spacing: AppSpacing.xs) {
                 Image(systemName: "info.circle")
-                    .foregroundStyle(.textSecondary)
+                    .foregroundStyle(Color.textSecondary)
                 Text("坚果云：个人设置 → 安全选项 → 添加应用 → 复制应用专用密码")
                     .font(.appCaption)
                     .foregroundColor(.textSecondary)
@@ -229,7 +229,7 @@ struct SettingsView: View {
     private var iCloudHint: some View {
         HStack(alignment: .top, spacing: AppSpacing.xs) {
             Image(systemName: "info.circle")
-                .foregroundStyle(.textSecondary)
+                .foregroundStyle(Color.textSecondary)
             VStack(alignment: .leading, spacing: AppSpacing.xs) {
                 Text("iCloud Drive 同步")
                     .font(.appCaption)
@@ -256,7 +256,7 @@ struct SettingsView: View {
     private var localHint: some View {
         HStack(alignment: .top, spacing: AppSpacing.xs) {
             Image(systemName: "internaldrive")
-                .foregroundStyle(.textSecondary)
+                .foregroundStyle(Color.textSecondary)
             VStack(alignment: .leading, spacing: AppSpacing.xs) {
                 Text("本机存储")
                     .font(.appCaption)
