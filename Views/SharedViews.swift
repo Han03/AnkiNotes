@@ -34,7 +34,7 @@ struct WeeklyChartView: View {
                             .fill(
                                 LinearGradient(
                                     colors: counts[idx] > 0
-                                        ? [.blue, .orange]
+                                        ? [.white, Color.brandPrimary]
                                         : [.gray.opacity(0.3), .gray.opacity(0.3)],
                                     startPoint: .bottom, endPoint: .top)
                             )
@@ -68,7 +68,7 @@ struct StatusDistributionView: View {
     var body: some View {
         let total = max(stats.totalNotes, 1)
         let data: [(label: String, value: Int, color: Color)] = [
-            ("新笔记", stats.newCount, .blue),
+            ("新笔记", stats.newCount, .brandPrimary),
             ("学习中", stats.learningCount, .orange),
             ("已掌握", stats.masteredCount, .green),
             ("复习中", max(0, stats.totalNotes - stats.newCount - stats.learningCount - stats.masteredCount), .orange)
@@ -181,10 +181,12 @@ struct StatCard: View {
     var highlight: Bool = false
     
     var body: some View {
+        // 白色图标时，背景使用橙色主色调，确保图标可见
+        let bgColor = color == .white ? Color.brandPrimary : color.opacity(highlight ? 0.2 : 0.12)
         VStack(spacing: 6) {
             ZStack {
                 Circle()
-                    .fill(color.opacity(highlight ? 0.2 : 0.12))
+                    .fill(bgColor)
                     .frame(width: 38, height: 38)
                 Image(systemName: systemImage)
                     .foregroundColor(color)

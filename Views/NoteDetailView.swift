@@ -466,7 +466,7 @@ struct FolderPickerView: View {
                     Text("根目录（无文件夹）")
                     Spacer()
                     if selectedFolderId == nil {
-                        Image(systemName: "checkmark").foregroundColor(.blue)
+                        Image(systemName: "checkmark").foregroundColor(.brandPrimary)
                     }
                 }
             }
@@ -494,7 +494,7 @@ struct FolderPickerView: View {
                         selectedFolderId = folder.id
                     } label: {
                         if selectedFolderId == folder.id {
-                            Image(systemName: "checkmark").foregroundColor(.blue)
+                            Image(systemName: "checkmark").foregroundColor(.brandPrimary)
                         } else {
                             Image(systemName: "chevron.right").foregroundColor(.secondary)
                         }

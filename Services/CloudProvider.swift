@@ -26,9 +26,9 @@ enum CloudProviderType: String, Codable, CaseIterable, Identifiable, Hashable {
     /// 显示名称（设置 UI）
     var displayName: String {
         switch self {
-        case .local:  return "📁 本机存储"
-        case .iCloud: return "☁️ iCloud Drive"
-        case .webDAV: return "🥇 WebDAV（坚果云 / NAS）"
+        case .local:  return "本机存储"
+        case .iCloud: return "iCloud Drive"
+        case .webDAV: return "WebDAV（坚果云 / NAS）"
         }
     }
 

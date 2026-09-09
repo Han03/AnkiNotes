@@ -47,16 +47,16 @@ struct ReviewHomeView: View {
                     HStack(spacing: AppSpacing.md) {
                         StatCard(title: "待复习", value: "\(queue.count)",
                                  systemImage: "doc.richtext.fill",
-                                 color: .blue, highlight: queue.count > 0)
+                                 color: .white, highlight: queue.count > 0)
                         StatCard(title: "新笔记", value: "\(newCount)",
                                  systemImage: "sparkles",
-                                 color: .brandPrimary)
+                                 color: .white)
                         StatCard(title: "学习中", value: "\(learningCount)",
                                  systemImage: "book.fill",
-                                 color: .brandPrimary)
+                                 color: .white)
                         StatCard(title: "已复习", value: "\(stats.reviewedToday)",
                                  systemImage: "checkmark.seal.fill",
-                                 color: .green)
+                                 color: .white)
                     }
                 }
                 .padding(18)
@@ -203,7 +203,7 @@ struct ReviewHomeView: View {
                                     .font(.appBody)
                             } else {
                                 Text("加载更多")
-                                    .foregroundColor(.blue)
+                                    .foregroundColor(.brandPrimary)
                                     .font(.appBody)
                             }
                             Spacer()

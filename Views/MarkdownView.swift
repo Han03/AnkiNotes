@@ -442,7 +442,8 @@ struct InlineMarkdownText: View {
             var t = Text(seg.content).font(style)
             switch seg.style {
             case .code:
-                t = t.foregroundColor(.orange)
+                // 行内代码不使用颜色，只保留等宽字体
+                break
             case .normal, .bold, .italic, .boldItalic:
                 t = t.foregroundColor(color)
             }
@@ -653,7 +654,7 @@ struct KnowledgeInlineText: View {
             guard let contentRange = Range(match.range(at: 1), in: text),
                   let attrRange = Range(contentRange, in: attr) else { continue }
             attr[attrRange].font = .system(.callout, design: .monospaced)
-            attr[attrRange].foregroundColor = .orange
+            // 行内代码不使用颜色，只保留等宽字体
         }
     }
     
@@ -665,10 +666,9 @@ struct KnowledgeInlineText: View {
         var searchRange = text.startIndex..<text.endIndex
         while let range = text.range(of: keyword, options: .caseInsensitive, range: searchRange) {
             if let attrRange = Range(range, in: attr) {
-                // 设置虚线下划线（统一橙色主色）
+                // 只设置虚线下划线，不改变文字颜色，避免大片橙色干扰阅读
                 attr[attrRange].underlineStyle = .patternDash
-                attr[attrRange].underlineColor = .orange
-                attr[attrRange].foregroundColor = .orange
+                attr[attrRange].underlineColor = Color.brandPrimary.opacity(0.4)
                 // 设置自定义 URL scheme，用于点击拦截
                 attr[attrRange].link = URL(string: "knowledge://\(point.id.uuidString)")
             }

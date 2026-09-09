@@ -92,8 +92,8 @@ struct ReviewQuizView: View {
                             .font(.caption)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 3)
-                            .background(question.type == .singleChoice ? Color.blue.opacity(0.1) : Color.orange.opacity(0.1))
-                            .foregroundColor(question.type == .singleChoice ? .blue : .orange)
+                            .background(Color.brandPrimaryLight)
+                            .foregroundColor(.brandPrimary)
                             .clipShape(Capsule())
                     }
                     
@@ -113,8 +113,8 @@ struct ReviewQuizView: View {
                                     Text(option.key)
                                         .font(.subheadline.bold())
                                         .frame(width: 28, height: 28)
-                                        .background(Color.blue.opacity(0.15))
-                                        .foregroundColor(.blue)
+                                        .background(Color.brandPrimaryLight)
+                                        .foregroundColor(.brandPrimary)
                                         .clipShape(Circle())
                                     Text(option.content)
                                         .font(.subheadline)
@@ -146,7 +146,7 @@ struct ReviewQuizView: View {
                                     .font(.subheadline.bold())
                                     .frame(maxWidth: .infinity)
                                     .padding(.vertical, 12)
-                                    .background(Color.blue)
+                                    .background(Color.brandPrimary)
                                     .foregroundColor(.white)
                                     .cornerRadius(10)
                             }
@@ -370,8 +370,8 @@ struct ReviewQuizView: View {
     
     private func colorForAccuracy(_ accuracy: Double) -> Color {
         if accuracy >= 0.9 { return .green }
-        if accuracy >= 0.7 { return .blue }
-        if accuracy >= 0.4 { return .orange }
+        if accuracy >= 0.7 { return .brandPrimary }
+        if accuracy >= 0.4 { return .yellow }
         return .red
     }
     

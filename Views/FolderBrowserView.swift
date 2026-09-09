@@ -113,7 +113,7 @@ struct FolderBrowserView: View {
                                 .font(.subheadline)
                         } else {
                             Text("加载更多")
-                                .foregroundColor(.blue)
+                                .foregroundColor(.brandPrimary)
                                 .font(.subheadline)
                         }
                         Spacer()
@@ -459,7 +459,7 @@ private func highlightedText(_ text: String, searchText: String) -> Text {
         if !before.isEmpty {
             result = result + Text(before)
         }
-        result = result + Text(matched).bold().foregroundColor(.blue)
+        result = result + Text(matched).bold().foregroundColor(.brandPrimary)
         remaining = String(remaining[range.upperBound...])
     }
     if !remaining.isEmpty {

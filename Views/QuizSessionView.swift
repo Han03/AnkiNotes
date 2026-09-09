@@ -97,8 +97,8 @@ struct QuizSessionView: View {
                         .font(.appCaption)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
-                        .background(q.type == .singleChoice ? Color.blue.opacity(0.1) : Color.brandPrimaryLight)
-                        .foregroundColor(q.type == .singleChoice ? .blue : .brandPrimary)
+                        .background(Color.brandPrimaryLight)
+                        .foregroundColor(.brandPrimary)
                         .clipShape(Capsule())
                 }
 
@@ -169,7 +169,7 @@ struct QuizSessionView: View {
                             Spacer()
                         }
                         .padding(.vertical, 14)
-                        .background(RoundedRectangle(cornerRadius: AppCornerRadius.lg).fill(Color.blue))
+                        .background(RoundedRectangle(cornerRadius: AppCornerRadius.lg).fill(Color.brandPrimary))
                     }
                     .buttonStyle(.plain)
                 }

@@ -161,7 +161,7 @@ struct QuizHomeView: View {
 
             // 题型分布
             HStack(spacing: AppSpacing.md) {
-                StatBox(title: "选择题", value: "\(stats.singleChoiceCount)", color: .blue)
+                StatBox(title: "选择题", value: "\(stats.singleChoiceCount)", color: .brandPrimary)
                 StatBox(title: "填空题", value: "\(stats.fillBlankCount)", color: .brandPrimary)
                 StatBox(title: "正确率", value: "\(Int(stats.accuracy * 100))%", color: .brandPrimary)
             }
