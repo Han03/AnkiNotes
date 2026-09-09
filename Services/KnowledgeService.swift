@@ -15,6 +15,12 @@ final class KnowledgeService: ObservableObject {
     @Published var isExplaining = false
     
     private let fileManager = FileManager.default
+    private weak var storageService: StorageService?
+    
+    /// 配置 StorageService 引用（用于获取文件夹路径）
+    func configure(storageService: StorageService) {
+        self.storageService = storageService
+    }
     private var cacheDirectory: URL {
         let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let dir = docs.appendingPathComponent(".knowledge_cache", isDirectory: true)
@@ -26,21 +32,57 @@ final class KnowledgeService: ObservableObject {
     
     private init() {}
     
-    // MARK: - 缓存路径
+    // MARK: - 缓存路径（按笔记目录层级存储）
     
-    private func extractionCacheURL(for noteId: UUID) -> URL {
-        cacheDirectory.appendingPathComponent("extraction_\(noteId.uuidString).json")
+    /// 知识点提取缓存路径：.knowledge_cache/[笔记文件夹路径]/[笔记标题].json
+    private func extractionCacheURL(for note: Note) -> URL {
+        let dir = cacheDirectoryFor(note: note)
+        return dir.appendingPathComponent("\(note.title).json")
     }
     
-    private func explanationCacheURL(for pointId: UUID) -> URL {
-        cacheDirectory.appendingPathComponent("explain_\(pointId.uuidString).json")
+    /// 知识点详解缓存目录：.knowledge_cache/[笔记文件夹路径]/[笔记标题]/
+    private func explanationCacheDirectory(for note: Note) -> URL {
+        let dir = cacheDirectoryFor(note: note).appendingPathComponent(note.title, isDirectory: true)
+        if !fileManager.fileExists(atPath: dir.path) {
+            try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        return dir
+    }
+    
+    /// 知识点详解缓存路径：.knowledge_cache/[笔记文件夹路径]/[笔记标题]/[知识点关键字].md
+    private func explanationCacheURL(for point: KnowledgePoint, note: Note) -> URL {
+        let dir = explanationCacheDirectory(for: note)
+        let safeFileName = sanitizeFileName(point.keyword)
+        return dir.appendingPathComponent("\(safeFileName).md")
+    }
+    
+    /// 笔记对应的缓存目录：.knowledge_cache/[笔记文件夹路径]/
+    private func cacheDirectoryFor(note: Note) -> URL {
+        var dir = cacheDirectory
+        // 通过 StorageService 获取笔记的文件夹路径
+        if let storage = storageService {
+            let folderPath = storage.getFolderPath(for: note.folderId)
+            if !folderPath.isEmpty && folderPath != "根目录" {
+                dir = dir.appendingPathComponent(folderPath, isDirectory: true)
+            }
+        }
+        if !fileManager.fileExists(atPath: dir.path) {
+            try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        return dir
+    }
+    
+    /// 将关键字转换为安全的文件名（替换文件系统不允许的字符）
+    private func sanitizeFileName(_ name: String) -> String {
+        let invalidChars = CharacterSet(charactersIn: "/\\:*?\"<>|")
+        return name.components(separatedBy: invalidChars).joined(separator: "_")
     }
     
     // MARK: - 知识点提取缓存
     
     /// 读取笔记的知识点提取缓存
-    func loadExtraction(for noteId: UUID) -> [KnowledgePoint]? {
-        let url = extractionCacheURL(for: noteId)
+    func loadExtraction(for note: Note) -> [KnowledgePoint]? {
+        let url = extractionCacheURL(for: note)
         guard let data = try? Data(contentsOf: url),
               let result = try? JSONDecoder().decode(KnowledgeExtractionResult.self, from: data) else {
             return nil
@@ -49,30 +91,44 @@ final class KnowledgeService: ObservableObject {
     }
     
     /// 保存知识点提取缓存
-    func saveExtraction(for noteId: UUID, points: [KnowledgePoint]) {
-        let result = KnowledgeExtractionResult(noteId: noteId, points: points)
+    func saveExtraction(for note: Note, points: [KnowledgePoint]) {
+        let result = KnowledgeExtractionResult(noteId: note.id, noteTitle: note.title, points: points)
         if let data = try? JSONEncoder().encode(result) {
-            try? data.write(to: extractionCacheURL(for: noteId))
+            try? data.write(to: extractionCacheURL(for: note), options: .atomic)
         }
     }
     
     // MARK: - 详解缓存
     
     /// 读取知识点详解缓存
-    func loadExplanation(for pointId: UUID) -> String? {
-        let url = explanationCacheURL(for: pointId)
+    func loadExplanation(for point: KnowledgePoint, note: Note) -> String? {
+        let url = explanationCacheURL(for: point, note: note)
         guard let data = try? Data(contentsOf: url),
-              let text = String(data: data, encoding: .utf8) else {
+              let text = String(data: data, encoding: .utf8),
+              !text.isEmpty else {
             return nil
         }
         return text
     }
     
     /// 保存知识点详解缓存
-    func saveExplanation(for pointId: UUID, explanation: String) {
+    func saveExplanation(for point: KnowledgePoint, note: Note, explanation: String) {
+        guard !explanation.isEmpty else { return }
         if let data = explanation.data(using: .utf8) {
-            try? data.write(to: explanationCacheURL(for: pointId))
+            try? data.write(to: explanationCacheURL(for: point, note: note), options: .atomic)
         }
+    }
+    
+    /// 检查知识点详解是否已生成
+    func hasExplanation(for point: KnowledgePoint, note: Note) -> Bool {
+        let url = explanationCacheURL(for: point, note: note)
+        guard fileManager.fileExists(atPath: url.path),
+              let data = try? Data(contentsOf: url),
+              let text = String(data: data, encoding: .utf8),
+              !text.isEmpty else {
+            return false
+        }
+        return true
     }
     
     // MARK: - 流式提取知识点
@@ -90,7 +146,7 @@ final class KnowledgeService: ObservableObject {
         completion: @escaping ([KnowledgePoint]) -> Void
     ) {
         // 先检查缓存
-        if let cached = loadExtraction(for: note.id) {
+        if let cached = loadExtraction(for: note) {
             DispatchQueue.main.async {
                 for point in cached {
                     onPoint(point)
@@ -200,7 +256,7 @@ final class KnowledgeService: ObservableObject {
                 }
                 
                 // 保存缓存
-                self.saveExtraction(for: note.id, points: allPoints)
+                self.saveExtraction(for: note, points: allPoints)
                 
                 DispatchQueue.main.async {
                     self.isExtracting = false
@@ -224,19 +280,21 @@ final class KnowledgeService: ObservableObject {
     /// 流式生成知识点详解（打字机效果）
     /// - Parameters:
     ///   - point: 知识点
+    ///   - note: 所属笔记（用于计算缓存路径）
     ///   - noteContent: 笔记原文（用于上下文）
     ///   - config: 百炼配置
     ///   - onChunk: 每收到一段文本时回调（打字机效果）
     ///   - completion: 完成回调
     func explainKeyword(
         point: KnowledgePoint,
+        note: Note,
         noteContent: String,
         config: BailianConfig,
         onChunk: @escaping (String) -> Void,
         completion: @escaping (String) -> Void
     ) {
         // 先检查缓存
-        if let cached = loadExplanation(for: point.id) {
+        if let cached = loadExplanation(for: point, note: note) {
             DispatchQueue.main.async {
                 onChunk(cached)
                 completion(cached)
@@ -303,7 +361,7 @@ final class KnowledgeService: ObservableObject {
                 }
                 
                 // 保存缓存
-                self.saveExplanation(for: point.id, explanation: fullText)
+                self.saveExplanation(for: point, note: note, explanation: fullText)
                 
                 DispatchQueue.main.async {
                     self.isExplaining = false

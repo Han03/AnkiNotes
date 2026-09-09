@@ -10,6 +10,7 @@ import SwiftUI
 /// 知识点详解界面：流式打字机展示大模型回答
 struct KnowledgeExplainView: View {
     let point: KnowledgePoint
+    let note: Note
     let noteContent: String
     let config: BailianConfig
     let knowledgeService = KnowledgeService.shared
@@ -94,7 +95,7 @@ struct KnowledgeExplainView: View {
     
     private func loadExplanation() {
         // 检查是否有缓存
-        if let cached = knowledgeService.loadExplanation(for: point.id) {
+        if let cached = knowledgeService.loadExplanation(for: point, note: note) {
             displayedText = cached
             fullText = cached
             isLoading = false
@@ -106,6 +107,7 @@ struct KnowledgeExplainView: View {
         
         knowledgeService.explainKeyword(
             point: point,
+            note: note,
             noteContent: noteContent,
             config: config,
             onChunk: { chunk in

@@ -66,6 +66,7 @@ struct NoteDetailView: View {
                 .sheet(item: $selectedKnowledgePoint) { point in
                     KnowledgeExplainView(
                         point: point,
+                        note: note,
                         noteContent: note.markdownContent,
                         config: appState.bailianConfig
                     )
@@ -340,7 +341,7 @@ struct NoteDetailView: View {
     
     private func loadCachedKnowledgePoints() {
         guard let note = note else { return }
-        if let cached = KnowledgeService.shared.loadExtraction(for: note.id) {
+        if let cached = KnowledgeService.shared.loadExtraction(for: note) {
             knowledgePoints = cached
         }
     }
@@ -350,7 +351,7 @@ struct NoteDetailView: View {
         guard appState.bailianConfig.isConfigured else { return }
         
         // 先检查缓存
-        if let cached = KnowledgeService.shared.loadExtraction(for: note.id) {
+        if let cached = KnowledgeService.shared.loadExtraction(for: note) {
             knowledgePoints = cached
             return
         }

@@ -31,11 +31,13 @@ struct KnowledgePoint: Identifiable, Codable, Hashable {
 /// 笔记的知识点提取结果（用于缓存）
 struct KnowledgeExtractionResult: Codable {
     let noteId: UUID
+    let noteTitle: String
     var points: [KnowledgePoint]
     var extractedAt: Date
     
-    init(noteId: UUID, points: [KnowledgePoint] = [], extractedAt: Date = Date()) {
+    init(noteId: UUID, noteTitle: String, points: [KnowledgePoint] = [], extractedAt: Date = Date()) {
         self.noteId = noteId
+        self.noteTitle = noteTitle
         self.points = points
         self.extractedAt = extractedAt
     }

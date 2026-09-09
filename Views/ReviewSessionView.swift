@@ -186,6 +186,7 @@ struct ReviewSessionView: View {
             if currentIndex < queue.count {
                 KnowledgeExplainView(
                     point: point,
+                    note: queue[currentIndex],
                     noteContent: queue[currentIndex].markdownContent,
                     config: appState.bailianConfig
                 )
@@ -313,7 +314,7 @@ struct ReviewSessionView: View {
         let note = queue[currentIndex]
         
         // 先检查缓存（即使大模型未配置，也能加载已有的缓存）
-        if let cached = KnowledgeService.shared.loadExtraction(for: note.id) {
+        if let cached = KnowledgeService.shared.loadExtraction(for: note) {
             knowledgePoints = cached
             return
         }

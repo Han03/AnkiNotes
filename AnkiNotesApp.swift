@@ -218,8 +218,7 @@ final class AppState: ObservableObject {
                     self.refreshStats()
                 }
             }
-            // 清理异常目录（private 嵌套等），然后拉取知识点缓存
-            MetadataSyncService.shared.cleanupAbnormalDirectories(cloudFS: fs)
+            // 拉取知识点缓存
             let knowledgePulled = MetadataSyncService.shared.pullKnowledgeCache(cloudFS: fs)
             if knowledgePulled > 0 {
                 print("📥 启动时知识点缓存同步: 拉取 \(knowledgePulled) 个文件")
@@ -581,7 +580,13 @@ final class AppState: ObservableObject {
                 let cloudNoteMetas = MetadataSyncService.shared.readLocalNoteMetas()
                 SyncLogger.shared.debug("云端 noteMetas: \(cloudNoteMetas.count) 条")
                 let mergedNoteMetas = MetadataSyncService.shared.mergeNoteMetas(local: localNoteMetasBackup, cloud: cloudNoteMetas)
-                MetadataSyncService.shared.writeLocalNoteMetas(mergedNoteMetas)
+                // 【优化】只有合并后的数据与云端数据真的有变化时才写入，避免无数据变更时也更新文件修改时间触发不必要的推送
+                if mergedNoteMetas != cloudNoteMetas {
+                    MetadataSyncService.shared.writeLocalNoteMetas(mergedNoteMetas)
+                    SyncLogger.shared.info("SRS 数据合并后有变化，已写入 notes_index.json")
+                } else {
+                    SyncLogger.shared.info("SRS 数据合并后无变化，跳过写入 notes_index.json")
+                }
                 SyncLogger.shared.stepDone("智能合并 SRS 数据")
                 SyncLogger.shared.info("SRS 数据合并完成: 本地 \(localNoteMetasBackup.count) 条，云端 \(cloudNoteMetas.count) 条，合并后 \(mergedNoteMetas.count) 条")
             } else {
@@ -595,8 +600,6 @@ final class AppState: ObservableObject {
             }
             SyncLogger.shared.stepStart("拉取知识点缓存")
             let knowledgePullStartTime = Date()
-            // 先清理异常目录（private 嵌套等）
-            MetadataSyncService.shared.cleanupAbnormalDirectories(cloudFS: fs)
             let knowledgePulled = MetadataSyncService.shared.pullKnowledgeCache(cloudFS: fs)
             let knowledgePullDuration = Date().timeIntervalSince(knowledgePullStartTime)
             SyncLogger.shared.stepDone("拉取知识点缓存", duration: knowledgePullDuration)
@@ -608,9 +611,10 @@ final class AppState: ObservableObject {
             let importDuration = Date().timeIntervalSince(importStartTime)
             SyncLogger.shared.stepDone("从云端导入数据", duration: importDuration)
             SyncLogger.shared.info("导入完成: 扫描 \(report.scannedMarkdownFiles) 个笔记文件，新增 \(report.importedCount)，跳过 \(report.skippedCount)，失败 \(report.failedCount)，讲稿 \(report.lectureImportedCount) 个，耗时 \(String(format: "%.2f", importDuration))秒")
-            // 云端读写完成，释放锁（本地处理不需要锁，缩短锁占用时间）
-            CloudLockService.shared.releaseLock(cloudFS: fs)
-            SyncLogger.shared.info("云端读写完成，释放锁，开始本地处理")
+            // 【优化】不释放锁，本地处理完成后直接推送数据，全程只持有一次锁
+            // 原因：锁有自动续期机制（18秒续期一次，20秒过期），本地处理不会导致锁过期
+            // 好处：避免第二次获取锁时的等待和限流，简化同步流程
+            SyncLogger.shared.info("继续持有云端锁，开始本地处理（全程只持有一次锁）")
             DispatchQueue.main.async {
                 self.syncStep = "本地处理"
                 self.syncProgress = 90
@@ -676,7 +680,10 @@ final class AppState: ObservableObject {
             }
             
             if !hasLocalChanges {
-                SyncLogger.shared.info("本地无更改（元数据变化=\(metadataChanged)，知识点缓存变化=\(knowledgeChanged)），跳过推送数据，无需重新获取锁")
+                SyncLogger.shared.info("本地无更改（元数据变化=\(metadataChanged)，知识点缓存变化=\(knowledgeChanged)），跳过推送数据")
+                // 本地无更改，释放锁（全程只释放一次）
+                CloudLockService.shared.releaseLock(cloudFS: fs)
+                SyncLogger.shared.info("本地无更改，释放云端锁（全程只持有一次锁）")
                 DispatchQueue.main.async {
                     var status = "✅ 同步完成：新增 \(report.importedCount)，跳过 \(report.skippedCount)，失败 \(report.failedCount)，扫描到 \(report.scannedMarkdownFiles) 个 .md 文件"
                     if report.scannedLectureFiles > 0 {
@@ -696,80 +703,8 @@ final class AppState: ObservableObject {
             
             SyncLogger.shared.info("检测到本地更改（元数据变化=\(metadataChanged)，知识点缓存变化=\(knowledgeChanged)），需要推送数据到云端")
             
-            // 本地处理完成，重新获取锁用于推送云端
-            SyncLogger.shared.stepStart("重新获取云端锁（用于推送数据）")
-            var pushLockAcquired = false
-            var pushRetryCount = 0
-            let maxPushLockRetries = 6  // 推送数据获取锁的最大重试次数，约1分钟
-            while !pushLockAcquired && pushRetryCount < maxPushLockRetries {
-                // 检查用户是否请求取消
-                if self.cancelSyncRequested {
-                    SyncLogger.shared.warning("用户取消同步，中断推送数据获取锁")
-                    DispatchQueue.main.async {
-                        self.syncErrorMessage = "同步已取消"
-                        self.providerStatus = "⚠️ 同步已取消"
-                    }
-                    completion?(StorageService.ImportReport())
-                    return
-                }
-                
-                pushLockAcquired = CloudLockService.shared.acquireLock(cloudFS: fs)
-                if !pushLockAcquired {
-                    pushRetryCount += 1
-                    let debugInfo = CloudLockService.shared.lockDebugInfo(cloudFS: fs)
-                    
-                    // 检测是否是限流错误（503）
-                    let isRateLimited = debugInfo.contains("503") || debugInfo.contains("Too many requests")
-                    let retryInterval = isRateLimited ? 10.0 : 5.0
-                    
-                    SyncLogger.shared.warning("推送数据获取锁失败，第 \(pushRetryCount)/\(maxPushLockRetries) 次重试，限流=\(isRateLimited)。\(debugInfo)")
-                    DispatchQueue.main.async {
-                        if isRateLimited {
-                            self.providerStatus = "⚠️ 云端限流，等待 \(Int(retryInterval)) 秒后重试推送...（第 \(pushRetryCount)/\(maxPushLockRetries) 次）\n\n可点击取消同步"
-                        } else {
-                            self.providerStatus = "⏳ 等待云端锁释放以推送数据...（第 \(pushRetryCount)/\(maxPushLockRetries) 次重试）\n\n可点击取消同步"
-                        }
-                        self.syncStep = "等待云端锁"
-                        self.syncDetail = "等待获取锁以推送数据，第 \(pushRetryCount)/\(maxPushLockRetries) 次重试"
-                    }
-                    // 可中断的等待：每次只sleep 0.1秒，循环检查取消标志，用户点击取消立即生效
-                    let waitStartTime = Date()
-                    while Date().timeIntervalSince(waitStartTime) < retryInterval {
-                        if self.cancelSyncRequested {
-                            SyncLogger.shared.warning("用户取消同步，中断等待推送数据")
-                            DispatchQueue.main.async {
-                                self.syncErrorMessage = "同步已取消"
-                                self.providerStatus = "⚠️ 同步已取消"
-                            }
-                            completion?(StorageService.ImportReport())
-                            return
-                        }
-                        Thread.sleep(forTimeInterval: 0.1)
-                    }
-                }
-            }
-            
-            // 检查是否达到最大重试次数
-            if !pushLockAcquired && pushRetryCount >= maxPushLockRetries {
-                SyncLogger.shared.warning("推送数据获取锁失败，达到最大重试次数 \(maxPushLockRetries)，跳过推送数据（数据已保存在本地，下次同步时会自动推送）")
-                DispatchQueue.main.async {
-                    self.providerStatus = "⚠️ 云端繁忙，跳过数据推送（数据已保存在本地，下次同步时会自动推送）"
-                    self.syncStep = "跳过推送"
-                    self.syncDetail = "云端繁忙，跳过数据推送"
-                }
-                // 跳过推送，直接完成同步
-                DispatchQueue.main.async {
-                    self.syncStep = "同步完成"
-                    self.syncProgress = 100
-                    self.syncDetail = "同步已完成（数据推送跳过，下次同步时自动推送）"
-                    self.refreshStats()
-                    completion?(report)
-                }
-                return
-            }
-            
-            SyncLogger.shared.stepDone("重新获取云端锁（用于推送数据）")
-            SyncLogger.shared.info("重新获取云端锁成功，重试 \(pushRetryCount) 次，开始推送数据")
+            // 【优化】全程只持有一次锁，不需要重新获取锁，直接推送数据
+            SyncLogger.shared.info("继续持有云端锁，直接推送数据到云端（全程只持有一次锁）")
             // 同步后：推送本地元数据和知识点缓存到云端
             DispatchQueue.main.async {
                 self.syncStep = "推送元数据到云端"
@@ -794,6 +729,10 @@ final class AppState: ObservableObject {
             let knowledgePushDuration = Date().timeIntervalSince(knowledgePushStartTime)
             SyncLogger.shared.stepDone("推送知识点缓存到云端", duration: knowledgePushDuration)
             SyncLogger.shared.info("推送知识点缓存到云端: \(knowledgePushed) 个文件，耗时 \(String(format: "%.2f", knowledgePushDuration))秒")
+            
+            // 推送完成，释放锁（全程只释放一次）
+            CloudLockService.shared.releaseLock(cloudFS: fs)
+            SyncLogger.shared.info("推送完成，释放云端锁（全程只持有一次锁）")
             
             DispatchQueue.main.async {
                 // 静默同步也显示完成状态
@@ -963,6 +902,8 @@ final class AppState: ObservableObject {
         storage.syncSnapshotService = syncSnapshotService
         // 注入到 MetadataSyncService，用于知识点缓存的增量同步跳过
         MetadataSyncService.shared.configure(syncSnapshotService: syncSnapshotService)
+        // 注入到 KnowledgeService，用于按笔记文件夹路径存储知识点缓存
+        KnowledgeService.shared.configure(storageService: storage)
         // 设置云端文件系统（用于锁验证）
         quizService.cloudFS = webDAVFS ?? localFS
         // 更新 quizService 的笔记和文件夹列表（用于按文件夹结构存储题目）
