@@ -8,6 +8,7 @@
 import Foundation
 import AVFoundation
 import CryptoKit
+import MediaPlayer
 
 // MARK: - Edge-TTS WebSocket 连接处理器
 
@@ -235,10 +236,16 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
     private var preloadTask: URLSessionDataTask?  // 预下载任务
     private var pendingPlayIndex: Int?  // 暂停时下载完成，待播放的句子索引
     
+    // MARK: - 后台音频保活
+    private var isAudioSessionActive = false  // 音频会话是否已激活
+    private var isRemoteCommandSetup = false  // 远程控制是否已注册（避免重复注册）
+    private var interruptionObserver: NSObjectProtocol?  // 音频中断通知观察者
+    
     private override init() {
         self.config = TTSConfig()
         super.init()
         synthesizer.delegate = self
+        setupAudioInterruptionHandling()
     }
     
     func updateConfig(_ config: TTSConfig) {
@@ -291,6 +298,10 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
         
         isSpeaking = true
         isPaused = false
+        
+        // 后台音频保活准备：激活音频会话、注册远程控制
+        prepareForBackgroundPlayback()
+        
         speakCurrentSentence()
     }
     
@@ -349,6 +360,8 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
                 self.audioPlayer?.prepareToPlay()
                 self.audioPlayer?.play()
                 self.isLoading = false
+                // 更新锁屏/控制中心的现在播放信息
+                self.updateNowPlayingInfo()
                 SyncLogger.shared.info("🔊 playAudioData: 开始播放，index=\(self.currentSentenceIndex)")
             } catch {
                 SyncLogger.shared.warning("🔊 playAudioData: 播放失败 - \(error.localizedDescription)，跳过当前句子")
@@ -414,6 +427,8 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
         guard !isPaused else { return }
         isPaused = true
         pendingPlayIndex = nil
+        // 更新锁屏/控制中心的播放状态（暂停）
+        updateNowPlayingInfo()
         SyncLogger.shared.info("🔊 TTSService.pause: provider=\(config.provider.displayName)")
         switch config.provider {
         case .edgeTTSService:
@@ -427,6 +442,8 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
     func resume() {
         guard isSpeaking, isPaused else { return }
         isPaused = false
+        // 更新锁屏/控制中心的播放状态（播放中）
+        updateNowPlayingInfo()
         SyncLogger.shared.info("🔊 TTSService.resume: provider=\(config.provider.displayName)")
         
         // 如果有待播放的句子（暂停时下载完成的），直接播放
@@ -486,6 +503,176 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
         case .iOSNative:
             synthesizer.stopSpeaking(at: .immediate)
         }
+        
+        // 停止播放后清理远程控制中心和音频会话
+        clearNowPlayingInfo()
+        deactivateAudioSessionIfNeeded()
+    }
+    
+    // MARK: - 后台音频保活
+    
+    /// 激活音频会话（播放前调用）
+    private func activateAudioSessionIfNeeded() {
+        guard !isAudioSessionActive else { return }
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setCategory(.playback, mode: .spokenAudio, options: [])
+            try audioSession.setActive(true)
+            isAudioSessionActive = true
+            SyncLogger.shared.info("🔊 音频会话已激活（后台播放模式）")
+        } catch {
+            SyncLogger.shared.warning("🔊 音频会话激活失败: \(error.localizedDescription)")
+        }
+    }
+    
+    /// 取消激活音频会话（停止播放后调用，允许其他应用播放音频）
+    private func deactivateAudioSessionIfNeeded() {
+        guard isAudioSessionActive else { return }
+        // 只有在完全停止播放时才取消激活，暂停时保持激活以便快速恢复
+        guard !isSpeaking else { return }
+        do {
+            try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            isAudioSessionActive = false
+            SyncLogger.shared.info("🔊 音频会话已取消激活")
+        } catch {
+            SyncLogger.shared.warning("🔊 音频会话取消激活失败: \(error.localizedDescription)")
+        }
+    }
+    
+    /// 设置音频中断处理（来电、闹钟、其他应用播放音频等）
+    private func setupAudioInterruptionHandling() {
+        interruptionObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            self?.handleAudioInterruption(notification)
+        }
+        SyncLogger.shared.info("🔊 音频中断监听已注册")
+    }
+    
+    /// 处理音频中断
+    private func handleAudioInterruption(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: typeValue) else {
+            return
+        }
+        
+        switch type {
+        case .began:
+            // 中断开始（来电、闹钟等），自动暂停播放
+            SyncLogger.shared.info("🔊 音频中断开始，自动暂停播放")
+            if isSpeaking && !isPaused {
+                pause()
+            }
+        case .ended:
+            // 中断结束，检查是否应该恢复播放
+            guard let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt else { return }
+            let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
+            if options.contains(.shouldResume) {
+                SyncLogger.shared.info("🔊 音频中断结束，系统建议恢复播放")
+                // 自动恢复播放（如果之前是播放状态被中断的）
+                if isSpeaking && isPaused {
+                    resume()
+                }
+            } else {
+                SyncLogger.shared.info("🔊 音频中断结束，系统不建议恢复播放，保持暂停状态")
+            }
+        @unknown default:
+            break
+        }
+    }
+    
+    /// 更新控制中心/锁屏的现在播放信息
+    private func updateNowPlayingInfo() {
+        guard isSpeaking else { return }
+        
+        var nowPlayingInfo: [String: Any] = [:]
+        
+        // 标题：当前句子内容（截断显示）
+        let title = currentText.count > 50 ? String(currentText.prefix(50)) + "..." : currentText
+        nowPlayingInfo[MPMediaItemPropertyTitle] = title
+        
+        // 副标题：播放进度
+        nowPlayingInfo[MPMediaItemPropertyArtist] = "第 \(currentSentenceIndex + 1)/\(totalSentences) 句"
+        
+        // 专辑名：应用名称
+        nowPlayingInfo[MPMediaItemPropertyAlbumTitle] = "Anki 笔记 - 课堂讲稿"
+        
+        // 播放进度（如果有 audioPlayer）
+        if let player = audioPlayer, player.duration > 0 {
+            nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = isPaused ? 0.0 : 1.0
+            nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = player.currentTime
+            nowPlayingInfo[MPMediaItemPropertyPlaybackDuration] = player.duration
+        } else {
+            nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = isPaused ? 0.0 : 1.0
+        }
+        
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
+    }
+    
+    /// 清除现在播放信息
+    private func clearNowPlayingInfo() {
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+    }
+    
+    /// 注册远程控制命令（锁屏/控制中心的播放控制），只注册一次
+    private func setupRemoteCommandCenter() {
+        guard !isRemoteCommandSetup else { return }
+        isRemoteCommandSetup = true
+        
+        let commandCenter = MPRemoteCommandCenter.shared()
+        
+        // 播放/暂停
+        commandCenter.playCommand.isEnabled = true
+        commandCenter.playCommand.addTarget { [weak self] _ in
+            guard let self = self else { return .commandFailed }
+            if self.isSpeaking && self.isPaused {
+                self.resume()
+                return .success
+            }
+            return .commandFailed
+        }
+        
+        commandCenter.pauseCommand.isEnabled = true
+        commandCenter.pauseCommand.addTarget { [weak self] _ in
+            guard let self = self else { return .commandFailed }
+            if self.isSpeaking && !self.isPaused {
+                self.pause()
+                return .success
+            }
+            return .commandFailed
+        }
+        
+        // 上一句/下一句
+        commandCenter.nextTrackCommand.isEnabled = true
+        commandCenter.nextTrackCommand.addTarget { [weak self] _ in
+            guard let self = self else { return .commandFailed }
+            if self.isSpeaking {
+                self.skipToNext()
+                return .success
+            }
+            return .commandFailed
+        }
+        
+        commandCenter.previousTrackCommand.isEnabled = true
+        commandCenter.previousTrackCommand.addTarget { [weak self] _ in
+            guard let self = self else { return .commandFailed }
+            if self.isSpeaking {
+                self.skipToPrevious()
+                return .success
+            }
+            return .commandFailed
+        }
+        
+        SyncLogger.shared.info("🔊 远程控制命令已注册（锁屏/控制中心播放控制）")
+    }
+    
+    /// 开始播放前的保活准备（激活音频会话、注册远程控制）
+    private func prepareForBackgroundPlayback() {
+        activateAudioSessionIfNeeded()
+        setupRemoteCommandCenter()
     }
     
     func skipToNext() {
@@ -563,6 +750,8 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
         }
         
         synthesizer.speak(utterance)
+        // 更新锁屏/控制中心的现在播放信息
+        updateNowPlayingInfo()
     }
     
     // MARK: - Edge-TTS 服务（HTTP API，Cloudflare Workers 部署）

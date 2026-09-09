@@ -55,6 +55,11 @@
     <true/>
     <key>LSSupportsOpeningDocumentsInPlace</key>
     <true/>
+    <!-- 后台音频播放保活：允许应用在后台继续播放讲稿音频 -->
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>audio</string>
+    </array>
     <key>NSHumanReadableCopyright</key>
     <string>Copyright © 2026. All rights reserved.</string>
     <!-- iCloud Drive 容器元数据（用于 Finder/文件 App 显示 AnkiNotes 同步文件夹） -->
