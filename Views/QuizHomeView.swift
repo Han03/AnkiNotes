@@ -169,7 +169,7 @@ struct QuizHomeView: View {
             // 覆盖笔记
             HStack {
                 Image(systemName: "folder.fill")
-                    .foregroundColor(.yellow)
+                    .foregroundColor(.brandPrimary.opacity(0.6))
                 Text("覆盖 \(stats.coveredNoteCount) 篇笔记")
                     .font(.appBody)
                     .foregroundColor(.textSecondary)

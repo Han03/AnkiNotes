@@ -171,7 +171,10 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
     
     // MARK: - 播放控制
     
-    func speak(text: String, onSentenceComplete: ((Int) -> Void)? = nil, onComplete: (() -> Void)? = nil) {
+    /// 播放讲稿文本
+    /// - Parameters:
+    ///   - lecturePath: 讲稿相对路径（如 "JAVA高级/01-Java核心/IO与NIO"），用于TTS缓存按讲稿目录分层存储
+    func speak(text: String, lecturePath: String? = nil, onSentenceComplete: ((Int) -> Void)? = nil, onComplete: (() -> Void)? = nil) {
         stop()
         self.sentences = splitIntoSentences(text)
         self.totalSentences = sentences.count
@@ -181,7 +184,10 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
         self.audioCache = [:]
         self.pendingPlayIndex = nil
         
-        SyncLogger.shared.info("🔊 speak: 开始播放，共\(sentences.count)句，provider=\(config.provider.displayName)")
+        // 设置TTS缓存的讲稿路径上下文（按讲稿目录分层存储）
+        TTSCacheManager.shared.setLecturePath(lecturePath)
+        
+        SyncLogger.shared.info("🔊 speak: 开始播放，共\(sentences.count)句，provider=\(config.provider.displayName)，lecturePath=\(lecturePath ?? "nil")")
         
         guard !sentences.isEmpty else {
             onComplete?()

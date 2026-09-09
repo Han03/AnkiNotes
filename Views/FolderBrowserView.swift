@@ -319,7 +319,7 @@ private struct FolderRow: View {
     var body: some View {
         HStack(spacing: AppSpacing.md) {
             Image(systemName: "folder.fill")
-                .foregroundColor(.yellow)
+                .foregroundColor(.brandPrimary.opacity(0.35))  // 柔和橙，融入主题
                 .textStyle(.subsectionTitle)
                 .frame(width: 32)
             VStack(alignment: .leading, spacing: 3) {
@@ -381,27 +381,18 @@ private struct NoteRow: View {
                 }
                 HStack(spacing: AppSpacing.sm) {
                     stateChip
-                    // 已生成题目标识：橙色"题"字，与状态标签风格一致
+                    // 已生成题目标识：橙色描边角标（视觉轻于状态胶囊）
                     if hasQuestions {
-                        Text("题")
-                            .textStyle(.subsectionTitle)
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(Color.brandPrimaryMedium)
-                            .foregroundColor(.brandPrimary)
-                            .cornerRadius(AppCornerRadius.xs)
+                        contentBadge("题")
                     }
-                    // 有讲稿标识：橙色"稿"字
+                    // 有讲稿标识：橙色描边角标
                     if hasLecture {
-                        Text("稿")
-                            .textStyle(.subsectionTitle)
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(Color.brandPrimaryMedium)
-                            .foregroundColor(.brandPrimary)
-                            .cornerRadius(AppCornerRadius.xs)
+                        contentBadge("稿")
                     }
+                    // 到期时间：状态化分级（已到期/今日到期橙色高亮）
                     Text(dueText)
                         .textStyle(.tertiaryText)
-                        .foregroundColor(.textSecondary)
+                        .foregroundColor(dueColor)
                 }
             }
             Spacer()
@@ -410,23 +401,29 @@ private struct NoteRow: View {
     }
     
     private var statusIcon: some View {
-        // 统一使用中性灰色，状态是辅助信息，不应抢夺视觉重心
+        // 状态图标颜色跟随状态语义：新=橙、学习中=半透明橙、复习=灰
+        // 与状态胶囊呼应，形成"图标+胶囊"的组合视觉锚点
         let imageName: String
+        let iconColor: Color
         switch note.srs.cardState {
         case .new:
             imageName = "sparkles"
+            iconColor = .brandPrimary
         case .learning, .relearning:
             imageName = "book.fill"
+            iconColor = .brandPrimary.opacity(0.6)
         case .review:
             imageName = "checkmark.seal.fill"
+            iconColor = .textSecondary
         }
         return Image(systemName: imageName)
-            .foregroundColor(.secondary)  // 统一中性灰色
+            .foregroundColor(iconColor)
             .textStyle(.subsectionTitle)
     }
     
     private var stateChip: some View {
-        // 统一使用中性灰色，避免四色（蓝橙红绿）带来的视觉混乱
+        // 状态胶囊：橙色语义强度系统表达学习阶段
+        // 新=实心橙（最强关注）、学/重=浅橙底橙字（进行中）、复=中性灰（稳定态）
         let text: String
         switch note.srs.cardState {
         case .new: text = "新"
@@ -434,18 +431,47 @@ private struct NoteRow: View {
         case .relearning: text = "重"
         case .review: text = "复"
         }
+        
+        let isNew = note.srs.cardState == .new
+        let isActive = note.srs.cardState == .learning || note.srs.cardState == .relearning
+        
         return Text(text)
             .textStyle(.subsectionTitle)
-            .padding(.horizontal, 6).padding(.vertical, 2)
-            .background(Color.gray.opacity(0.1))  // 统一极浅灰背景
-            .foregroundColor(.textSecondary)  // 统一次级文字颜色
-            .cornerRadius(AppCornerRadius.xs)
+            .padding(.horizontal, 8).padding(.vertical, 3)
+            .background(
+                isNew ? Color.brandPrimary :                         // 新：实心橙
+                (isActive ? Color.brandPrimaryMedium : Color.gray.opacity(0.1))  // 学/重：浅橙底；复：浅灰底
+            )
+            .foregroundColor(isNew ? .white : (isActive ? .brandPrimary : .textSecondary))
+            .cornerRadius(AppCornerRadius.sm)
     }
     
     private var dueText: String {
         SM2Algorithm.dueDescription(note.srs.dueDate)
     }
-}
+    
+    /// 到期时间颜色：已到期=橙、今日到期=橙、明日=N级灰、N天后=次级灰
+    private var dueColor: Color {
+        let seconds = note.srs.dueDate.timeIntervalSinceNow
+        if seconds <= 0 { return .brandPrimary }
+        let days = seconds / 86400
+        if days < 1 { return .brandPrimary }
+        if days < 2 { return .textSecondary }
+        return .textSecondary
+    }
+    
+    /// 题/稿内容角标（橙色细描边，视觉轻于状态胶囊）
+    private func contentBadge(_ text: String) -> some View {
+        Text(text)
+            .textStyle(.subsectionTitle)
+            .padding(.horizontal, 6).padding(.vertical, 1)
+            .overlay(
+                RoundedRectangle(cornerRadius: AppCornerRadius.xs)
+                    .stroke(Color.brandPrimary.opacity(0.5), lineWidth: 1)
+            )
+            .foregroundColor(.brandPrimary)
+            .cornerRadius(AppCornerRadius.xs)
+    }
 
 // MARK: - 搜索高亮文本
 

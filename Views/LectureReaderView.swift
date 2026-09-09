@@ -122,9 +122,12 @@ struct LectureReaderView: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("完成") {
                         // 复习页面打开的讲稿：点完成不暂停播放，关闭复习页面时才暂停
-                        // 笔记页面打开的讲稿：点完成时暂停播放
+                        // 笔记页面打开的讲稿：点完成时停止播放但【保留进度】（重新打开可恢复）
                         if stopOnDismiss {
-                            stopPlaying()
+                            saveProgress()
+                            TTSService.shared.stop()
+                            isPlaying = false
+                            isPaused = false
                         }
                         dismiss()
                     }
@@ -142,8 +145,7 @@ struct LectureReaderView: View {
                     currentSentence = sentences[0]
                 }
                 
-                // 【修复】从 TTSService 同步当前播放状态（解决熄屏后回到页面状态不同步的问题）
-                // 检查 TTSService 是否正在播放当前讲稿（通过 currentText 是否匹配来判断）
+                // 从 TTSService 同步当前播放状态（解决熄屏后回到页面状态不同步的问题）
                 let ttsIsSpeaking = TTSService.shared.isSpeaking
                 let ttsIsPaused = TTSService.shared.isPaused
                 let ttsCurrentIndex = TTSService.shared.currentSentenceIndex
@@ -151,13 +153,25 @@ struct LectureReaderView: View {
                 
                 SyncLogger.shared.info("📖 同步 TTSService 状态: isSpeaking=\(ttsIsSpeaking), isPaused=\(ttsIsPaused), currentIndex=\(ttsCurrentIndex), currentText=\(ttsCurrentText.prefix(20))")
                 
-                // 如果 TTSService 正在播放，且播放的内容与当前讲稿相关，同步状态
-                if ttsIsSpeaking && ttsCurrentIndex < sentences.count {
+                // 判断 TTSService 是否正在播放当前讲稿（通过当前句子文本是否属于本讲稿内容来判断）
+                let textMatchesCurrentLecture = !ttsCurrentText.isEmpty
+                    && lectureContent.contains(String(ttsCurrentText.prefix(20)))
+                
+                // 如果 TTSService 正在播放/暂停当前讲稿，同步实时状态（保留进度）
+                if ttsIsSpeaking && textMatchesCurrentLecture && ttsCurrentIndex < sentences.count {
                     isPlaying = true
                     isPaused = ttsIsPaused
                     currentSentenceIndex = ttsCurrentIndex
                     currentSentence = sentences[ttsCurrentIndex]
                     SyncLogger.shared.info("📖 已同步播放状态: index=\(ttsCurrentIndex), sentence=\(currentSentence.prefix(20))")
+                } else {
+                    // TTSService 未在播放当前讲稿（已停止/切到其他讲稿），从持久化进度恢复
+                    let saved = loadSavedProgress()
+                    if saved > 0 {
+                        currentSentenceIndex = saved
+                        currentSentence = sentences[saved]
+                        SyncLogger.shared.info("📖 已从持久化恢复播放进度: index=\(saved), sentence=\(currentSentence.prefix(20))")
+                    }
                 }
             }
             .onReceive(TTSService.shared.$isLoading) { loading in
@@ -187,8 +201,11 @@ struct LectureReaderView: View {
                 }
             }
             .onDisappear {
+                // 保存播放进度（暂停/关闭时保留进度，重新打开时恢复）
                 // 注意：不在 onDisappear 中停止播放，允许后台继续播放
-                // stopPlaying()  // 注释掉，支持后台播放
+                if isPlaying || isPaused {
+                    saveProgress()
+                }
             }
         }
     }
@@ -343,6 +360,8 @@ struct LectureReaderView: View {
             } else {
                 TTSService.shared.pause()
                 isPaused = true
+                // 暂停时保存进度（关闭后重新打开可恢复）
+                saveProgress()
             }
         } else {
             startPlaying()
@@ -353,14 +372,31 @@ struct LectureReaderView: View {
         totalSentences = sentences.count
         isPlaying = true
         isPaused = false
-        jumpStartIndex = 0  // 正常播放时起始索引为0
+        // 【修复】从当前选中的句子开始播放（未播放时点击句子选中某句后，播放不应重置为第一句）
+        let startIndex = min(max(currentSentenceIndex, 0), max(totalSentences - 1, 0))
+        jumpStartIndex = startIndex  // 正常进入页面 startIndex=0；选中某句后从该句开始
+        
+        // 构造讲稿相对路径（用于TTS缓存按讲稿目录分层存储）
+        // 路径格式：{folderPath}/{noteTitle}
+        let lecturePath: String
+        if folderPath.isEmpty {
+            lecturePath = note.title
+        } else {
+            lecturePath = "\(folderPath)/\(note.title)"
+        }
+        
+        // 从选中句开始拼接剩余文本
+        let playText = startIndex > 0
+            ? sentences[startIndex...].joined(separator: "")
+            : lectureContent
         
         TTSService.shared.updateConfig(appState.ttsConfig)
         TTSService.shared.speak(
-            text: lectureContent,
+            text: playText,
+            lecturePath: lecturePath,
             onSentenceComplete: { index in
                 DispatchQueue.main.async {
-                    currentSentenceIndex = index + 1
+                    currentSentenceIndex = startIndex + index + 1
                     if currentSentenceIndex < sentences.count {
                         currentSentence = sentences[currentSentenceIndex]
                     }
@@ -372,12 +408,14 @@ struct LectureReaderView: View {
                     isPaused = false
                     currentSentenceIndex = 0
                     currentSentence = ""
+                    // 播放完毕，清除持久化进度（下次从头开始）
+                    clearProgress()
                 }
             }
         )
         
         if !sentences.isEmpty {
-            currentSentence = sentences[0]
+            currentSentence = sentences[startIndex]
         }
     }
     
@@ -387,6 +425,8 @@ struct LectureReaderView: View {
         isPaused = false
         currentSentenceIndex = 0
         currentSentence = ""
+        // 用户主动停止，清除持久化进度（下次从头开始）
+        clearProgress()
     }
     
     private func previousSentence() {
@@ -410,10 +450,19 @@ struct LectureReaderView: View {
         let remainingText = sentences[index...].joined(separator: "")
         TTSService.shared.stop()
         
+        // 构造讲稿相对路径（用于TTS缓存按讲稿目录分层存储）
+        let lecturePath: String
+        if folderPath.isEmpty {
+            lecturePath = note.title
+        } else {
+            lecturePath = "\(folderPath)/\(note.title)"
+        }
+        
         if isPlaying || isPaused {
             TTSService.shared.updateConfig(appState.ttsConfig)
             TTSService.shared.speak(
                 text: remainingText,
+                lecturePath: lecturePath,
                 onSentenceComplete: { idx in
                     DispatchQueue.main.async {
                         currentSentenceIndex = index + idx + 1
@@ -428,11 +477,39 @@ struct LectureReaderView: View {
                         isPaused = false
                         currentSentenceIndex = 0
                         currentSentence = ""
+                        // 播放完毕，清除持久化进度
+                        clearProgress()
                     }
                 }
             )
             isPlaying = true
             isPaused = false
         }
+    }
+    
+    // MARK: - 播放进度持久化
+    
+    /// 讲稿进度存储键（以讲稿路径为唯一标识）
+    private var progressKey: String {
+        let path = folderPath.isEmpty ? note.title : "\(folderPath)/\(note.title)"
+        return "lecture_progress_\(path)"
+    }
+    
+    /// 保存当前播放进度（暂停/关闭页面时调用）
+    private func saveProgress() {
+        UserDefaults.standard.set(currentSentenceIndex, forKey: progressKey)
+        SyncLogger.shared.info("📖 已保存播放进度: index=\(currentSentenceIndex), key=\(progressKey)")
+    }
+    
+    /// 读取已保存的播放进度（越界时返回 0）
+    private func loadSavedProgress() -> Int {
+        let saved = UserDefaults.standard.integer(forKey: progressKey)
+        guard saved >= 0 && saved < sentences.count else { return 0 }
+        return saved
+    }
+    
+    /// 清除播放进度（播放完毕或主动停止时调用）
+    private func clearProgress() {
+        UserDefaults.standard.removeObject(forKey: progressKey)
     }
 }

@@ -168,7 +168,7 @@ struct NoteDetailView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Image(systemName: "lightbulb.fill")
-                    .foregroundColor(.yellow)
+                    .foregroundColor(.brandPrimary)
                 Text("知识点精讲")
                     .textStyle(.sectionTitle)
                 Spacer()
@@ -489,7 +489,7 @@ struct FolderPickerView: View {
                         currentParentId = folder.id
                     } label: {
                         Label(folder.name, systemImage: "folder.fill")
-                            .foregroundColor(.yellow)
+                            .foregroundColor(.brandPrimary.opacity(0.6))
                     }
                     Spacer()
                     Button {

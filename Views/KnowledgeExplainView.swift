@@ -25,13 +25,13 @@ struct KnowledgeExplainView: View {
                     // 知识点标题
                     HStack {
                         Image(systemName: "lightbulb.fill")
-                            .foregroundColor(.yellow)
+                            .foregroundColor(.brandPrimary)
                         Text(point.keyword)
                             .font(.headline)
                         Spacer()
                     }
                     .padding()
-                    .background(Color.yellow.opacity(0.1))
+                    .background(Color.brandPrimaryLight)
                     .cornerRadius(AppCornerRadius.lg)
                     
                     // 详解内容

@@ -227,8 +227,8 @@ struct ReviewSessionView: View {
     }
     
     private func stateLabel(_ state: SRSData.CardState) -> some View {
-        // 统一使用中性灰色，状态是辅助信息，不应抢夺视觉重心
-        // 避免四色（蓝橙红绿）带来的视觉混乱
+        // 状态胶囊：橙色语义强度系统（与笔记列表一致）
+        // 新=实心橙、学/重=浅橙底橙字、复习=中性灰
         let mapping: [(SRSData.CardState, String)] = [
             (.new, "新"),
             (.learning, "学"),
@@ -236,12 +236,18 @@ struct ReviewSessionView: View {
             (.review, "复习")
         ]
         let result = mapping.first(where: { $0.0 == state }) ?? (.new, "新")
+        let isNew = state == .new
+        let isActive = state == .learning || state == .relearning
+        
         return Text(result.1)
             .textStyle(.tertiaryText)
-            .padding(.horizontal, 6).padding(.vertical, 3)
-            .background(Color.gray.opacity(0.1))  // 统一极浅灰背景
-            .foregroundColor(.secondary)  // 统一次级文字颜色
-            .cornerRadius(6)
+            .padding(.horizontal, 8).padding(.vertical, 3)
+            .background(
+                isNew ? Color.brandPrimary :                         // 新：实心橙
+                (isActive ? Color.brandPrimaryMedium : Color.gray.opacity(0.1))  // 学/重：浅橙底；复习：浅灰底
+            )
+            .foregroundColor(isNew ? .white : (isActive ? .brandPrimary : .textSecondary))
+            .cornerRadius(AppCornerRadius.sm)
     }
     
     // MARK: - 底部操作栏（专业UI设计，橙色主色调）
@@ -406,9 +412,13 @@ struct ReviewSessionView: View {
     private func loadAndPlayLecture(note: Note) {
         guard let storage = appState.storage else { return }
         
+        // 构造讲稿相对路径（用于TTS缓存按讲稿目录分层存储）
+        let folderPath = storage.getNoteFolderPath(for: note) ?? ""
+        let lecturePath = folderPath.isEmpty ? note.title : "\(folderPath)/\(note.title)"
+        
         // 如果已有缓存的讲稿文本，直接播放
         if let text = lectureText {
-            startLecturePlayback(text: text)
+            startLecturePlayback(text: text, lecturePath: lecturePath)
             return
         }
         
@@ -418,7 +428,7 @@ struct ReviewSessionView: View {
                 let text = try storage.readLecture(for: note)
                 DispatchQueue.main.async {
                     lectureText = text
-                    startLecturePlayback(text: text)
+                    startLecturePlayback(text: text, lecturePath: lecturePath)
                 }
             } catch {
                 SyncLogger.shared.warning("📖 加载讲稿失败: \(error.localizedDescription)")
@@ -426,10 +436,11 @@ struct ReviewSessionView: View {
         }
     }
     
-    private func startLecturePlayback(text: String) {
+    private func startLecturePlayback(text: String, lecturePath: String? = nil) {
         TTSService.shared.updateConfig(appState.ttsConfig)
         TTSService.shared.speak(
             text: text,
+            lecturePath: lecturePath,
             onSentenceComplete: { index in
                 DispatchQueue.main.async {
                     // 更新播放进度
