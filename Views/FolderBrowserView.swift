@@ -317,7 +317,7 @@ private struct FolderRow: View {
     var onDelete: (Folder) -> Void
     
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: AppSpacing.md) {
             Image(systemName: "folder.fill")
                 .foregroundColor(.yellow)
                 .textStyle(.subsectionTitle)
@@ -329,11 +329,11 @@ private struct FolderRow: View {
                 let noteCount = storage.countNotesRecursive(in: folder.id)
                 Text("\(subCount) 文件夹 · \(noteCount) 笔记")
                     .textStyle(.secondaryText)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(.textSecondary)
             }
             Spacer()
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, AppSpacing.xs)
         .contextMenu {
             Button {
                 onRename(folder)
@@ -358,17 +358,17 @@ private struct NoteRow: View {
     let hasLecture: Bool
     
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: AppSpacing.md) {
             statusIcon
                 .frame(width: 32)
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: AppSpacing.xs) {
                 Text(note.title)
                     .textStyle(.sectionTitle)
                     .lineLimit(1)
                 // 文件夹路径小字标识
                 Text(folderPath)
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
+                    .font(.appCaption)
+                    .foregroundColor(.textSecondary)
                     .lineLimit(1)
                 let snippet = note.cardBack
                     .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -376,37 +376,37 @@ private struct NoteRow: View {
                 if !snippet.isEmpty {
                     Text(snippet)
                         .textStyle(.secondaryText)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(.textSecondary)
                         .lineLimit(2)
                 }
-                HStack(spacing: 8) {
+                HStack(spacing: AppSpacing.sm) {
                     stateChip
-                    // 已生成题目标识：紫色"题"字，与状态标签风格一致
+                    // 已生成题目标识：橙色"题"字，与状态标签风格一致
                     if hasQuestions {
                         Text("题")
                             .textStyle(.subsectionTitle)
                             .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(Color.orange.opacity(0.15))
-                            .foregroundColor(.orange)
-                            .cornerRadius(4)
+                            .background(Color.brandPrimaryMedium)
+                            .foregroundColor(.brandPrimary)
+                            .cornerRadius(AppCornerRadius.xs)
                     }
                     // 有讲稿标识：橙色"稿"字
                     if hasLecture {
                         Text("稿")
                             .textStyle(.subsectionTitle)
                             .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(Color.orange.opacity(0.15))
-                            .foregroundColor(.orange)
-                            .cornerRadius(4)
+                            .background(Color.brandPrimaryMedium)
+                            .foregroundColor(.brandPrimary)
+                            .cornerRadius(AppCornerRadius.xs)
                     }
                     Text(dueText)
                         .textStyle(.tertiaryText)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(.textSecondary)
                 }
             }
             Spacer()
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, AppSpacing.xs)
     }
     
     private var statusIcon: some View {
@@ -438,8 +438,8 @@ private struct NoteRow: View {
             .textStyle(.subsectionTitle)
             .padding(.horizontal, 6).padding(.vertical, 2)
             .background(Color.gray.opacity(0.1))  // 统一极浅灰背景
-            .foregroundColor(.secondary)  // 统一次级文字颜色
-            .cornerRadius(4)
+            .foregroundColor(.textSecondary)  // 统一次级文字颜色
+            .cornerRadius(AppCornerRadius.xs)
     }
     
     private var dueText: String {
