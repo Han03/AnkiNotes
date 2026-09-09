@@ -135,12 +135,51 @@ struct LectureReaderView: View {
                 if !sentences.isEmpty {
                     currentSentence = sentences[0]
                 }
+                
+                // 【修复】从 TTSService 同步当前播放状态（解决熄屏后回到页面状态不同步的问题）
+                // 检查 TTSService 是否正在播放当前讲稿（通过 currentText 是否匹配来判断）
+                let ttsIsSpeaking = TTSService.shared.isSpeaking
+                let ttsIsPaused = TTSService.shared.isPaused
+                let ttsCurrentIndex = TTSService.shared.currentSentenceIndex
+                let ttsCurrentText = TTSService.shared.currentText
+                
+                SyncLogger.shared.info("📖 同步 TTSService 状态: isSpeaking=\(ttsIsSpeaking), isPaused=\(ttsIsPaused), currentIndex=\(ttsCurrentIndex), currentText=\(ttsCurrentText.prefix(20))")
+                
+                // 如果 TTSService 正在播放，且播放的内容与当前讲稿相关，同步状态
+                if ttsIsSpeaking && ttsCurrentIndex < sentences.count {
+                    isPlaying = true
+                    isPaused = ttsIsPaused
+                    currentSentenceIndex = ttsCurrentIndex
+                    currentSentence = sentences[ttsCurrentIndex]
+                    SyncLogger.shared.info("📖 已同步播放状态: index=\(ttsCurrentIndex), sentence=\(currentSentence.prefix(20))")
+                }
             }
             .onReceive(TTSService.shared.$isLoading) { loading in
                 isLoading = loading
             }
+            // 【修复】监听 TTSService 播放状态变化，实时同步本地状态
+            .onReceive(TTSService.shared.$isSpeaking) { speaking in
+                if speaking {
+                    isPlaying = true
+                }
+                // 不在这里设置 isPlaying = false，因为 stop 时会通过 onComplete 回调处理
+            }
+            .onReceive(TTSService.shared.$isPaused) { paused in
+                isPaused = paused
+            }
+            .onReceive(TTSService.shared.$currentSentenceIndex) { newIndex in
+                // 只在 TTSService 正在播放时同步索引，避免 stop 后重置为 0 时影响显示
+                guard TTSService.shared.isSpeaking else { return }
+                guard newIndex < sentences.count else { return }
+                if newIndex != currentSentenceIndex {
+                    currentSentenceIndex = newIndex
+                    currentSentence = sentences[newIndex]
+                    SyncLogger.shared.info("📖 同步句子索引: \(newIndex), sentence=\(currentSentence.prefix(20))")
+                }
+            }
             .onDisappear {
-                stopPlaying()
+                // 注意：不在 onDisappear 中停止播放，允许后台继续播放
+                // stopPlaying()  // 注释掉，支持后台播放
             }
         }
     }
@@ -277,6 +316,17 @@ struct LectureReaderView: View {
     // MARK: - 播放控制
     
     private func togglePlay() {
+        // 【修复】先同步 TTSService 实际状态，避免熄屏后状态不同步
+        let ttsSpeaking = TTSService.shared.isSpeaking
+        let ttsPaused = TTSService.shared.isPaused
+        
+        // 如果 TTSService 正在播放但本地状态未同步，先同步
+        if ttsSpeaking && !isPlaying {
+            isPlaying = true
+            isPaused = ttsPaused
+            SyncLogger.shared.info("📖 togglePlay: 同步播放状态 isPlaying=true, isPaused=\(ttsPaused)")
+        }
+        
         if isPlaying {
             if isPaused {
                 TTSService.shared.resume()
