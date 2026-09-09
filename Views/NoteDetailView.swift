@@ -17,9 +17,8 @@ struct NoteDetailView: View {
     @State private var showMoveFolder = false
     @State private var isSyncingNote = false  // 正在同步单个笔记
     @State private var selectedFolderId: UUID?
-    @State private var knowledgePoints: [KnowledgePoint] = []  // 已提取的知识点
+    @StateObject private var knowledgeStore = KnowledgePointsStore()  // 知识点状态（使用 ObservableObject 解决异步更新问题）
     @State private var selectedKnowledgePoint: KnowledgePoint? = nil  // 选中的知识点（用于弹出详解）
-    @State private var isExtractingKnowledge = false  // 正在提取知识点
     @State private var lectureItem: LectureItem? = nil  // 讲稿阅读页面数据（使用 item 方式确保数据正确传递）
     
     var body: some View {
@@ -31,7 +30,7 @@ struct NoteDetailView: View {
                         sectionHeader("完整内容")
                         MarkdownView(
                             markdown: note.markdownContent,
-                            knowledgePoints: knowledgePoints,
+                            knowledgePoints: knowledgeStore.points,
                             onKnowledgeTap: { point in
                                 selectedKnowledgePoint = point
                             }
@@ -171,14 +170,14 @@ struct NoteDetailView: View {
                 Text("知识点精讲")
                     .textStyle(.sectionTitle)
                 Spacer()
-                if !knowledgePoints.isEmpty {
-                    Text("\(knowledgePoints.count) 个知识点")
+                if !knowledgeStore.points.isEmpty {
+                    Text("\(knowledgeStore.points.count) 个知识点")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
             }
             
-            if isExtractingKnowledge {
+            if knowledgeStore.isExtracting {
                 HStack(spacing: 12) {
                     ProgressView()
                         .scaleEffect(0.9)
@@ -186,8 +185,8 @@ struct NoteDetailView: View {
                         Text("正在提取知识点...")
                             .font(.subheadline)
                             .foregroundColor(.purple)
-                        if !knowledgePoints.isEmpty {
-                            Text("已提取 \(knowledgePoints.count) 个")
+                        if !knowledgeStore.points.isEmpty {
+                            Text("已提取 \(knowledgeStore.points.count) 个")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -197,7 +196,7 @@ struct NoteDetailView: View {
                 .padding()
                 .background(Color.purple.opacity(0.08))
                 .cornerRadius(10)
-            } else if knowledgePoints.isEmpty {
+            } else if knowledgeStore.points.isEmpty {
                 Button {
                     extractKnowledgePoints()
                 } label: {
@@ -224,7 +223,7 @@ struct NoteDetailView: View {
                 }
             } else {
                 VStack(alignment: .leading, spacing: 8) {
-                    FlexibleView(data: knowledgePoints, spacing: 8) { point in
+                    FlexibleView(data: knowledgeStore.points, spacing: 8) { point in
                         Button {
                             selectedKnowledgePoint = point
                         } label: {
@@ -341,8 +340,9 @@ struct NoteDetailView: View {
     
     private func loadCachedKnowledgePoints() {
         guard let note = note else { return }
+        knowledgeStore.reset()
         if let cached = KnowledgeService.shared.loadExtraction(for: note) {
-            knowledgePoints = cached
+            knowledgeStore.setPoints(cached)
         }
     }
     
@@ -352,22 +352,28 @@ struct NoteDetailView: View {
         
         // 先检查缓存
         if let cached = KnowledgeService.shared.loadExtraction(for: note) {
-            knowledgePoints = cached
+            knowledgeStore.setPoints(cached)
             return
         }
         
-        isExtractingKnowledge = true
+        knowledgeStore.reset()
+        knowledgeStore.isExtracting = true
         
         KnowledgeService.shared.extractKeywords(
             note: note,
             config: appState.bailianConfig,
             onPoint: { point in
                 // 实时标记：每识别到一个知识点就添加到列表
-                knowledgePoints.append(point)
+                // 使用 ObservableObject 的 @Published 属性，确保异步闭包中修改能触发 UI 更新
+                DispatchQueue.main.async {
+                    knowledgeStore.addPoint(point)
+                }
             },
             completion: { points in
-                isExtractingKnowledge = false
-                knowledgePoints = points
+                DispatchQueue.main.async {
+                    knowledgeStore.isExtracting = false
+                    knowledgeStore.setPoints(points)
+                }
             }
         )
     }

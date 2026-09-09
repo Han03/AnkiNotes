@@ -27,7 +27,7 @@ struct ReviewSessionView: View {
     @State private var showReviewQuiz = false  // 是否显示测评界面
     
     // 知识点
-    @State private var knowledgePoints: [KnowledgePoint] = []  // 当前笔记的知识点
+    @StateObject private var knowledgeStore = KnowledgePointsStore()  // 知识点状态（使用 ObservableObject 解决异步更新问题）
     @State private var selectedKnowledgePoint: KnowledgePoint? = nil  // 选中的知识点
     @State private var lectureItem: LectureItem? = nil  // 讲稿阅读页面数据（使用 item 方式确保数据正确传递）
     
@@ -135,7 +135,7 @@ struct ReviewSessionView: View {
                     // 完整笔记内容（带知识点标记）
                     MarkdownView(
                         markdown: note.markdownContent,
-                        knowledgePoints: knowledgePoints,
+                        knowledgePoints: knowledgeStore.points,
                         onKnowledgeTap: { point in
                             selectedKnowledgePoint = point
                         }
@@ -313,29 +313,35 @@ struct ReviewSessionView: View {
         guard currentIndex < queue.count else { return }
         let note = queue[currentIndex]
         
+        knowledgeStore.reset()
+        
         // 先检查缓存（即使大模型未配置，也能加载已有的缓存）
         if let cached = KnowledgeService.shared.loadExtraction(for: note) {
-            knowledgePoints = cached
+            knowledgeStore.setPoints(cached)
             return
         }
         
         // 大模型未配置时，不提取知识点
         guard appState.bailianConfig.isConfigured else {
-            knowledgePoints = []
             return
         }
         
-        knowledgePoints = []
+        knowledgeStore.isExtracting = true
         
         KnowledgeService.shared.extractKeywords(
             note: note,
             config: appState.bailianConfig,
             onPoint: { point in
-                // 实时标记
-                knowledgePoints.append(point)
+                // 实时标记：使用 ObservableObject 确保异步闭包中修改能触发 UI 更新
+                DispatchQueue.main.async {
+                    knowledgeStore.addPoint(point)
+                }
             },
             completion: { points in
-                knowledgePoints = points
+                DispatchQueue.main.async {
+                    knowledgeStore.isExtracting = false
+                    knowledgeStore.setPoints(points)
+                }
             }
         )
     }

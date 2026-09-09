@@ -7,6 +7,27 @@
 
 import Foundation
 
+/// 知识点状态存储（用于 View 中实时更新，解决异步闭包中修改 @State 不生效的问题）
+final class KnowledgePointsStore: ObservableObject {
+    @Published var points: [KnowledgePoint] = []
+    @Published var isExtracting = false
+    
+    func addPoint(_ point: KnowledgePoint) {
+        // 去重：避免重复添加相同关键字
+        guard !points.contains(where: { $0.keyword == point.keyword }) else { return }
+        points.append(point)
+    }
+    
+    func setPoints(_ newPoints: [KnowledgePoint]) {
+        points = newPoints
+    }
+    
+    func reset() {
+        points = []
+        isExtracting = false
+    }
+}
+
 /// 知识点服务：提取知识点关键字、生成详解、缓存管理
 final class KnowledgeService: ObservableObject {
     static let shared = KnowledgeService()
