@@ -65,6 +65,8 @@ struct MainTabView: View {
             }
             .tag(3)
         }
+        // 主菜单选中颜色统一为橙色，与全局主题保持一致
+        .tint(.brandPrimary)
         // 最顶层同步模态框（在所有菜单之上）
         .overlay {
             if appState.isSyncing || appState.isSilentSyncing {
