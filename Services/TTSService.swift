@@ -208,7 +208,8 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
     
     private var sentences: [String] = []
     private var config: TTSConfig
-    private var actualProvider: TTSProvider = .edgeTTS  // 实际使用的 TTS 方案（可能因降级而与 config.provider 不同）
+    private var actualProvider: TTSProvider = .edgeTTS  // 实际使用的 TTS 方案
+    private var hasDegradedToiOSNative = false  // 降级持久化标志：本次播放会话是否已降级
     private var onSentenceComplete: ((Int) -> Void)?
     private var onComplete: (() -> Void)?
     private var hasReceivedAudio = false  // 跟踪是否已接收到音频数据
@@ -259,6 +260,9 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
         self.currentSentenceIndex = 0
         self.onSentenceComplete = onSentenceComplete
         self.onComplete = onComplete
+        self.hasDegradedToiOSNative = false  // 重置降级标志
+        
+        SyncLogger.shared.info("🔊 speak: 开始播放，共\(sentences.count)句，provider=\(config.provider.displayName)")
         
         guard !sentences.isEmpty else {
             onComplete?()
@@ -279,7 +283,17 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
         let sentence = sentences[currentSentenceIndex]
         currentText = sentence
         
-        switch config.provider {
+        SyncLogger.shared.info("🔊 speakCurrentSentence: index=\(currentSentenceIndex)/\(sentences.count), hasDegraded=\(hasDegradedToiOSNative)")
+        
+        // 根据 provider 和降级标志选择 TTS 方案
+        let useProvider: TTSProvider
+        if hasDegradedToiOSNative {
+            useProvider = .iOSNative
+        } else {
+            useProvider = config.provider
+        }
+        
+        switch useProvider {
         case .edgeTTS:
             speakEdgeTTS(sentence)
         case .iOSNative:
@@ -399,11 +413,12 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
     
     // MARK: - Edge-TTS (WebSocket)
     
-    /// 降级到 iOS 原生 TTS
+    /// 降级到 iOS 原生 TTS（设置持久化标志，本次播放会话不再尝试 Edge-TTS）
     private func fallbackToiOSNative(text: String) {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
-            SyncLogger.shared.info("🔊 Edge-TTS: 降级到 iOS 原生 TTS")
+            SyncLogger.shared.info("🔊 Edge-TTS: 降级到 iOS 原生 TTS（本次会话保持降级状态）")
+            self.hasDegradedToiOSNative = true  // 设置降级标志
             self.actualProvider = .iOSNative
             self.speakiOSNative(text)
         }
