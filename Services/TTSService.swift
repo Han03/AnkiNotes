@@ -295,13 +295,12 @@ final class EdgeTTSStreamingPlayer {
 // MARK: - AudioFileStream 回调函数
 
 private func audioFileStreamPropertyListenerProc(
-    _ inClientData: UnsafeMutableRawPointer?,
+    _ inClientData: UnsafeMutableRawPointer,
     _ inAudioFileStream: AudioFileStreamID,
     _ inPropertyID: AudioFileStreamPropertyID,
-    _ ioFlags: UnsafeMutablePointer<AudioFileStreamPropertyFlags>?
+    _ ioFlags: UnsafeMutablePointer<AudioFileStreamPropertyFlags>
 ) {
-    guard let clientData = inClientData else { return }
-    let player = Unmanaged<EdgeTTSStreamingPlayer>.fromOpaque(clientData).takeUnretainedValue()
+    let player = Unmanaged<EdgeTTSStreamingPlayer>.fromOpaque(inClientData).takeUnretainedValue()
     
     if inPropertyID == kAudioFileStreamProperty_DataFormat {
         var format = AudioStreamBasicDescription()
@@ -315,15 +314,14 @@ private func audioFileStreamPropertyListenerProc(
 }
 
 private func audioFileStreamPacketsProc(
-    _ inClientData: UnsafeMutableRawPointer?,
+    _ inClientData: UnsafeMutableRawPointer,
     _ inNumberBytes: UInt32,
     _ inNumberPackets: UInt32,
     _ inInputData: UnsafeRawPointer,
     _ inPacketDescriptions: UnsafeMutablePointer<AudioStreamPacketDescription>?
 ) {
-    guard let clientData = inClientData,
-          let packetDescriptions = inPacketDescriptions else { return }
-    let player = Unmanaged<EdgeTTSStreamingPlayer>.fromOpaque(clientData).takeUnretainedValue()
+    guard let packetDescriptions = inPacketDescriptions else { return }
+    let player = Unmanaged<EdgeTTSStreamingPlayer>.fromOpaque(inClientData).takeUnretainedValue()
     
     player.handleAudioPackets(
         numberBytes: inNumberBytes,
