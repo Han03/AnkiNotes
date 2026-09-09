@@ -7,6 +7,34 @@
 
 import Foundation
 
+/// 知识点详解状态存储（用于流式打字机效果，解决异步闭包中修改 @State 不生效的问题）
+final class KnowledgeExplanationStore: ObservableObject {
+    @Published var displayedText = ""
+    @Published var fullText = ""
+    @Published var isLoading = true
+    
+    func appendChunk(_ chunk: String) {
+        displayedText += chunk
+    }
+    
+    func complete(with text: String) {
+        fullText = text
+        isLoading = false
+    }
+    
+    func setCached(_ text: String) {
+        displayedText = text
+        fullText = text
+        isLoading = false
+    }
+    
+    func reset() {
+        displayedText = ""
+        fullText = ""
+        isLoading = true
+    }
+}
+
 /// 知识点状态存储（用于 View 中实时更新，解决异步闭包中修改 @State 不生效的问题）
 final class KnowledgePointsStore: ObservableObject {
     @Published var points: [KnowledgePoint] = []

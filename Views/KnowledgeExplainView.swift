@@ -15,9 +15,7 @@ struct KnowledgeExplainView: View {
     let config: BailianConfig
     let knowledgeService = KnowledgeService.shared
     
-    @State private var displayedText = ""
-    @State private var isLoading = true
-    @State private var fullText = ""
+    @StateObject private var explanationStore = KnowledgeExplanationStore()
     @Environment(\.dismiss) private var dismiss
     
     var body: some View {
@@ -37,7 +35,7 @@ struct KnowledgeExplainView: View {
                     .cornerRadius(12)
                     
                     // 详解内容
-                    if isLoading && displayedText.isEmpty {
+                    if explanationStore.isLoading && explanationStore.displayedText.isEmpty {
                         HStack {
                             ProgressView()
                             Text("正在生成详解...")
@@ -46,13 +44,13 @@ struct KnowledgeExplainView: View {
                         .padding(.vertical, 40)
                         .frame(maxWidth: .infinity)
                     } else {
-                        Text(displayedText)
+                        Text(explanationStore.displayedText)
                             .font(.body)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .fixedSize(horizontal: false, vertical: true)
                         
                         // 打字机光标
-                        if isLoading {
+                        if explanationStore.isLoading {
                             HStack(spacing: 2) {
                                 Rectangle()
                                     .fill(Color.blue)
@@ -66,7 +64,7 @@ struct KnowledgeExplainView: View {
                     }
                     
                     // 来源提示
-                    if !isLoading && !displayedText.isEmpty {
+                    if !explanationStore.isLoading && !explanationStore.displayedText.isEmpty {
                         HStack {
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundColor(.green)
@@ -96,14 +94,11 @@ struct KnowledgeExplainView: View {
     private func loadExplanation() {
         // 检查是否有缓存
         if let cached = knowledgeService.loadExplanation(for: point, note: note) {
-            displayedText = cached
-            fullText = cached
-            isLoading = false
+            explanationStore.setCached(cached)
             return
         }
         
-        isLoading = true
-        displayedText = ""
+        explanationStore.reset()
         
         knowledgeService.explainKeyword(
             point: point,
@@ -111,11 +106,15 @@ struct KnowledgeExplainView: View {
             noteContent: noteContent,
             config: config,
             onChunk: { chunk in
-                displayedText += chunk
+                // 流式打字机效果：使用 ObservableObject 确保异步闭包中修改能触发 UI 更新
+                DispatchQueue.main.async {
+                    explanationStore.appendChunk(chunk)
+                }
             },
             completion: { finalText in
-                fullText = finalText
-                isLoading = false
+                DispatchQueue.main.async {
+                    explanationStore.complete(with: finalText)
+                }
             }
         )
     }
