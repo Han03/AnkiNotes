@@ -172,30 +172,30 @@ struct NoteDetailView: View {
                 Spacer()
                 if !knowledgeStore.points.isEmpty {
                     Text("\(knowledgeStore.points.count) 个知识点")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                        .font(.appCaption)
+                        .foregroundColor(.textSecondary)
                 }
             }
             
             if knowledgeStore.isExtracting {
-                HStack(spacing: 12) {
+                HStack(spacing: AppSpacing.md) {
                     ProgressView()
                         .scaleEffect(0.9)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("正在提取知识点...")
-                            .font(.subheadline)
-                            .foregroundColor(.orange)
+                            .font(.appBody)
+                            .foregroundColor(.brandPrimary)
                         if !knowledgeStore.points.isEmpty {
                             Text("已提取 \(knowledgeStore.points.count) 个")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
+                                .font(.appCaption)
+                                .foregroundColor(.textSecondary)
                         }
                     }
                     Spacer()
                 }
                 .padding()
-                .background(Color.orange.opacity(0.08))
-                .cornerRadius(10)
+                .background(Color.brandPrimaryLight)
+                .cornerRadius(AppCornerRadius.standard)
             } else if knowledgeStore.points.isEmpty {
                 Button {
                     extractKnowledgePoints()
@@ -203,37 +203,37 @@ struct NoteDetailView: View {
                     HStack {
                         Image(systemName: "wand.and.stars")
                         Text("提取知识点")
-                            .font(.subheadline.bold())
+                            .font(.appBody.bold())
                         Spacer()
                         Image(systemName: "chevron.right")
-                            .foregroundColor(.secondary)
+                            .foregroundColor(.textSecondary)
                     }
                     .padding()
-                    .background(Color.orange.opacity(0.1))
-                    .foregroundColor(.orange)
-                    .cornerRadius(10)
+                    .background(Color.brandPrimaryLight)
+                    .foregroundColor(.brandPrimary)
+                    .cornerRadius(AppCornerRadius.standard)
                 }
                 .buttonStyle(.plain)
                 .disabled(!appState.bailianConfig.isConfigured)
                 
                 if !appState.bailianConfig.isConfigured {
                     Text("请先在设置中配置百炼大模型")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                        .font(.appCaption)
+                        .foregroundColor(.textSecondary)
                 }
             } else {
-                VStack(alignment: .leading, spacing: 8) {
-                    FlexibleView(data: knowledgeStore.points, spacing: 8) { point in
+                VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                    FlexibleView(data: knowledgeStore.points, spacing: AppSpacing.sm) { point in
                         Button {
                             selectedKnowledgePoint = point
                         } label: {
                             Text(point.keyword)
-                                .font(.caption)
+                                .font(.appCaption)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 5)
-                                .background(Color.orange.opacity(0.12))
-                                .foregroundColor(.orange)
-                                .cornerRadius(8)
+                                .background(Color.brandPrimaryMedium)
+                                .foregroundColor(.brandPrimary)
+                                .cornerRadius(AppCornerRadius.md)
                         }
                         .buttonStyle(.plain)
                     }
@@ -241,18 +241,18 @@ struct NoteDetailView: View {
                     Button {
                         extractKnowledgePoints()
                     } label: {
-                        HStack(spacing: 4) {
+                        HStack(spacing: AppSpacing.xs) {
                             Image(systemName: "arrow.clockwise")
                             Text("重新提取")
-                                .font(.caption)
+                                .font(.appCaption)
                         }
-                        .foregroundColor(.secondary)
+                        .foregroundColor(.textSecondary)
                     }
                     .buttonStyle(.plain)
                 }
             }
         }
-        .padding(.top, 4)
+        .padding(.top, AppSpacing.xs)
     }
     
     // MARK: - 分区
@@ -288,7 +288,7 @@ struct NoteDetailView: View {
         let logs = appState.storage.getReviewLogs(for: note.id)
         if logs.isEmpty {
             Text("（尚无复习记录）")
-                .foregroundColor(.secondary)
+                .foregroundColor(.textSecondary)
                 .textStyle(.secondaryText)
         } else {
             VStack(spacing: 0) {
@@ -302,18 +302,18 @@ struct NoteDetailView: View {
                         Spacer()
                         Text("\(log.oldInterval)d → \(log.newInterval)d")
                             .textStyle(.tertiaryText)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(.textSecondary)
                         Text(log.reviewDate.formatted(date: .abbreviated, time: .shortened))
                             .textStyle(.tertiaryText)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(.textSecondary)
                             .frame(width: 110, alignment: .trailing)
                     }
-                    .padding(.vertical, 8)
-                    .padding(.horizontal, 12)
+                    .padding(.vertical, AppSpacing.sm)
+                    .padding(.horizontal, AppSpacing.md)
                     if idx < min(logs.count, 10) - 1 { Divider().padding(.leading, 30) }
                 }
             }
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color(.systemBackground)))
+            .background(RoundedRectangle(cornerRadius: AppCornerRadius.standard).fill(Color.bgCard))
         }
     }
     
