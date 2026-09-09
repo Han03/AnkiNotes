@@ -10,6 +10,7 @@
 		ANAppSwift /* AnkiNotesApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANAppSwiftRef /* AnkiNotesApp.swift */; };
 		ANSharedView /* SharedViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANSharedViewRef /* SharedViews.swift */; };
 		ANFolder /* Folder.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANFolderRef /* Folder.swift */; };
+		ANDS /* DesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANDSRef /* DesignSystem.swift */; };
 		ANSRS /* SRSData.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANSRSRef /* SRSData.swift */; };
 		ANNote /* Note.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANNoteRef /* Note.swift */; };
 		ANLog /* ReviewLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANLogRef /* ReviewLog.swift */; };
@@ -48,6 +49,7 @@
 /* Begin PBXFileReference section */
 		ANAppSwiftRef /* AnkiNotesApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnkiNotesApp.swift; sourceTree = "<group>"; };
 		ANFolderRef /* Folder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Folder.swift; sourceTree = "<group>"; };
+		ANDSRef /* DesignSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignSystem.swift; sourceTree = "<group>"; };
 		ANSRSRef /* SRSData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SRSData.swift; sourceTree = "<group>"; };
 		ANNoteRef /* Note.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Note.swift; sourceTree = "<group>"; };
 		ANLogRef /* ReviewLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewLog.swift; sourceTree = "<group>"; };
@@ -114,6 +116,7 @@
 			isa = PBXGroup;
 			children = (
 				ANFolderRef /* Folder.swift */,
+				ANDSRef /* DesignSystem.swift */,
 				ANSRSRef /* SRSData.swift */,
 				ANNoteRef /* Note.swift */,
 				ANLogRef /* ReviewLog.swift */,
@@ -255,6 +258,7 @@
 				ANAppSwift /* AnkiNotesApp.swift in Sources */,
 				ANSharedView /* SharedViews.swift in Sources */,
 				ANFolder /* Folder.swift in Sources */,
+				ANDS /* DesignSystem.swift in Sources */,
 				ANSRS /* SRSData.swift in Sources */,
 				ANNote /* Note.swift in Sources */,
 				ANLog /* ReviewLog.swift in Sources */,

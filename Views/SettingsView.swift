@@ -152,7 +152,7 @@ struct SettingsView: View {
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
-                    .background(RoundedRectangle(cornerRadius: 12).fill(Color.orange.opacity(0.14)))
+                    .background(RoundedRectangle(cornerRadius: 12).fill(Color.orange.opacity(0.15)))
                     .foregroundStyle(.orange)
                 }
                 .buttonStyle(.plain)
