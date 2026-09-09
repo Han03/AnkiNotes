@@ -8,7 +8,6 @@
 import Foundation
 import AVFoundation
 import CryptoKit
-import AudioToolbox
 
 // MARK: - Edge-TTS WebSocket 连接处理器
 
@@ -115,40 +114,55 @@ private func parseEdgeTTSBinaryMessage(_ data: Data) -> Data? {
 
 // MARK: - Edge-TTS 流式音频播放器
 
-/// 流式音频播放器：边接收边播放，避免等待完整音频导致超时
+/// 流式音频播放器：接收原始 PCM 数据并流式播放（无需 AudioFileStream 解码）
 final class EdgeTTSStreamingPlayer {
     private let engine = AVAudioEngine()
     private let playerNode = AVAudioPlayerNode()
-    private var audioFormat: AVAudioFormat?
-    private var streamParser: AudioFileStreamID?
+    private let audioFormat: AVAudioFormat
     private var scheduledBuffers: [AVAudioPCMBuffer] = []
-    private var isWaitingForBuffers = false
     private var hasReceivedAudio = false
     private var didFinishReceiving = false
     
     var onFinished: (() -> Void)?
     
     init() {
+        // 24kHz, 16-bit, mono PCM（匹配 Edge-TTS raw-24khz-16bit-mono-pcm 格式）
+        audioFormat = AVAudioFormat(
+            commonFormat: .pcmFormatInt16,
+            sampleRate: 24000,
+            channels: 1,
+            interleaved: true
+        )!
+        
         engine.attach(playerNode)
-        setupAudioFileStream()
+        engine.connect(playerNode, to: engine.mainMixerNode, format: audioFormat)
+        SyncLogger.shared.info("🔊 Edge-TTS: 流式播放器初始化完成（24kHz/16bit/mono PCM）")
     }
     
     deinit {
         stop()
     }
     
-    /// 接收音频数据块，立即解码并调度播放
+    /// 接收原始 PCM 数据，转换为缓冲区并调度播放
     func feedAudioData(_ data: Data) {
-        guard let parser = streamParser else { return }
         hasReceivedAudio = true
         
-        data.withUnsafeBytes { bufferPointer in
-            guard let baseAddress = bufferPointer.baseAddress else { return }
-            let status = AudioFileStreamParseBytes(parser, UInt32(data.count), baseAddress, [])
-            if status != noErr {
-                SyncLogger.shared.info("🔊 Edge-TTS: AudioFileStream 解析失败，状态码=\(status)")
+        let bytesPerFrame = Int(audioFormat.streamDescription.pointee.mBytesPerFrame)
+        guard bytesPerFrame > 0 else { return }
+        let frameCount = AVAudioFrameCount(data.count / bytesPerFrame)
+        guard frameCount > 0 else { return }
+        
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: audioFormat, frameCapacity: frameCount) else { return }
+        buffer.frameLength = frameCount
+        
+        // 复制 PCM 数据到缓冲区
+        data.withUnsafeBytes { srcPtr in
+            if let src = srcPtr.baseAddress, let dst = buffer.audioBufferList.pointee.mBuffers.mData {
+                memcpy(dst, src, data.count)
             }
         }
+        
+        scheduleBuffer(buffer)
     }
     
     /// 标记音频数据接收完毕
@@ -158,12 +172,20 @@ final class EdgeTTSStreamingPlayer {
             onFinished?()
             return
         }
-        
-        if !isWaitingForBuffers && scheduledBuffers.isEmpty {
-            // 没有待播放的缓冲区，立即结束
+        if scheduledBuffers.isEmpty {
             onFinished?()
         }
         // 否则等待最后一个缓冲区的完成回调触发 onFinished
+    }
+    
+    /// 暂停播放
+    func pause() {
+        playerNode.pause()
+    }
+    
+    /// 恢复播放
+    func resume() {
+        playerNode.play()
     }
     
     /// 停止播放并清理资源
@@ -172,12 +194,7 @@ final class EdgeTTSStreamingPlayer {
             playerNode.stop()
             engine.stop()
         }
-        if let parser = streamParser {
-            AudioFileStreamClose(parser)
-            streamParser = nil
-        }
         scheduledBuffers.removeAll()
-        isWaitingForBuffers = false
         hasReceivedAudio = false
         didFinishReceiving = false
     }
@@ -189,45 +206,23 @@ final class EdgeTTSStreamingPlayer {
     
     // MARK: - 私有方法
     
-    private func setupAudioFileStream() {
-        var parser: AudioFileStreamID?
-        let selfPtr = Unmanaged.passUnretained(self).toOpaque()
-        
-        let status = AudioFileStreamOpen(
-            selfPtr,
-            audioFileStreamPropertyListenerProc,
-            audioFileStreamPacketsProc,
-            kAudioFileMP3Type,
-            &parser
-        )
-        
-        if status == noErr, let parser = parser {
-            streamParser = parser
-            SyncLogger.shared.info("🔊 Edge-TTS: AudioFileStream 初始化成功")
-        } else {
-            SyncLogger.shared.info("🔊 Edge-TTS: AudioFileStream 初始化失败，状态码=\(status)")
-        }
-    }
-    
     private func startEngine() {
         guard !engine.isRunning else { return }
         do {
             try engine.start()
             playerNode.play()
+            SyncLogger.shared.info("🔊 Edge-TTS: 音频引擎启动成功")
         } catch {
             SyncLogger.shared.info("🔊 Edge-TTS: 音频引擎启动失败 - \(error.localizedDescription)")
         }
     }
     
     private func scheduleBuffer(_ buffer: AVAudioPCMBuffer) {
-        guard audioFormat != nil else { return }
-        
         if !engine.isRunning {
             startEngine()
         }
         
         scheduledBuffers.append(buffer)
-        isWaitingForBuffers = true
         
         playerNode.scheduleBuffer(buffer, at: nil, options: []) { [weak self] in
             DispatchQueue.main.async {
@@ -235,100 +230,11 @@ final class EdgeTTSStreamingPlayer {
                 self.scheduledBuffers.removeFirst()
                 
                 if self.scheduledBuffers.isEmpty && self.didFinishReceiving {
-                    self.isWaitingForBuffers = false
                     self.onFinished?()
                 }
             }
         }
     }
-    
-    /// 设置音频格式（由 AudioFileStream 回调触发）
-    func setAudioFormat(_ format: AudioStreamBasicDescription) {
-        var mutableFormat = format
-        let audioFormat = withUnsafePointer(to: &mutableFormat) { formatPtr -> AVAudioFormat? in
-            return AVAudioFormat(streamDescription: formatPtr)
-        }
-        
-        guard let audioFormat = audioFormat else {
-            SyncLogger.shared.info("🔊 Edge-TTS: 无法创建音频格式")
-            return
-        }
-        
-        self.audioFormat = audioFormat
-        engine.connect(playerNode, to: engine.mainMixerNode, format: audioFormat)
-        SyncLogger.shared.info("🔊 Edge-TTS: 音频格式已设置 - 采样率=\(format.mSampleRate), 通道数=\(format.mChannelsPerFrame)")
-    }
-    
-    /// 处理解码后的音频数据包（由 AudioFileStream 回调触发）
-    func handleAudioPackets(
-        numberBytes: UInt32,
-        numberPackets: UInt32,
-        inputData: UnsafeRawPointer,
-        packetDescriptions: UnsafeMutablePointer<AudioStreamPacketDescription>
-    ) {
-        guard let format = audioFormat else { return }
-        
-        for i in 0..<Int(numberPackets) {
-            let packetDesc = packetDescriptions[i]
-            let startOffset = Int(packetDesc.mStartOffset)
-            let packetSize = Int(packetDesc.mDataByteSize)
-            
-            guard packetSize > 0 else { continue }
-            
-            // 创建 PCM 缓冲区
-            let frameCount = AVAudioFrameCount(packetDesc.mVariableFramesInPacket != 0 ? packetDesc.mVariableFramesInPacket : 1)
-            guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else { continue }
-            buffer.frameLength = frameCount
-            
-            // 从输入数据中复制音频数据
-            let audioData = buffer.audioBufferList.pointee.mBuffers
-            let srcPtr = inputData.advanced(by: startOffset)
-            if let dstPtr = audioData.mData {
-                memcpy(dstPtr, srcPtr, packetSize)
-            }
-            
-            scheduleBuffer(buffer)
-        }
-    }
-}
-
-// MARK: - AudioFileStream 回调函数
-
-private func audioFileStreamPropertyListenerProc(
-    _ inClientData: UnsafeMutableRawPointer,
-    _ inAudioFileStream: AudioFileStreamID,
-    _ inPropertyID: AudioFileStreamPropertyID,
-    _ ioFlags: UnsafeMutablePointer<AudioFileStreamPropertyFlags>
-) {
-    let player = Unmanaged<EdgeTTSStreamingPlayer>.fromOpaque(inClientData).takeUnretainedValue()
-    
-    if inPropertyID == kAudioFileStreamProperty_DataFormat {
-        var format = AudioStreamBasicDescription()
-        var size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
-        let status = AudioFileStreamGetProperty(inAudioFileStream, kAudioFileStreamProperty_DataFormat, &size, &format)
-        
-        if status == noErr {
-            player.setAudioFormat(format)
-        }
-    }
-}
-
-private func audioFileStreamPacketsProc(
-    _ inClientData: UnsafeMutableRawPointer,
-    _ inNumberBytes: UInt32,
-    _ inNumberPackets: UInt32,
-    _ inInputData: UnsafeRawPointer,
-    _ inPacketDescriptions: UnsafeMutablePointer<AudioStreamPacketDescription>?
-) {
-    guard let packetDescriptions = inPacketDescriptions else { return }
-    let player = Unmanaged<EdgeTTSStreamingPlayer>.fromOpaque(inClientData).takeUnretainedValue()
-    
-    player.handleAudioPackets(
-        numberBytes: inNumberBytes,
-        numberPackets: inNumberPackets,
-        inputData: inInputData,
-        packetDescriptions: packetDescriptions
-    )
 }
 
 // MARK: - TTS 配置
@@ -403,7 +309,6 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
     static let shared = TTSService()
     
     private let synthesizer = AVSpeechSynthesizer()
-    private var audioPlayer: AVAudioPlayer?
     private var downloadTask: URLSessionDataTask?
     
     // Edge-TTS WebSocket 相关
@@ -513,7 +418,7 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
         SyncLogger.shared.info("🔊 TTSService.pause: actualProvider=\(actualProvider.displayName)")
         switch actualProvider {
         case .edgeTTS:
-            audioPlayer?.pause()
+            edgeTTSPlayer?.pause()
         case .iOSNative:
             synthesizer.pauseSpeaking(at: .immediate)  // 使用 .immediate 立即暂停，而不是 .word
         }
@@ -525,7 +430,7 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
         SyncLogger.shared.info("🔊 TTSService.resume: actualProvider=\(actualProvider.displayName)")
         switch actualProvider {
         case .edgeTTS:
-            audioPlayer?.play()
+            edgeTTSPlayer?.resume()
         case .iOSNative:
             synthesizer.continueSpeaking()
         }
@@ -545,8 +450,6 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
             edgeTTSWebSocketTask = nil
             edgeTTSPlayer?.stop()
             edgeTTSPlayer = EdgeTTSStreamingPlayer()
-            audioPlayer?.stop()
-            audioPlayer = nil
         case .iOSNative:
             synthesizer.stopSpeaking(at: .immediate)
         }
@@ -578,8 +481,6 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
             edgeTTSWebSocketTask = nil
             edgeTTSPlayer?.stop()
             edgeTTSPlayer = EdgeTTSStreamingPlayer()
-            audioPlayer?.stop()
-            audioPlayer = nil
         case .iOSNative:
             synthesizer.stopSpeaking(at: .immediate)
         }
@@ -641,6 +542,11 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
         edgeTTSWebSocketTask = nil
         edgeTTSPlayer?.stop()
         edgeTTSPlayer = EdgeTTSStreamingPlayer()
+        edgeTTSPlayer?.onFinished = { [weak self] in
+            guard let self = self else { return }
+            SyncLogger.shared.info("🔊 Edge-TTS: 流式播放完成")
+            self.sentenceFinished()
+        }
         hasReceivedAudio = false
         inactivityTimerWorkItem?.cancel()
         inactivityTimerWorkItem = nil
@@ -766,7 +672,7 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
         // os 信息必须与 User-Agent 一致（Windows/Edge）
         // 注意：JSON 后面必须有 \r\n，与 Python edge-tts 库完全一致
         let configJSON = """
-        {"context":{"synthesis":{"audio":{"metadataoptions":{"sentenceBoundaryEnabled":"true","wordBoundaryEnabled":"false"},"outputFormat":"audio-24khz-48kbitrate-mono-mp3"}}}}
+        {"context":{"synthesis":{"audio":{"metadataoptions":{"sentenceBoundaryEnabled":"true","wordBoundaryEnabled":"false"},"outputFormat":"raw-24khz-16bit-mono-pcm"}}}}
         """
         return "X-Timestamp:\(timestamp)\r\nContent-Type:application/json; charset=utf-8\r\nPath:speech.config\r\n\r\n\(configJSON)\r\n"
     }
@@ -838,9 +744,6 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
                         self.resetInactivityTimer(task: task, originalText: originalText)
                         // 流式播放：立即喂给播放器
                         self.edgeTTSPlayer?.feedAudioData(audioData)
-                        if self.edgeTTSPlayer?.hasAudio() == true {
-                            SyncLogger.shared.info("🔊 Edge-TTS: 已接收并播放音频数据（消息大小=\(data.count)，音频部分=\(audioData.count)）")
-                        }
                     }
                 }
                 
@@ -886,43 +789,9 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
         """
     }
     
-    private func playAudio(data: Data) {
-        do {
-            // 设置 AVAudioSession，确保音频可以正常播放
-            let audioSession = AVAudioSession.sharedInstance()
-            try audioSession.setCategory(.playback, mode: .spokenAudio, options: [])
-            try audioSession.setActive(true)
-            
-            SyncLogger.shared.info("🔊 Edge-TTS: 准备播放音频，数据大小=\(data.count)字节，前4字节=\(data.prefix(4).map { String(format: "%02X", $0) }.joined())")
-            
-            audioPlayer = try AVAudioPlayer(data: data)
-            audioPlayer?.delegate = self
-            audioPlayer?.prepareToPlay()
-            let started = audioPlayer?.play() ?? false
-            SyncLogger.shared.info("🔊 Edge-TTS: 音频播放开始，结果=\(started)，时长=\(audioPlayer?.duration ?? 0)秒")
-        } catch {
-            // 播放失败，降级到 iOS 原生
-            SyncLogger.shared.info("🔊 TTSService: Edge-TTS 播放失败，错误=\(error.localizedDescription)，降级到 iOS 原生")
-            actualProvider = .iOSNative
-            let sentence = currentText.isEmpty ? (currentSentenceIndex < sentences.count ? sentences[currentSentenceIndex] : "") : currentText
-            if !sentence.isEmpty {
-                speakiOSNative(sentence)
-            }
-        }
-    }
-    
     // MARK: - AVSpeechSynthesizerDelegate
     
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
-        guard isSpeaking, !isPaused else { return }
-        sentenceFinished()
-    }
-}
-
-// MARK: - AVAudioPlayerDelegate
-
-extension TTSService: AVAudioPlayerDelegate {
-    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
         guard isSpeaking, !isPaused else { return }
         sentenceFinished()
     }
