@@ -23,6 +23,7 @@ struct LectureReaderView: View {
     @State private var totalSentences = 0
     @State private var currentSentence = ""
     @State private var showSpeedMenu = false
+    @State private var jumpStartIndex = 0  // 跳转播放时的起始索引（用于转换TTSService的索引体系）
     
     // 分句后的文本
     private var sentences: [String] {
@@ -170,11 +171,14 @@ struct LectureReaderView: View {
             .onReceive(TTSService.shared.$currentSentenceIndex) { newIndex in
                 // 只在 TTSService 正在播放时同步索引，避免 stop 后重置为 0 时影响显示
                 guard TTSService.shared.isSpeaking else { return }
-                guard newIndex < sentences.count else { return }
-                if newIndex != currentSentenceIndex {
-                    currentSentenceIndex = newIndex
-                    currentSentence = sentences[newIndex]
-                    SyncLogger.shared.info("📖 同步句子索引: \(newIndex), sentence=\(currentSentence.prefix(20))")
+                // 【修复】转换索引体系：TTSService的索引 + jumpStartIndex = 原文本的索引
+                // 正常播放时 jumpStartIndex=0，跳转播放时 jumpStartIndex=跳转的起始句索引
+                let actualIndex = jumpStartIndex + newIndex
+                guard actualIndex >= 0 && actualIndex < sentences.count else { return }
+                if actualIndex != currentSentenceIndex {
+                    currentSentenceIndex = actualIndex
+                    currentSentence = sentences[actualIndex]
+                    SyncLogger.shared.info("📖 同步句子索引: TTSService=\(newIndex), 实际=\(actualIndex), jumpStart=\(jumpStartIndex), sentence=\(currentSentence.prefix(20))")
                 }
             }
             .onDisappear {
@@ -344,6 +348,7 @@ struct LectureReaderView: View {
         totalSentences = sentences.count
         isPlaying = true
         isPaused = false
+        jumpStartIndex = 0  // 正常播放时起始索引为0
         
         TTSService.shared.updateConfig(appState.ttsConfig)
         TTSService.shared.speak(
@@ -395,6 +400,7 @@ struct LectureReaderView: View {
         guard index >= 0 && index < sentences.count else { return }
         currentSentenceIndex = index
         currentSentence = sentences[index]
+        jumpStartIndex = index  // 【修复】设置跳转起始索引，用于转换TTSService的索引体系
         
         let remainingText = sentences[index...].joined(separator: "")
         TTSService.shared.stop()
