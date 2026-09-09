@@ -218,6 +218,7 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
     
     @Published private(set) var isSpeaking = false
     @Published private(set) var isPaused = false
+    @Published private(set) var isLoading = false  // 是否正在下载音频
     @Published private(set) var currentSentenceIndex = 0
     @Published private(set) var totalSentences = 0
     @Published private(set) var currentText = ""
@@ -228,6 +229,11 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
     private var onComplete: (() -> Void)?
     private var hasReceivedAudio = false  // 跟踪是否已接收到音频数据
     private var inactivityTimerWorkItem: DispatchWorkItem?  // 不活跃超时计时器
+    
+    // MARK: - 音频预缓存
+    private var audioCache: [Int: Data] = [:]  // 句子索引 -> 音频数据
+    private var preloadTask: URLSessionDataTask?  // 预下载任务
+    private var pendingPlayIndex: Int?  // 暂停时下载完成，待播放的句子索引
     
     private override init() {
         self.config = TTSConfig()
@@ -273,6 +279,8 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
         self.currentSentenceIndex = 0
         self.onSentenceComplete = onSentenceComplete
         self.onComplete = onComplete
+        self.audioCache = [:]
+        self.pendingPlayIndex = nil
         
         SyncLogger.shared.info("🔊 speak: 开始播放，共\(sentences.count)句，provider=\(config.provider.displayName)")
         
@@ -292,26 +300,125 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
             return
         }
         
+        // 检查暂停状态：如果已暂停，不自动播放，记录待播放索引
+        guard !isPaused else {
+            SyncLogger.shared.info("🔊 speakCurrentSentence: 已暂停，跳过自动播放，index=\(currentSentenceIndex)")
+            pendingPlayIndex = currentSentenceIndex
+            return
+        }
+        
         let sentence = sentences[currentSentenceIndex]
         currentText = sentence
         
         SyncLogger.shared.info("🔊 speakCurrentSentence: index=\(currentSentenceIndex)/\(sentences.count), provider=\(config.provider.displayName)")
         
+        // 检查缓存：如果已有音频数据，直接播放
+        if let cachedData = audioCache[currentSentenceIndex] {
+            SyncLogger.shared.info("🔊 speakCurrentSentence: 命中缓存，直接播放，index=\(currentSentenceIndex)")
+            playAudioData(cachedData)
+            // 预下载下一句
+            preloadNextSentence()
+            return
+        }
+        
+        // 没有缓存，需要下载
+        isLoading = true
         switch config.provider {
         case .edgeTTSService:
             speakEdgeTTSService(sentence)
         case .iOSNative:
             speakiOSNative(sentence)
+            isLoading = false
         }
+    }
+    
+    /// 播放音频数据（统一入口）
+    private func playAudioData(_ data: Data) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            // 再次检查暂停状态
+            guard !self.isPaused else {
+                SyncLogger.shared.info("🔊 playAudioData: 已暂停，不播放")
+                self.pendingPlayIndex = self.currentSentenceIndex
+                return
+            }
+            do {
+                self.audioPlayer?.stop()
+                self.audioPlayer = try AVAudioPlayer(data: data)
+                self.audioPlayer?.delegate = self
+                self.audioPlayer?.prepareToPlay()
+                self.audioPlayer?.play()
+                self.isLoading = false
+                SyncLogger.shared.info("🔊 playAudioData: 开始播放，index=\(self.currentSentenceIndex)")
+            } catch {
+                SyncLogger.shared.warning("🔊 playAudioData: 播放失败 - \(error.localizedDescription)，跳过当前句子")
+                self.isLoading = false
+                self.sentenceFinished()
+            }
+        }
+    }
+    
+    /// 预下载下一句的音频
+    private func preloadNextSentence() {
+        let nextIndex = currentSentenceIndex + 1
+        guard nextIndex < sentences.count else { return }
+        guard audioCache[nextIndex] == nil else {
+            SyncLogger.shared.info("🔊 preloadNextSentence: 下一句已在缓存中，跳过预下载，index=\(nextIndex)")
+            return
+        }
+        guard config.provider == .edgeTTSService else { return }
+        
+        SyncLogger.shared.info("🔊 preloadNextSentence: 开始预下载下一句，index=\(nextIndex)")
+        
+        let sentence = sentences[nextIndex]
+        let serviceURL = config.serviceURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !serviceURL.isEmpty, let url = URL(string: "\(serviceURL)/v1/audio/speech") else { return }
+        
+        let body: [String: Any] = [
+            "input": sentence,
+            "voice": config.edgeVoice,
+            "speed": config.rate,
+            "pitch": "\(Int(config.pitch))",
+            "style": "general",
+            "volume": "0"
+        ]
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 30
+        
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        } catch { return }
+        
+        preloadTask?.cancel()
+        let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            guard let self = self else { return }
+            guard error == nil,
+                  let httpResponse = response as? HTTPURLResponse,
+                  httpResponse.statusCode == 200,
+                  let audioData = data, !audioData.isEmpty else {
+                SyncLogger.shared.warning("🔊 preloadNextSentence: 预下载失败，index=\(nextIndex)")
+                return
+            }
+            self.audioCache[nextIndex] = audioData
+            SyncLogger.shared.info("🔊 preloadNextSentence: 预下载成功，index=\(nextIndex)，大小=\(audioData.count)字节")
+        }
+        preloadTask = task
+        task.resume()
     }
     
     func pause() {
         guard isSpeaking else { return }
+        guard !isPaused else { return }
         isPaused = true
+        pendingPlayIndex = nil
         SyncLogger.shared.info("🔊 TTSService.pause: provider=\(config.provider.displayName)")
         switch config.provider {
         case .edgeTTSService:
             audioPlayer?.pause()
+            // 不取消 downloadTask，让下载完成后缓存起来
         case .iOSNative:
             synthesizer.pauseSpeaking(at: .immediate)
         }
@@ -321,9 +428,31 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
         guard isSpeaking, isPaused else { return }
         isPaused = false
         SyncLogger.shared.info("🔊 TTSService.resume: provider=\(config.provider.displayName)")
+        
+        // 如果有待播放的句子（暂停时下载完成的），直接播放
+        if let pendingIndex = pendingPlayIndex {
+            SyncLogger.shared.info("🔊 TTSService.resume: 播放待播放句子，index=\(pendingIndex)")
+            pendingPlayIndex = nil
+            currentSentenceIndex = pendingIndex
+            currentText = sentences[pendingIndex]
+            if let cachedData = audioCache[pendingIndex] {
+                playAudioData(cachedData)
+                preloadNextSentence()
+            } else {
+                speakCurrentSentence()
+            }
+            return
+        }
+        
         switch config.provider {
         case .edgeTTSService:
-            audioPlayer?.play()
+            // 如果 audioPlayer 存在且已准备好，直接继续播放
+            if audioPlayer != nil {
+                audioPlayer?.play()
+            } else {
+                // 否则重新播放当前句子
+                speakCurrentSentence()
+            }
         case .iOSNative:
             synthesizer.continueSpeaking()
         }
@@ -332,13 +461,23 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
     func stop() {
         isSpeaking = false
         isPaused = false
+        isLoading = false
         currentSentenceIndex = 0
         totalSentences = 0
         currentText = ""
+        pendingPlayIndex = nil
+        
+        // 取消所有下载任务
+        downloadTask?.cancel()
+        downloadTask = nil
+        preloadTask?.cancel()
+        preloadTask = nil
+        
+        // 清理缓存（保留是为了下次播放，但这里 stop 是完全停止，所以清理）
+        // audioCache = [:]  // 不清理，下次播放相同文本时可以复用
         
         switch config.provider {
         case .edgeTTSService:
-            downloadTask?.cancel()
             edgeTTSWebSocketTask?.cancel()
             edgeTTSWebSocketTask = nil
             audioPlayer?.stop()
@@ -368,9 +507,14 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
     }
     
     private func stopCurrentOnly() {
+        downloadTask?.cancel()
+        downloadTask = nil
+        preloadTask?.cancel()
+        preloadTask = nil
+        isLoading = false
+        
         switch config.provider {
         case .edgeTTSService:
-            downloadTask?.cancel()
             edgeTTSWebSocketTask?.cancel()
             edgeTTSWebSocketTask = nil
             audioPlayer?.stop()
@@ -389,6 +533,13 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
     }
     
     private func sentenceFinished() {
+        // 检查是否已暂停：如果已暂停，不自动播放下一句
+        guard !isPaused else {
+            SyncLogger.shared.info("🔊 sentenceFinished: 已暂停，不自动播放下一句，currentIndex=\(currentSentenceIndex)")
+            pendingPlayIndex = currentSentenceIndex + 1
+            return
+        }
+        
         onSentenceComplete?(currentSentenceIndex)
         currentSentenceIndex += 1
         if currentSentenceIndex >= sentences.count {
@@ -424,6 +575,7 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
         let serviceURL = config.serviceURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !serviceURL.isEmpty, let url = URL(string: "\(serviceURL)/v1/audio/speech") else {
             SyncLogger.shared.warning("🔊 Edge-TTS 服务: URL 无效，跳过当前句子")
+            isLoading = false
             sentenceFinished()
             return
         }
@@ -450,6 +602,7 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
         } catch {
             SyncLogger.shared.warning("🔊 Edge-TTS 服务: 请求体编码失败，跳过当前句子")
+            isLoading = false
             sentenceFinished()
             return
         }
@@ -460,14 +613,27 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
         let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
             guard let self = self else { return }
             
+            // 检查任务是否已被取消
+            guard task.state != .canceling else {
+                SyncLogger.shared.info("🔊 Edge-TTS 服务: 任务已取消，忽略回调")
+                return
+            }
+            
             if let error = error {
+                // 如果是取消错误，忽略
+                if (error as NSError).code == NSURLErrorCancelled {
+                    SyncLogger.shared.info("🔊 Edge-TTS 服务: 任务被取消")
+                    return
+                }
                 SyncLogger.shared.warning("🔊 Edge-TTS 服务: 请求失败 - \(error.localizedDescription)，跳过当前句子")
+                self.isLoading = false
                 self.sentenceFinished()
                 return
             }
             
             guard let httpResponse = response as? HTTPURLResponse else {
                 SyncLogger.shared.warning("🔊 Edge-TTS 服务: 无效响应，跳过当前句子")
+                self.isLoading = false
                 self.sentenceFinished()
                 return
             }
@@ -475,33 +641,36 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
             guard httpResponse.statusCode == 200 else {
                 let errorBody = data.flatMap { String(data: $0, encoding: .utf8) } ?? "无"
                 SyncLogger.shared.warning("🔊 Edge-TTS 服务: HTTP \(httpResponse.statusCode)，响应体=\(errorBody.prefix(200))，跳过当前句子")
+                self.isLoading = false
                 self.sentenceFinished()
                 return
             }
             
             guard let audioData = data, !audioData.isEmpty else {
                 SyncLogger.shared.warning("🔊 Edge-TTS 服务: 音频数据为空，跳过当前句子")
+                self.isLoading = false
                 self.sentenceFinished()
                 return
             }
             
             SyncLogger.shared.info("🔊 Edge-TTS 服务: 合成成功，音频大小=\(audioData.count) 字节")
             
-            // 播放音频
-            DispatchQueue.main.async { [weak self] in
-                guard let self = self else { return }
-                do {
-                    self.audioPlayer?.stop()
-                    self.audioPlayer = try AVAudioPlayer(data: audioData)
-                    self.audioPlayer?.delegate = self
-                    self.audioPlayer?.prepareToPlay()
-                    self.audioPlayer?.play()
-                    SyncLogger.shared.info("🔊 Edge-TTS 服务: 开始播放")
-                } catch {
-                    SyncLogger.shared.warning("🔊 Edge-TTS 服务: 音频播放失败 - \(error.localizedDescription)，跳过当前句子")
-                    self.sentenceFinished()
-                }
+            // 缓存音频数据
+            self.audioCache[self.currentSentenceIndex] = audioData
+            
+            // 检查暂停状态：如果已暂停，只缓存不播放
+            guard !self.isPaused else {
+                SyncLogger.shared.info("🔊 Edge-TTS 服务: 已暂停，缓存音频但不播放，index=\(self.currentSentenceIndex)")
+                self.isLoading = false
+                self.pendingPlayIndex = self.currentSentenceIndex
+                return
             }
+            
+            // 播放音频（使用统一入口）
+            self.playAudioData(audioData)
+            
+            // 预下载下一句
+            self.preloadNextSentence()
         }
         
         downloadTask = task
