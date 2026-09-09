@@ -29,6 +29,12 @@ struct ReviewSessionView: View {
     // 评级弹窗
     @State private var showRatingDialog = false  // 是否显示评级选择弹窗
     
+    // 播放状态
+    @State private var isPlayingLecture = false  // 是否正在播放讲稿
+    @State private var isPausedLecture = false  // 讲稿是否暂停
+    @State private var lecturePlayProgress: Double = 0  // 讲稿播放进度 (0.0 - 1.0)
+    @State private var lectureText: String? = nil  // 当前讲稿文本（用于播放）
+    
     // 知识点
     @StateObject private var knowledgeStore = KnowledgePointsStore()  // 知识点状态（使用 ObservableObject 解决异步更新问题）
     @State private var selectedKnowledgePoint: KnowledgePoint? = nil  // 选中的知识点
@@ -55,7 +61,13 @@ struct ReviewSessionView: View {
         }
         .navigationBarHidden(true)  // 隐藏系统导航栏，使用自定义顶部栏
         .onAppear { bootstrap() }
-        .onDisappear { appState.refreshStats() }
+        .onDisappear {
+            // 离开复习界面时停止讲稿播放
+            TTSService.shared.stop()
+            lectureText = nil
+            lecturePlayProgress = 0
+            appState.refreshStats()
+        }
     }
     
     // MARK: - 初始化
@@ -154,6 +166,17 @@ struct ReviewSessionView: View {
             bottomOperationBar(note: note, scheduler: scheduler)
         }
         .background(Color(.systemGroupedBackground))
+        // 监听 TTSService 播放状态
+        .onReceive(TTSService.shared.$isSpeaking) { speaking in
+            isPlayingLecture = speaking
+            if !speaking {
+                isPausedLecture = false
+                lecturePlayProgress = 0
+            }
+        }
+        .onReceive(TTSService.shared.$isPaused) { paused in
+            isPausedLecture = paused
+        }
         // 评级选择弹窗
         .confirmationDialog("请选择掌握程度评级", isPresented: $showRatingDialog) {
             ForEach(ReviewRating.allCases) { rating in
@@ -217,32 +240,53 @@ struct ReviewSessionView: View {
             .cornerRadius(6)
     }
     
-    // MARK: - 底部操作栏（主按钮+图标按钮组合布局）
+    // MARK: - 底部操作栏（专业UI设计，橙色主色调）
     
     @ViewBuilder
     private func bottomOperationBar(note: Note, scheduler: SchedulerService) -> some View {
         let hasQuiz = appState.quizService.generatedNoteIds.contains(note.id)
         let hasLecture = appState.storage?.hasLecture(for: note) ?? false
+        let isPlaying = isPlayingLecture && !isPausedLecture
+        let secondaryButtonCount = (hasQuiz ? 1 : 0) + (hasLecture ? 1 : 0) + (hasLecture ? 1 : 0)  // 测评+讲稿+播放
         
         VStack(spacing: 0) {
+            // 播放进度条（仅播放/暂停时显示，2pt细条）
+            if isPlayingLecture {
+                GeometryReader { geometry in
+                    ZStack(alignment: .leading) {
+                        Color.gray.opacity(0.1)
+                        Color.orange
+                            .frame(width: geometry.size.width * CGFloat(lecturePlayProgress))
+                    }
+                }
+                .frame(height: 2)
+            }
+            
             // 顶部分割线
             Divider()
+                .opacity(0.2)
             
             HStack(spacing: 8) {
-                // 评级主按钮（始终显示，占剩余空间）
+                // 评级主按钮（始终显示，占主要空间）
                 ratingButton(note: note, scheduler: scheduler)
                     .frame(maxWidth: .infinity)
                 
                 // 测评按钮（有题目时显示）
                 if hasQuiz {
                     quizButton()
-                        .frame(width: hasLecture ? 48 : 56)
+                        .frame(width: 52)
                 }
                 
                 // 讲稿按钮（有讲稿时显示）
                 if hasLecture {
                     lectureButton(note: note)
-                        .frame(width: hasQuiz ? 48 : 56)
+                        .frame(width: 52)
+                }
+                
+                // 播放/暂停按钮（有讲稿时显示）
+                if hasLecture {
+                    playPauseButton(note: note, isPlaying: isPlaying)
+                        .frame(width: 52)
                 }
             }
             .padding(.horizontal, 16)
@@ -255,37 +299,32 @@ struct ReviewSessionView: View {
         )
     }
     
-    // MARK: - 评级主按钮
+    // MARK: - 评级主按钮（橙色主色调）
     
     private func ratingButton(note: Note, scheduler: SchedulerService) -> some View {
-        // 推荐评级：默认良好，或根据笔记状态选择
         let recommendedRating = ReviewRating.good
         let previewText = scheduler.previewNextInterval(note: note, rating: recommendedRating)
         
         return Button {
             showRatingDialog = true
         } label: {
-            VStack(spacing: 2) {
+            VStack(spacing: 3) {
                 Text("评级")
-                    .font(.headline)
+                    .font(.system(size: 15, weight: .semibold))
                 Text("\(recommendedRating.description) · \(previewText)")
-                    .font(.caption2)
+                    .font(.system(size: 11))
                     .foregroundColor(.secondary)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
-            .background(Color.blue.opacity(0.14))
-            .foregroundColor(.blue)
+            .frame(height: 44)  // 统一44pt高度（HIG标准）
+            .background(Color.orange.opacity(0.1))  // 极浅橙背景
+            .foregroundColor(.orange)  // 橙色主色调
             .cornerRadius(10)
-            .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(Color.blue.opacity(0.35), lineWidth: 1)
-            )
         }
         .buttonStyle(.plain)
     }
     
-    // MARK: - 测评图标按钮
+    // MARK: - 测评图标按钮（中性色）
     
     private func quizButton() -> some View {
         Button {
@@ -293,24 +332,20 @@ struct ReviewSessionView: View {
         } label: {
             VStack(spacing: 2) {
                 Image(systemName: "doc.questionmark")
-                    .font(.subheadline)
+                    .font(.system(size: 16))
                 Text("测评")
-                    .font(.caption2)
+                    .font(.system(size: 10))
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 10)
-            .background(Color.purple.opacity(0.14))
-            .foregroundColor(.purple)
+            .frame(height: 44)  // 统一44pt高度
+            .background(Color.gray.opacity(0.08))  // 统一极浅灰背景
+            .foregroundColor(.primary)  // 中性色
             .cornerRadius(10)
-            .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(Color.purple.opacity(0.35), lineWidth: 1)
-            )
         }
         .buttonStyle(.plain)
     }
     
-    // MARK: - 讲稿图标按钮
+    // MARK: - 讲稿图标按钮（中性色）
     
     private func lectureButton(note: Note) -> some View {
         Button {
@@ -318,21 +353,94 @@ struct ReviewSessionView: View {
         } label: {
             VStack(spacing: 2) {
                 Image(systemName: "book.closed.fill")
-                    .font(.subheadline)
+                    .font(.system(size: 16))
                 Text("讲稿")
-                    .font(.caption2)
+                    .font(.system(size: 10))
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 10)
-            .background(Color.orange.opacity(0.14))
-            .foregroundColor(.orange)
+            .frame(height: 44)  // 统一44pt高度
+            .background(Color.gray.opacity(0.08))  // 统一极浅灰背景
+            .foregroundColor(.primary)  // 中性色
             .cornerRadius(10)
-            .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(Color.orange.opacity(0.35), lineWidth: 1)
-            )
         }
         .buttonStyle(.plain)
+    }
+    
+    // MARK: - 播放/暂停按钮（状态感知，橙色强调）
+    
+    private func playPauseButton(note: Note, isPlaying: Bool) -> some View {
+        Button {
+            toggleLecturePlayback(note: note)
+        } label: {
+            Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                .font(.system(size: 20))
+                .frame(maxWidth: .infinity)
+                .frame(height: 44)  // 统一44pt高度
+                .background(isPlaying ? Color.orange.opacity(0.1) : Color.gray.opacity(0.08))
+                .foregroundColor(isPlaying ? .orange : .primary)
+                .cornerRadius(10)
+        }
+        .buttonStyle(.plain)
+    }
+    
+    // MARK: - 讲稿播放控制
+    
+    private func toggleLecturePlayback(note: Note) {
+        if isPlayingLecture {
+            // 正在播放，暂停或恢复
+            if isPausedLecture {
+                TTSService.shared.resume()
+            } else {
+                TTSService.shared.pause()
+            }
+        } else {
+            // 未播放，加载讲稿并开始播放
+            loadAndPlayLecture(note: note)
+        }
+    }
+    
+    private func loadAndPlayLecture(note: Note) {
+        guard let storage = appState.storage else { return }
+        
+        // 如果已有缓存的讲稿文本，直接播放
+        if let text = lectureText {
+            startLecturePlayback(text: text)
+            return
+        }
+        
+        // 异步加载讲稿内容
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let text = try storage.readLecture(for: note)
+                DispatchQueue.main.async {
+                    lectureText = text
+                    startLecturePlayback(text: text)
+                }
+            } catch {
+                SyncLogger.shared.warning("📖 加载讲稿失败: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    private func startLecturePlayback(text: String) {
+        TTSService.shared.updateConfig(appState.ttsConfig)
+        TTSService.shared.speak(
+            text: text,
+            onSentenceComplete: { [weak self] index in
+                DispatchQueue.main.async {
+                    // 更新播放进度
+                    let total = TTSService.shared.totalSentences
+                    if total > 0 {
+                        self?.lecturePlayProgress = Double(index + 1) / Double(total)
+                    }
+                }
+            },
+            onComplete: { [weak self] in
+                DispatchQueue.main.async {
+                    self?.lecturePlayProgress = 1.0
+                }
+            }
+        )
     }
     
     // MARK: - 操作
@@ -358,6 +466,10 @@ struct ReviewSessionView: View {
                 offsetX = 0
                 cardDegrees = 0
                 cardStartTime = Date()
+                // 切换笔记时重置讲稿播放状态
+                TTSService.shared.stop()
+                lectureText = nil
+                lecturePlayProgress = 0
                 // 切换笔记时提取新笔记的知识点
                 extractKnowledgeForCurrentNote()
             }
