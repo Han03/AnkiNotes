@@ -244,9 +244,17 @@ final class EdgeTTSStreamingPlayer {
     
     /// 设置音频格式（由 AudioFileStream 回调触发）
     func setAudioFormat(_ format: AudioStreamBasicDescription) {
-        let audioFormat = AVAudioFormat(streamDescription: format)
-        self.audioFormat = audioFormat
+        var mutableFormat = format
+        let audioFormat = withUnsafePointer(to: &mutableFormat) { formatPtr -> AVAudioFormat? in
+            return AVAudioFormat(streamDescription: formatPtr)
+        }
         
+        guard let audioFormat = audioFormat else {
+            SyncLogger.shared.info("🔊 Edge-TTS: 无法创建音频格式")
+            return
+        }
+        
+        self.audioFormat = audioFormat
         engine.connect(playerNode, to: engine.mainMixerNode, format: audioFormat)
         SyncLogger.shared.info("🔊 Edge-TTS: 音频格式已设置 - 采样率=\(format.mSampleRate), 通道数=\(format.mChannelsPerFrame)")
     }
@@ -290,7 +298,7 @@ private func audioFileStreamPropertyListenerProc(
     _ inClientData: UnsafeMutableRawPointer?,
     _ inAudioFileStream: AudioFileStreamID,
     _ inPropertyID: AudioFileStreamPropertyID,
-    _ inIOFlags: UnsafeMutablePointer<UInt32>
+    _ ioFlags: UnsafeMutablePointer<AudioFileStreamPropertyFlags>?
 ) {
     guard let clientData = inClientData else { return }
     let player = Unmanaged<EdgeTTSStreamingPlayer>.fromOpaque(clientData).takeUnretainedValue()
@@ -311,16 +319,17 @@ private func audioFileStreamPacketsProc(
     _ inNumberBytes: UInt32,
     _ inNumberPackets: UInt32,
     _ inInputData: UnsafeRawPointer,
-    _ inPacketDescriptions: UnsafeMutablePointer<AudioStreamPacketDescription>
+    _ inPacketDescriptions: UnsafeMutablePointer<AudioStreamPacketDescription>?
 ) {
-    guard let clientData = inClientData else { return }
+    guard let clientData = inClientData,
+          let packetDescriptions = inPacketDescriptions else { return }
     let player = Unmanaged<EdgeTTSStreamingPlayer>.fromOpaque(clientData).takeUnretainedValue()
     
     player.handleAudioPackets(
         numberBytes: inNumberBytes,
         numberPackets: inNumberPackets,
         inputData: inInputData,
-        packetDescriptions: inPacketDescriptions
+        packetDescriptions: packetDescriptions
     )
 }
 
