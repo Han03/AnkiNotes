@@ -372,6 +372,10 @@ struct SettingsView: View {
 
     // MARK: - 关于
 
+    private var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+    }
+
     private var aboutSection: some View {
         VStack(alignment: .leading, spacing: AppSpacing.md) {
             HStack {
@@ -379,7 +383,7 @@ struct SettingsView: View {
                     .font(.appSubheading)
                     .fontWeight(.semibold)
                 Spacer()
-                Text("v\(Bundle.main.infoDictionary?[\"CFBundleShortVersionString\"] as? String ?? \"1.0\")")
+                Text("v\(appVersion)")
                     .font(.appCaption)
                     .foregroundColor(.textSecondary)
             }
