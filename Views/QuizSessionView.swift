@@ -144,7 +144,7 @@ struct QuizSessionView: View {
                             Spacer()
                         }
                         .padding(.vertical, 14)
-                        .background(RoundedRectangle(cornerRadius: 12).fill(Color.purple))
+                        .background(RoundedRectangle(cornerRadius: 12).fill(Color.orange))
                     }
                     .buttonStyle(.plain)
                     .disabled(q.type == .singleChoice ? selectedAnswer == nil : essayAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -197,9 +197,9 @@ struct QuizSessionView: View {
                     .frame(width: 32, height: 32)
                     .background(
                         Circle()
-                            .fill(isCorrectAnswer ? Color.green : (isWrongSelected ? Color.red : (isSelected ? Color.purple.opacity(0.2) : Color(.secondarySystemBackground))))
+                            .fill(isCorrectAnswer ? Color.green : (isWrongSelected ? Color.red : (isSelected ? Color.orange.opacity(0.2) : Color(.secondarySystemBackground))))
                     )
-                    .foregroundColor(isCorrectAnswer || isWrongSelected ? .white : (isSelected ? .purple : .primary))
+                    .foregroundColor(isCorrectAnswer || isWrongSelected ? .white : (isSelected ? .orange : .primary))
                 Text(option.content)
                     .font(.body)
                     .fixedSize(horizontal: false, vertical: true)
@@ -215,11 +215,11 @@ struct QuizSessionView: View {
             .padding(12)
             .background(
                 RoundedRectangle(cornerRadius: 10)
-                    .fill(isCorrectAnswer ? Color.green.opacity(0.1) : (isWrongSelected ? Color.red.opacity(0.1) : (isSelected ? Color.purple.opacity(0.05) : Color(.systemBackground))))
+                    .fill(isCorrectAnswer ? Color.green.opacity(0.1) : (isWrongSelected ? Color.red.opacity(0.1) : (isSelected ? Color.orange.opacity(0.05) : Color(.systemBackground))))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 10)
-                    .stroke(isCorrectAnswer ? Color.green : (isWrongSelected ? Color.red : (isSelected ? Color.purple : Color.clear)), lineWidth: 1)
+                    .stroke(isCorrectAnswer ? Color.green : (isWrongSelected ? Color.red : (isSelected ? Color.orange : Color.clear)), lineWidth: 1)
             )
         }
         .buttonStyle(.plain)
@@ -285,7 +285,7 @@ struct QuizSessionView: View {
                     Circle()
                         .fill(
                             LinearGradient(
-                                colors: [Color.purple, Color.purple.opacity(0.6)],
+                                colors: [Color.orange, Color.orange.opacity(0.6)],
                                 startPoint: .topLeading, endPoint: .bottomTrailing)
                         )
                         .frame(width: 80, height: 80)
@@ -310,11 +310,11 @@ struct QuizSessionView: View {
                         .font(.headline)
                     Text("\(accuracyPercent)%")
                         .font(.system(size: 48, weight: .bold))
-                        .foregroundColor(.purple)
+                        .foregroundColor(.orange)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(24)
-                .background(RoundedRectangle(cornerRadius: 16).fill(Color.purple.opacity(0.08)))
+                .background(RoundedRectangle(cornerRadius: 16).fill(Color.orange.opacity(0.08)))
 
                 // 按钮
                 VStack(spacing: 12) {
@@ -337,7 +337,7 @@ struct QuizSessionView: View {
                             Spacer()
                         }
                         .padding(.vertical, 14)
-                        .background(RoundedRectangle(cornerRadius: 12).fill(Color.purple))
+                        .background(RoundedRectangle(cornerRadius: 12).fill(Color.orange))
                     }
                     .buttonStyle(.plain)
 

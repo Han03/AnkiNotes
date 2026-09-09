@@ -184,7 +184,7 @@ struct NoteDetailView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("正在提取知识点...")
                             .font(.subheadline)
-                            .foregroundColor(.purple)
+                            .foregroundColor(.orange)
                         if !knowledgeStore.points.isEmpty {
                             Text("已提取 \(knowledgeStore.points.count) 个")
                                 .font(.caption)
@@ -194,7 +194,7 @@ struct NoteDetailView: View {
                     Spacer()
                 }
                 .padding()
-                .background(Color.purple.opacity(0.08))
+                .background(Color.orange.opacity(0.08))
                 .cornerRadius(10)
             } else if knowledgeStore.points.isEmpty {
                 Button {
@@ -209,8 +209,8 @@ struct NoteDetailView: View {
                             .foregroundColor(.secondary)
                     }
                     .padding()
-                    .background(Color.purple.opacity(0.1))
-                    .foregroundColor(.purple)
+                    .background(Color.orange.opacity(0.1))
+                    .foregroundColor(.orange)
                     .cornerRadius(10)
                 }
                 .buttonStyle(.plain)
@@ -231,8 +231,8 @@ struct NoteDetailView: View {
                                 .font(.caption)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 5)
-                                .background(Color.purple.opacity(0.12))
-                                .foregroundColor(.purple)
+                                .background(Color.orange.opacity(0.12))
+                                .foregroundColor(.orange)
                                 .cornerRadius(8)
                         }
                         .buttonStyle(.plain)

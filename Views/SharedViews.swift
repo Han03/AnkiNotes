@@ -34,7 +34,7 @@ struct WeeklyChartView: View {
                             .fill(
                                 LinearGradient(
                                     colors: counts[idx] > 0
-                                        ? [.blue, .purple]
+                                        ? [.blue, .orange]
                                         : [.gray.opacity(0.3), .gray.opacity(0.3)],
                                     startPoint: .bottom, endPoint: .top)
                             )
@@ -71,7 +71,7 @@ struct StatusDistributionView: View {
             ("新笔记", stats.newCount, .blue),
             ("学习中", stats.learningCount, .orange),
             ("已掌握", stats.masteredCount, .green),
-            ("复习中", max(0, stats.totalNotes - stats.newCount - stats.learningCount - stats.masteredCount), .purple)
+            ("复习中", max(0, stats.totalNotes - stats.newCount - stats.learningCount - stats.masteredCount), .orange)
         ]
         VStack(spacing: 12) {
             GeometryReader { geo in

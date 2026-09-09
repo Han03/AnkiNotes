@@ -49,12 +49,9 @@ enum ReviewRating: Int, Codable, CaseIterable, Identifiable {
     }
     
     var color: String {
-        switch self {
-        case .again: return "FF3B30"  // 红
-        case .hard:  return "FF9500"  // 橙
-        case .good:  return "34C759"  // 绿
-        case .easy:  return "007AFF"  // 蓝
-        }
+        // 统一使用橙色主色，避免红/绿配色带来的心理暗示和色盲问题
+        // 专业记忆应用（如Anki）用统一颜色，仅靠文字区分难度
+        return "FF9500"  // 橙色（品牌主色）
     }
     
     var shortLabel: String {

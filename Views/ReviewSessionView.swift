@@ -225,18 +225,20 @@ struct ReviewSessionView: View {
     }
     
     private func stateLabel(_ state: SRSData.CardState) -> some View {
-        let mapping: [(SRSData.CardState, String, Color)] = [
-            (.new, "新", .blue),
-            (.learning, "学", .orange),
-            (.relearning, "重学", .red),
-            (.review, "复习", .green)
+        // 统一使用中性灰色，状态是辅助信息，不应抢夺视觉重心
+        // 避免四色（蓝橙红绿）带来的视觉混乱
+        let mapping: [(SRSData.CardState, String)] = [
+            (.new, "新"),
+            (.learning, "学"),
+            (.relearning, "重学"),
+            (.review, "复习")
         ]
-        let result = mapping.first(where: { $0.0 == state }) ?? (.new, "新", .blue)
+        let result = mapping.first(where: { $0.0 == state }) ?? (.new, "新")
         return Text(result.1)
             .textStyle(.tertiaryText)
             .padding(.horizontal, 6).padding(.vertical, 3)
-            .background(result.2.opacity(0.15))
-            .foregroundColor(result.2)
+            .background(Color.gray.opacity(0.1))  // 统一极浅灰背景
+            .foregroundColor(.secondary)  // 统一次级文字颜色
             .cornerRadius(6)
     }
     
@@ -545,7 +547,7 @@ struct ReviewSessionView: View {
                 .font(.system(size: 72, weight: .bold, design: .rounded))
                 .foregroundStyle(
                     LinearGradient(
-                        colors: [.yellow, .orange],
+                        colors: [.orange, .orange.opacity(0.7)],  // 统一橙色系
                         startPoint: .top, endPoint: .bottom)
                 )
                 .padding()
@@ -554,10 +556,11 @@ struct ReviewSessionView: View {
                 .textStyle(.screenTitle)
             
             VStack(spacing: 16) {
-                SummaryRow(label: "复习笔记", value: "\(reviewedCount) 篇", systemImage: "doc.richtext.fill", color: .blue)
-                SummaryRow(label: "今日累计", value: "\(stats.reviewedToday) 张", systemImage: "checkmark.seal.fill", color: .green)
+                // 统一使用橙色主色，避免四色（蓝绿橙紫）带来的视觉混乱
+                SummaryRow(label: "复习笔记", value: "\(reviewedCount) 篇", systemImage: "doc.richtext.fill", color: .orange)
+                SummaryRow(label: "今日累计", value: "\(stats.reviewedToday) 张", systemImage: "checkmark.seal.fill", color: .orange)
                 SummaryRow(label: "连续打卡", value: "\(stats.streakDays) 天", systemImage: "flame.fill", color: .orange)
-                SummaryRow(label: "剩余待复习", value: "\(appState.scheduler.getTodayDueCount()) 张", systemImage: "clock.fill", color: .purple)
+                SummaryRow(label: "剩余待复习", value: "\(appState.scheduler.getTodayDueCount()) 张", systemImage: "clock.fill", color: .orange)
             }
             .padding()
             .background(RoundedRectangle(cornerRadius: 16).fill(Color(.systemBackground)))
@@ -574,7 +577,8 @@ struct ReviewSessionView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 16)
                     .background(
-                        LinearGradient(colors: [.green, .mint], startPoint: .leading, endPoint: .trailing)
+                        LinearGradient(colors: [.orange, .orange.opacity(0.85)],  // 统一橙色系
+                                       startPoint: .leading, endPoint: .trailing)
                     )
                     .foregroundColor(.white)
                     .cornerRadius(14)

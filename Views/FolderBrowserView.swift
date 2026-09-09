@@ -386,8 +386,8 @@ private struct NoteRow: View {
                         Text("题")
                             .textStyle(.subsectionTitle)
                             .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(Color.purple.opacity(0.15))
-                            .foregroundColor(.purple)
+                            .background(Color.orange.opacity(0.15))
+                            .foregroundColor(.orange)
                             .cornerRadius(4)
                     }
                     // 有讲稿标识：橙色"稿"字
@@ -410,35 +410,35 @@ private struct NoteRow: View {
     }
     
     private var statusIcon: some View {
+        // 统一使用中性灰色，状态是辅助信息，不应抢夺视觉重心
         let imageName: String
-        let color: Color
         switch note.srs.cardState {
         case .new:
-            imageName = "sparkles"; color = .blue
+            imageName = "sparkles"
         case .learning, .relearning:
-            imageName = "book.fill"; color = .orange
+            imageName = "book.fill"
         case .review:
-            imageName = "checkmark.seal.fill"; color = .green
+            imageName = "checkmark.seal.fill"
         }
         return Image(systemName: imageName)
-            .foregroundColor(color)
+            .foregroundColor(.secondary)  // 统一中性灰色
             .textStyle(.subsectionTitle)
     }
     
     private var stateChip: some View {
+        // 统一使用中性灰色，避免四色（蓝橙红绿）带来的视觉混乱
         let text: String
-        let color: Color
         switch note.srs.cardState {
-        case .new: text = "新"; color = .blue
-        case .learning: text = "学"; color = .orange
-        case .relearning: text = "重"; color = .red
-        case .review: text = "复"; color = .green
+        case .new: text = "新"
+        case .learning: text = "学"
+        case .relearning: text = "重"
+        case .review: text = "复"
         }
         return Text(text)
             .textStyle(.subsectionTitle)
             .padding(.horizontal, 6).padding(.vertical, 2)
-            .background(color.opacity(0.15))
-            .foregroundColor(color)
+            .background(Color.gray.opacity(0.1))  // 统一极浅灰背景
+            .foregroundColor(.secondary)  // 统一次级文字颜色
             .cornerRadius(4)
     }
     

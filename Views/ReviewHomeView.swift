@@ -50,7 +50,7 @@ struct ReviewHomeView: View {
                                  color: .blue, highlight: queue.count > 0)
                         StatCard(title: "新笔记", value: "\(newCount)",
                                  systemImage: "sparkles",
-                                 color: .purple)
+                                 color: .orange)
                         StatCard(title: "学习中", value: "\(learningCount)",
                                  systemImage: "book.fill",
                                  color: .orange)
@@ -71,11 +71,11 @@ struct ReviewHomeView: View {
                         if queue.isEmpty {
                             Image(systemName: "checkmark.circle.fill")
                                 .textStyle(.screenTitle)
-                                .foregroundColor(.green)
+                                .foregroundColor(.orange)  // 统一橙色
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("今日已完成")
                                     .textStyle(.subsectionTitle)
-                                    .foregroundColor(.green)
+                                    .foregroundColor(.orange)  // 统一橙色
                                 Text("明天再来巩固记忆吧！")
                                     .textStyle(.secondaryText)
                                     .foregroundColor(.secondary)
@@ -85,7 +85,7 @@ struct ReviewHomeView: View {
                                 Circle()
                                     .fill(
                                         LinearGradient(
-                                            colors: [Color.blue, Color.blue.opacity(0.6)],
+                                            colors: [Color.orange, Color.orange.opacity(0.7)],  // 统一橙色
                                             startPoint: .topLeading, endPoint: .bottomTrailing)
                                     )
                                     .frame(width: 52, height: 52)
@@ -108,7 +108,7 @@ struct ReviewHomeView: View {
                     .padding(18)
                     .background(
                         RoundedRectangle(cornerRadius: 18)
-                            .fill(queue.isEmpty ? Color.green.opacity(0.08) : Color.blue.opacity(0.08))
+                            .fill(Color.orange.opacity(0.08))  // 统一极浅橙背景
                     )
                 }
                 .buttonStyle(.plain)

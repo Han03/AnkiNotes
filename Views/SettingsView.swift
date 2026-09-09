@@ -89,7 +89,7 @@ struct SettingsView: View {
     private var webDAVConfigForm: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Image(systemName: "network").foregroundStyle(.purple)
+                Image(systemName: "network").foregroundStyle(.orange)
                 Text("WebDAV 连接配置")
                     .textStyle(.subsectionTitle)
                     .foregroundStyle(.primary)
@@ -120,7 +120,7 @@ struct SettingsView: View {
                     Toggle("允许自签名证书（NAS/内网场景）",
                            isOn: $appState.webDAVConfig.trustSelfSigned)
                     .textStyle(.secondaryText)
-                    .tint(.purple)
+                    .tint(.orange)
                 }
             }
 
@@ -135,7 +135,7 @@ struct SettingsView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 14)
-                .background(RoundedRectangle(cornerRadius: 14).fill(Color.purple.gradient))
+                .background(RoundedRectangle(cornerRadius: 14).fill(Color.orange.gradient))
                 .foregroundStyle(.white)
             }
             .buttonStyle(.plain)
@@ -152,8 +152,8 @@ struct SettingsView: View {
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
-                    .background(RoundedRectangle(cornerRadius: 12).fill(Color.purple.opacity(0.14)))
-                    .foregroundStyle(.purple)
+                    .background(RoundedRectangle(cornerRadius: 12).fill(Color.orange.opacity(0.14)))
+                    .foregroundStyle(.orange)
                 }
                 .buttonStyle(.plain)
                 .disabled(isTesting)
@@ -281,7 +281,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
                 Image(systemName: "brain.head.profile")
-                    .foregroundColor(.purple)
+                    .foregroundColor(.orange)
                     .font(.title2)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("百炼大模型平台")

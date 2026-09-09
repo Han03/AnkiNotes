@@ -85,7 +85,7 @@ struct QuizHomeView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("正在更新题库...")
                         .font(.headline)
-                        .foregroundColor(.purple)
+                        .foregroundColor(.orange)
                     if let progress = appState.generationProgress {
                         Text("正在处理：\(progress.noteTitle)（\(progress.current + 1)/\(progress.total)）")
                             .font(.subheadline)
@@ -94,7 +94,7 @@ struct QuizHomeView: View {
                         if appState.quizService?.generatedCharCount ?? 0 > 0 {
                             Text("已生成：\(appState.quizService?.generatedCharCount ?? 0) 字")
                                 .font(.caption)
-                                .foregroundColor(.purple.opacity(0.8))
+                                .foregroundColor(.orange.opacity(0.8))
                         }
                     }
                 }
@@ -102,10 +102,10 @@ struct QuizHomeView: View {
             }
         }
         .padding(16)
-        .background(RoundedRectangle(cornerRadius: 14).fill(Color.purple.opacity(0.1)))
+        .background(RoundedRectangle(cornerRadius: 14).fill(Color.orange.opacity(0.1)))
         .overlay(
             RoundedRectangle(cornerRadius: 14)
-                .stroke(Color.purple.opacity(0.3), lineWidth: 1)
+                .stroke(Color.orange.opacity(0.3), lineWidth: 1)
         )
     }
 
@@ -116,7 +116,7 @@ struct QuizHomeView: View {
             HStack {
                 Image(systemName: "brain.head.profile")
                     .font(.title)
-                    .foregroundColor(.purple)
+                    .foregroundColor(.orange)
                 Text("开启 AI 题库")
                     .font(.title3)
                     .fontWeight(.semibold)
@@ -131,7 +131,7 @@ struct QuizHomeView: View {
                 Text("去配置 →")
                     .font(.subheadline)
                     .fontWeight(.medium)
-                    .foregroundColor(.purple)
+                    .foregroundColor(.orange)
             }
         }
         .padding(18)
@@ -163,7 +163,7 @@ struct QuizHomeView: View {
             HStack(spacing: 12) {
                 StatBox(title: "选择题", value: "\(stats.singleChoiceCount)", color: .blue)
                 StatBox(title: "填空题", value: "\(stats.fillBlankCount)", color: .orange)
-                StatBox(title: "正确率", value: "\(Int(stats.accuracy * 100))%", color: .purple)
+                StatBox(title: "正确率", value: "\(Int(stats.accuracy * 100))%", color: .orange)
             }
 
             // 覆盖笔记
@@ -212,7 +212,7 @@ struct QuizHomeView: View {
                         Circle()
                             .fill(
                                 LinearGradient(
-                                    colors: [Color.purple, Color.purple.opacity(0.6)],
+                                    colors: [Color.orange, Color.orange.opacity(0.6)],
                                     startPoint: .topLeading, endPoint: .bottomTrailing)
                             )
                             .frame(width: 48, height: 48)
@@ -232,7 +232,7 @@ struct QuizHomeView: View {
                         .foregroundColor(.secondary)
                 }
                 .padding(16)
-                .background(RoundedRectangle(cornerRadius: 14).fill(Color.purple.opacity(0.08)))
+                .background(RoundedRectangle(cornerRadius: 14).fill(Color.orange.opacity(0.08)))
             }
             .buttonStyle(.plain)
             .disabled(appState.isGeneratingQuestions)
@@ -248,7 +248,7 @@ struct QuizHomeView: View {
         VStack(spacing: 12) {
             HStack {
                 Image(systemName: "wand.and.stars")
-                    .foregroundColor(.purple)
+                    .foregroundColor(.orange)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("AI 生成题目")
                         .font(.headline)
@@ -295,7 +295,7 @@ struct QuizHomeView: View {
                     .padding(.vertical, 12)
                     .background(
                         RoundedRectangle(cornerRadius: 10)
-                            .fill(appState.bailianConfig.isConfigured ? Color.purple : Color.gray)
+                            .fill(appState.bailianConfig.isConfigured ? Color.orange : Color.gray)
                     )
                     .foregroundColor(.white)
                 }
