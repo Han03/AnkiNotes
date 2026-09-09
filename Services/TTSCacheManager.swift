@@ -13,7 +13,6 @@ struct TTSCacheEntry: Codable {
     let fileName: String          // 磁盘文件名（{cacheKey}.mp3）
     let sentenceHash: String      // 句子文本哈希
     let voice: String             // 音色
-    let speed: Double             // 语速
     let pitch: Int                // 音调
     let fileSize: Int             // 文件大小（字节）
     let createdAt: TimeInterval   // 创建时间
@@ -58,16 +57,50 @@ final class TTSCacheManager {
     
     // MARK: - 初始化
     private init() {
+        // 【新增】检测并清除旧格式缓存（旧缓存 Key 包含语速，新的不包含）
+        // 旧缓存不会被新代码命中，会占用空间，所以第一次启动时清除
+        clearLegacyCacheIfNeeded()
+        
         loadCacheIndex()
         cleanupExpiredCache()
         SyncLogger.shared.info("💾 TTSCacheManager 初始化完成，磁盘缓存 \(diskCacheIndex.count) 条，总大小 \(totalDiskCacheSize() / 1024)KB")
     }
     
+    // MARK: - 旧缓存清理
+    
+    /// 检测并清除旧格式缓存（旧缓存 Key 包含语速字段）
+    private func clearLegacyCacheIfNeeded() {
+        let indexURL = cacheDirectory.appendingPathComponent("cache_index.json")
+        guard FileManager.default.fileExists(atPath: indexURL.path),
+              let data = try? Data(contentsOf: indexURL) else { return }
+        
+        // 尝试解码为包含 speed 字段的临时结构体，如果成功说明是旧格式
+        struct LegacyCacheEntry: Codable {
+            let speed: Double?
+        }
+        
+        if let legacyEntries = try? JSONDecoder().decode([String: LegacyCacheEntry].self, from: data),
+           let firstEntry = legacyEntries.values.first,
+           firstEntry.speed != nil {
+            SyncLogger.shared.warning("💾 检测到旧格式缓存（包含语速字段），清除所有缓存重新开始")
+            // 清除所有缓存文件
+            do {
+                let files = try FileManager.default.contentsOfDirectory(at: cacheDirectory, includingPropertiesForKeys: nil)
+                for file in files {
+                    try? FileManager.default.removeItem(at: file)
+                }
+                SyncLogger.shared.info("💾 旧格式缓存已清除，共删除 \(files.count) 个文件")
+            } catch {
+                SyncLogger.shared.warning("💾 清除旧格式缓存失败: \(error.localizedDescription)")
+            }
+        }
+    }
+    
     // MARK: - 缓存 Key 计算
     
-    /// 计算缓存 key（基于句子文本 + TTS 配置）
-    func cacheKey(for sentence: String, voice: String, speed: Double, pitch: Int) -> String {
-        let combined = "\(sentence)|\(voice)|\(speed)|\(pitch)"
+    /// 计算缓存 key（基于句子文本 + 音色 + 音调，不包含语速，因为语速通过播放时后处理实现）
+    func cacheKey(for sentence: String, voice: String, pitch: Int) -> String {
+        let combined = "\(sentence)|\(voice)|\(pitch)"
         let hash = SHA256.hash(data: Data(combined.utf8))
         return hash.compactMap { String(format: "%02x", $0) }.joined()
     }
@@ -160,7 +193,7 @@ final class TTSCacheManager {
     }
     
     /// 写入磁盘缓存（异步，不阻塞调用线程）
-    func setDiskCache(_ data: Data, forKey key: String, sentence: String, voice: String, speed: Double, pitch: Int) {
+    func setDiskCache(_ data: Data, forKey key: String, sentence: String, voice: String, pitch: Int) {
         cacheQueue.async(flags: .barrier) { [weak self] in
             guard let self = self else { return }
             
@@ -178,7 +211,6 @@ final class TTSCacheManager {
                 fileName: fileName,
                 sentenceHash: self.sentenceHash(for: sentence),
                 voice: voice,
-                speed: speed,
                 pitch: pitch,
                 fileSize: data.count,
                 createdAt: Date().timeIntervalSince1970,
@@ -220,9 +252,9 @@ final class TTSCacheManager {
     }
     
     /// 统一写入缓存：同时写入内存和磁盘
-    func setCache(_ data: Data, forKey key: String, sentence: String, voice: String, speed: Double, pitch: Int) {
+    func setCache(_ data: Data, forKey key: String, sentence: String, voice: String, pitch: Int) {
         setMemoryCache(data, forKey: key)
-        setDiskCache(data, forKey: key, sentence: sentence, voice: voice, speed: speed, pitch: pitch)
+        setDiskCache(data, forKey: key, sentence: sentence, voice: voice, pitch: pitch)
     }
     
     // MARK: - 缓存淘汰

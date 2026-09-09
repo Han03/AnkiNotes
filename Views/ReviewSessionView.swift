@@ -113,16 +113,6 @@ struct ReviewSessionView: View {
                             Text(note.title)
                                 .font(.headline)
                                 .lineLimit(2)
-                            // 阅读讲稿按钮（只有有讲稿时显示）
-                            if let storage = appState.storage, storage.hasLecture(for: note) {
-                                Button {
-                                    openLecture(note: note)
-                                } label: {
-                                    Image(systemName: "book.closed.fill")
-                                        .font(.caption)
-                                        .foregroundColor(.orange)
-                                }
-                            }
                             Spacer()
                             let sched = SM2Algorithm.dueDescription(note.srs.dueDate)
                             Text(sched)
@@ -157,13 +147,12 @@ struct ReviewSessionView: View {
             )
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
-            
-            // 评级按钮（直接显示，不需要先翻卡）
-            ratingButtons(note: note, scheduler: scheduler)
-                .padding(.horizontal, 16)
-                .padding(.bottom, 20)
         }
         .background(Color(.systemGroupedBackground))
+        // 底部操作栏（使用 safeAreaInset 自动适配底部安全区域，消除圆弧角导致的空白）
+        .safeAreaInset(edge: .bottom) {
+            bottomOperationBar(note: note, scheduler: scheduler)
+        }
         // 测评界面
         .sheet(isPresented: $showReviewQuiz) {
             if let note = currentIndex < queue.count ? queue[currentIndex] : nil {
@@ -218,11 +207,15 @@ struct ReviewSessionView: View {
             .cornerRadius(6)
     }
     
-    // MARK: - 评级按钮
+    // MARK: - 底部操作栏（评级按钮 + 讲稿入口）
     
     @ViewBuilder
-    private func ratingButtons(note: Note, scheduler: SchedulerService) -> some View {
+    private func bottomOperationBar(note: Note, scheduler: SchedulerService) -> some View {
         VStack(spacing: 10) {
+            // 顶部分割线，区分内容区和操作栏
+            Divider()
+                .padding(.top, 8)
+            
             Text("请根据对笔记内容的掌握程度选择评级")
                 .textStyle(.secondaryText)
                 .foregroundColor(.secondary)
@@ -275,7 +268,39 @@ struct ReviewSessionView: View {
                     .buttonStyle(.plain)
                 }
             }
+            
+            // 阅读讲稿按钮（只有有讲稿时显示，全宽按钮）
+            if let storage = appState.storage, storage.hasLecture(for: note) {
+                Button {
+                    openLecture(note: note)
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "book.closed.fill")
+                            .font(.subheadline)
+                        Text("阅读课堂讲稿")
+                            .textStyle(.primaryText)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .padding(.horizontal, 16)
+                    .background(Color.orange.opacity(0.12))
+                    .foregroundColor(.orange)
+                    .cornerRadius(12)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color.orange.opacity(0.3), lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+            }
         }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
+        .background(Color(.systemBackground))
     }
     
     // MARK: - 操作

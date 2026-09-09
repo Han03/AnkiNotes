@@ -10,108 +10,6 @@ import AVFoundation
 import CryptoKit
 import MediaPlayer
 
-// MARK: - Edge-TTS WebSocket 连接处理器
-
-/// Edge-TTS WebSocket 连接处理器，支持为每个 task 注册独立的连接回调
-final class EdgeTTSWebSocketDelegate: NSObject, URLSessionWebSocketDelegate {
-    /// 单例（因为 URLSession 的 delegate 在创建时设置，需要共享）
-    static let shared = EdgeTTSWebSocketDelegate()
-    
-    /// 存储每个 task 的连接回调（key: taskIdentifier）
-    private var connectionHandlers: [Int: (onConnected: () -> Void, onError: (Error) -> Void)] = [:]
-    
-    /// 注册 task 的连接回调
-    func registerHandler(for task: URLSessionWebSocketTask, onConnected: @escaping () -> Void, onError: @escaping (Error) -> Void) {
-        connectionHandlers[task.taskIdentifier] = (onConnected, onError)
-    }
-    
-    /// 移除 task 的连接回调
-    func removeHandler(for task: URLSessionWebSocketTask) {
-        connectionHandlers.removeValue(forKey: task.taskIdentifier)
-    }
-    
-    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol protocol: String?) {
-        SyncLogger.shared.info("🔊 Edge-TTS: WebSocket 连接建立成功，协议=\(`protocol` ?? "无")")
-        if let handler = connectionHandlers[webSocketTask.taskIdentifier] {
-            handler.onConnected()
-        }
-    }
-    
-    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
-        let reasonStr = reason.flatMap { String(data: $0, encoding: .utf8) } ?? "无"
-        SyncLogger.shared.info("🔊 Edge-TTS: WebSocket 连接关闭，code=\(closeCode.rawValue), reason=\(reasonStr)")
-        connectionHandlers.removeValue(forKey: webSocketTask.taskIdentifier)
-    }
-    
-    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        if let error = error {
-            SyncLogger.shared.info("🔊 Edge-TTS: WebSocket 任务完成（错误）- \(error.localizedDescription)")
-            if let handler = connectionHandlers[task.taskIdentifier] {
-                handler.onError(error)
-            }
-        }
-        connectionHandlers.removeValue(forKey: task.taskIdentifier)
-    }
-}
-
-// MARK: - Edge-TTS 常量和工具函数
-
-private enum EdgeTTSConstants {
-    static let baseURL = "speech.platform.bing.com/consumer/speech/synthesize/readaloud"
-    static let trustedClientToken = "6A5AA1D4EAFF4E9FB37E23D68491D6F4"
-    static let chromiumFullVersion = "143.0.3650.75"
-    static let chromiumMajorVersion = "143"
-    static let secMsGecVersion = "1-\(chromiumFullVersion)"
-    static let winEpoch: Double = 11644473600
-    static let sToNs: Double = 1e9
-}
-
-/// 生成 Sec-MS-GEC token（参考 edge-tts Python 库的 DRM.generate_sec_ms_gec）
-private func generateSecMsGec() -> String {
-    // 获取当前 Unix 时间戳
-    var ticks = Date().timeIntervalSince1970
-    // 转换到 Windows 文件时间纪元（1601-01-01 00:00:00 UTC）
-    ticks += EdgeTTSConstants.winEpoch
-    // 向下取整到最近的5分钟（300秒）
-    ticks -= ticks.truncatingRemainder(dividingBy: 300)
-    // 转换为100纳秒间隔（Windows 文件时间格式）
-    ticks *= EdgeTTSConstants.sToNs / 100
-    // 拼接时间戳和 TrustedClientToken
-    let strToHash = String(format: "%.0f", ticks) + EdgeTTSConstants.trustedClientToken
-    // 计算 SHA256 哈希，返回大写的十六进制摘要
-    let data = Data(strToHash.utf8)
-    let hash = SHA256.hash(data: data)
-    return hash.compactMap { String(format: "%02X", $0) }.joined()
-}
-
-/// 生成随机 MUID（32位十六进制，大写）
-private func generateMuid() -> String {
-    var bytes = [UInt8](repeating: 0, count: 16)
-    _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
-    return bytes.map { String(format: "%02X", $0) }.joined()
-}
-
-/// 生成 RFC 2616 格式的时间戳（如 "Tue, 08 Sep 2026 22:49:32 GMT"）
-private func rfc2616Timestamp() -> String {
-    let formatter = DateFormatter()
-    formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss 'GMT'"
-    formatter.timeZone = TimeZone(identifier: "GMT")
-    formatter.locale = Locale(identifier: "en_US_POSIX")
-    return formatter.string(from: Date())
-}
-
-/// 解析 Edge-TTS 二进制消息，提取音频数据
-/// 二进制消息格式：[2字节头部长度(大端序)][头部文本][\r\n\r\n][音频数据]
-private func parseEdgeTTSBinaryMessage(_ data: Data) -> Data? {
-    guard data.count >= 2 else { return nil }
-    // 前2字节是头部长度（大端序）
-    let headerLength = Int(data[0]) << 8 | Int(data[1])
-    guard headerLength + 2 <= data.count else { return nil }
-    // 跳过头部长度 + 2字节（\r\n\r\n），剩下的是音频数据
-    let audioStart = headerLength + 2
-    guard audioStart <= data.count else { return nil }
-    return data.subdata(in: audioStart..<data.count)
-}
 
 // MARK: - TTS 配置
 
@@ -204,19 +102,6 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
     private var audioPlayer: AVAudioPlayer?
     private var downloadTask: URLSessionDataTask?
     
-    // Edge-TTS WebSocket 相关
-    private var edgeTTSWebSocketTask: URLSessionWebSocketTask?
-    private var edgeTTSAudioData = Data()  // 累积 Edge-TTS 音频数据
-    
-    /// 共享的 URLSession（用于 Edge-TTS，复用连接池，避免每次创建新 session）
-    private static let edgeTTSSession: URLSession = {
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 30
-        config.timeoutIntervalForResource = 60
-        config.httpAdditionalHeaders = [:]
-        return URLSession(configuration: config, delegate: EdgeTTSWebSocketDelegate.shared, delegateQueue: OperationQueue.main)
-    }()
-    
     @Published private(set) var isSpeaking = false
     @Published private(set) var isPaused = false
     @Published private(set) var isLoading = false  // 是否正在下载音频
@@ -228,8 +113,6 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
     private var config: TTSConfig
     private var onSentenceComplete: ((Int) -> Void)?
     private var onComplete: (() -> Void)?
-    private var hasReceivedAudio = false  // 跟踪是否已接收到音频数据
-    private var inactivityTimerWorkItem: DispatchWorkItem?  // 不活跃超时计时器
     
     // MARK: - 音频预缓存
     private var audioCache: [Int: Data] = [:]  // 句子索引 -> 音频数据
@@ -250,8 +133,16 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
     }
     
     func updateConfig(_ config: TTSConfig) {
+        let oldRate = self.config.rate
         self.config = config
         SyncLogger.shared.info("🔊 TTSService.updateConfig: provider=\(config.provider.displayName), rate=\(config.rate)")
+        
+        // 【新增】如果正在播放 Edge-TTS 且语速变化，实时调整播放速度
+        // 因为 TTS 合成时使用默认语速，播放时通过 AVAudioPlayer.rate 后处理
+        if oldRate != config.rate, let player = audioPlayer, player.isPlaying {
+            player.rate = Float(config.rate)
+            SyncLogger.shared.info("🔊 实时调整播放速度: \(oldRate)x -> \(config.rate)x")
+        }
     }
     
     // MARK: - 文本分句
@@ -332,11 +223,10 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
             return
         }
         
-        // 计算缓存 key
+        // 计算缓存 key（不包含语速，语速通过播放时后处理实现）
         let cacheKey = TTSCacheManager.shared.cacheKey(
             for: sentence,
             voice: config.edgeVoice,
-            speed: config.rate,
             pitch: Int(config.pitch)
         )
         
@@ -387,12 +277,18 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
                 self.audioPlayer?.stop()
                 self.audioPlayer = try AVAudioPlayer(data: data)
                 self.audioPlayer?.delegate = self
+                
+                // 【新增】启用变速播放，语速通过播放时后处理实现
+                // TTS 合成时始终使用默认语速 1.0，播放时根据用户设置变速
+                self.audioPlayer?.enableRate = true
+                self.audioPlayer?.rate = Float(self.config.rate)
+                
                 self.audioPlayer?.prepareToPlay()
                 self.audioPlayer?.play()
                 self.isLoading = false
                 // 更新锁屏/控制中心的现在播放信息
                 self.updateNowPlayingInfo()
-                SyncLogger.shared.info("🔊 playAudioData: 开始播放，index=\(self.currentSentenceIndex)")
+                SyncLogger.shared.info("🔊 playAudioData: 开始播放，index=\(self.currentSentenceIndex)，语速=\(self.config.rate)x")
             } catch {
                 SyncLogger.shared.warning("🔊 playAudioData: 播放失败 - \(error.localizedDescription)，跳过当前句子")
                 self.isLoading = false
@@ -423,7 +319,6 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
             let cacheKey = TTSCacheManager.shared.cacheKey(
                 for: sentence,
                 voice: config.edgeVoice,
-                speed: config.rate,
                 pitch: Int(config.pitch)
             )
             guard !TTSCacheManager.shared.hasDiskCache(forKey: cacheKey) else {
@@ -454,7 +349,7 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
         let body: [String: Any] = [
             "input": sentence,
             "voice": config.edgeVoice,
-            "speed": config.rate,
+            "speed": 1.0,  // 合成时始终使用默认语速，语速通过播放时后处理实现
             "pitch": "\(Int(config.pitch))",
             "style": "general",
             "volume": "0"
@@ -496,12 +391,10 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
                 forKey: TTSCacheManager.shared.cacheKey(
                     for: sentence,
                     voice: self.config.edgeVoice,
-                    speed: self.config.rate,
                     pitch: Int(self.config.pitch)
                 ),
                 sentence: sentence,
                 voice: self.config.edgeVoice,
-                speed: self.config.rate,
                 pitch: Int(self.config.pitch)
             )
             
@@ -555,6 +448,8 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
         case .edgeTTSService:
             // 如果 audioPlayer 存在且已准备好，直接继续播放
             if audioPlayer != nil {
+                // 【新增】恢复播放时重新设置语速，确保使用最新的语速配置
+                audioPlayer?.rate = Float(config.rate)
                 audioPlayer?.play()
             } else {
                 // 否则重新播放当前句子
@@ -590,11 +485,8 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
         
         switch config.provider {
         case .edgeTTSService:
-            edgeTTSWebSocketTask?.cancel()
-            edgeTTSWebSocketTask = nil
             audioPlayer?.stop()
             audioPlayer = nil
-            edgeTTSAudioData = Data()
         case .iOSNative:
             synthesizer.stopSpeaking(at: .immediate)
         }
@@ -797,11 +689,8 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
         
         switch config.provider {
         case .edgeTTSService:
-            edgeTTSWebSocketTask?.cancel()
-            edgeTTSWebSocketTask = nil
             audioPlayer?.stop()
             audioPlayer = nil
-            edgeTTSAudioData = Data()
         case .iOSNative:
             synthesizer.stopSpeaking(at: .immediate)
         }
@@ -871,7 +760,7 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
         let body: [String: Any] = [
             "input": text,
             "voice": config.edgeVoice,
-            "speed": config.rate,
+            "speed": 1.0,  // 合成时始终使用默认语速，语速通过播放时后处理实现
             "pitch": "\(Int(config.pitch))",
             "style": "general",
             "volume": "0"
@@ -942,12 +831,10 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
                 forKey: TTSCacheManager.shared.cacheKey(
                     for: text,
                     voice: self.config.edgeVoice,
-                    speed: self.config.rate,
                     pitch: Int(self.config.pitch)
                 ),
                 sentence: text,
                 voice: self.config.edgeVoice,
-                speed: self.config.rate,
                 pitch: Int(self.config.pitch)
             )
             
@@ -968,294 +855,6 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
         
         downloadTask = task
         task.resume()
-    }
-    
-    // MARK: - Edge-TTS (WebSocket)
-    
-    private func speakEdgeTTS(_ text: String) {
-        let ssml = buildSSML(text: text)
-        
-        // 取消之前的任务
-        downloadTask?.cancel()
-        edgeTTSWebSocketTask?.cancel()
-        edgeTTSWebSocketTask = nil
-        audioPlayer?.stop()
-        audioPlayer = nil
-        edgeTTSAudioData = Data()
-        hasReceivedAudio = false
-        inactivityTimerWorkItem?.cancel()
-        inactivityTimerWorkItem = nil
-        
-        // 生成连接 ID 和请求 ID（不带连字符的全小写 UUID，与 Python edge-tts 库一致）
-        let connectionId = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
-        let requestId = connectionId
-        
-        // 生成 Sec-MS-GEC token（与 Python edge-tts 库的 DRM.generate_sec_ms_gec 算法完全一致）
-        let secMsGec = generateSecMsGec()
-        
-        // 构建完整的 WebSocket URL（包含所有必要的参数，与 Python edge-tts 库一致）
-        let urlString = "wss://\(EdgeTTSConstants.baseURL)/edge/v1" +
-            "?TrustedClientToken=\(EdgeTTSConstants.trustedClientToken)" +
-            "&ConnectionId=\(connectionId)" +
-            "&Sec-MS-GEC=\(secMsGec)" +
-            "&Sec-MS-GEC-Version=\(EdgeTTSConstants.secMsGecVersion)"
-        
-        guard let url = URL(string: urlString) else {
-            SyncLogger.shared.info("🔊 Edge-TTS: URL 无效，跳过当前句子")
-            sentenceFinished()
-            return
-        }
-        
-        SyncLogger.shared.info("🔊 Edge-TTS: connectionId=\(connectionId)")
-        SyncLogger.shared.info("🔊 Edge-TTS: Sec-MS-GEC=\(secMsGec)")
-        SyncLogger.shared.info("🔊 Edge-TTS: URL=\(urlString)")
-        
-        // 构建请求（请求头与 Python edge-tts 库的 WSS_HEADERS + headers_with_muid 完全一致）
-        var request = URLRequest(url: url)
-        // User-Agent：与 Python edge-tts 库的 BASE_HEADERS 一致
-        request.setValue(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" +
-            " (KHTML, like Gecko) Chrome/\(EdgeTTSConstants.chromiumMajorVersion).0.0.0 Safari/537.36" +
-            " Edg/\(EdgeTTSConstants.chromiumMajorVersion).0.0.0",
-            forHTTPHeaderField: "User-Agent"
-        )
-        // Origin：必须是 Chrome 扩展 ID（与 Python edge-tts 库一致）
-        request.setValue("chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold", forHTTPHeaderField: "Origin")
-        // Accept-Encoding：与 Python edge-tts 库一致
-        request.setValue("gzip, deflate, br, zstd", forHTTPHeaderField: "Accept-Encoding")
-        // Accept-Language：与 Python edge-tts 库一致
-        request.setValue("en-US,en;q=0.9", forHTTPHeaderField: "Accept-Language")
-        // Pragma / Cache-Control：与 Python edge-tts 库一致
-        request.setValue("no-cache", forHTTPHeaderField: "Pragma")
-        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
-        // 注意：不手动设置 Sec-WebSocket-Version，由 URLSession 自动设置（手动设置可能冲突）
-        // Cookie：包含随机的 muid（与 Python edge-tts 库的 DRM.headers_with_muid 一致）
-        request.setValue("muid=\(generateMuid());", forHTTPHeaderField: "Cookie")
-        
-        // 使用共享的 URLSession 创建 WebSocket task（复用连接池）
-        let task = TTSService.edgeTTSSession.webSocketTask(with: request)
-        edgeTTSWebSocketTask = task
-        
-        let speechConfigMessage = buildSpeechConfigMessage(requestId: requestId)
-        let ssmlMessage = buildSSMLMessage(requestId: requestId, ssml: ssml)
-        
-        // 注册连接回调：连接建立成功后发送消息，连接失败时降级
-        EdgeTTSWebSocketDelegate.shared.registerHandler(
-            for: task,
-            onConnected: { [weak self] in
-                guard let self = self else { return }
-                SyncLogger.shared.info("🔊 Edge-TTS: 连接已建立，开始发送消息")
-                
-                // 发送 speech.config 消息
-                task.send(.string(speechConfigMessage)) { [weak self] error in
-                    guard let self = self else { return }
-                    if let error = error {
-                        SyncLogger.shared.info("🔊 Edge-TTS: 发送 speech.config 失败 - \(error.localizedDescription)，跳过当前句子")
-                        self.sentenceFinished()
-                        return
-                    }
-                    
-                    SyncLogger.shared.info("🔊 Edge-TTS: speech.config 发送成功")
-                    
-                    // 发送 ssml 消息
-                    task.send(.string(ssmlMessage)) { [weak self] error in
-                        guard let self = self else { return }
-                        if let error = error {
-                            SyncLogger.shared.info("🔊 Edge-TTS: 发送 ssml 失败 - \(error.localizedDescription)，跳过当前句子")
-                            self.sentenceFinished()
-                            return
-                        }
-                        
-                        SyncLogger.shared.info("🔊 Edge-TTS: ssml 发送成功，SSML前100字=\(String(ssml.prefix(100)))")
-                        SyncLogger.shared.info("🔊 Edge-TTS: 消息已发送，开始接收音频数据...")
-                        // 开始接收消息
-                        self.receiveEdgeTTSMessages(task: task, originalText: text)
-                    }
-                }
-            },
-            onError: { [weak self] error in
-                guard let self = self else { return }
-                SyncLogger.shared.info("🔊 Edge-TTS: 连接失败 - \(error.localizedDescription)，跳过当前句子")
-                self.sentenceFinished()
-            }
-        )
-        
-        task.resume()
-        
-        SyncLogger.shared.info("🔊 Edge-TTS: 已创建 WebSocket task，正在建立连接... requestId=\(requestId)")
-        SyncLogger.shared.info("🔊 Edge-TTS: 等待 didOpenWithProtocol 回调后发送消息")
-        
-        // 设置连接超时（15秒内未建立连接则跳过）
-        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
-            guard let self = self else { return }
-            guard self.edgeTTSWebSocketTask === task else { return }
-            if task.state != .running {
-                SyncLogger.shared.info("🔊 Edge-TTS: 连接建立超时（15秒），跳过当前句子")
-                task.cancel()
-                EdgeTTSWebSocketDelegate.shared.removeHandler(for: task)
-                self.sentenceFinished()
-            } else {
-                SyncLogger.shared.info("🔊 Edge-TTS: 连接已建立，启动不活跃超时计时器")
-                self.resetInactivityTimer(task: task, originalText: text)
-            }
-        }
-    }
-    
-    /// 构建 speech.config 消息（参考 edge-tts Python 库的 send_command_request，完全一致）
-    private func buildSpeechConfigMessage(requestId: String) -> String {
-        let timestamp = rfc2616Timestamp()
-        // os 信息必须与 User-Agent 一致（Windows/Edge）
-        // 注意：JSON 后面必须有 \r\n，与 Python edge-tts 库完全一致
-        let configJSON = """
-        {"context":{"synthesis":{"audio":{"metadataoptions":{"sentenceBoundaryEnabled":"true","wordBoundaryEnabled":"false"},"outputFormat":"audio-24khz-48kbitrate-mono-mp3"}}}}
-        """
-        return "X-Timestamp:\(timestamp)\r\nContent-Type:application/json; charset=utf-8\r\nPath:speech.config\r\n\r\n\(configJSON)\r\n"
-    }
-    
-    /// 构建 ssml 消息（参考 edge-tts Python 库的 ssml_headers_plus_data）
-    private func buildSSMLMessage(requestId: String, ssml: String) -> String {
-        let timestamp = rfc2616Timestamp()
-        return "X-Timestamp:\(timestamp)\r\nContent-Type:application/ssml+xml\r\nX-RequestId:\(requestId)\r\nPath:ssml\r\n\r\n\(ssml)"
-    }
-    
-    /// 重置不活跃超时计时器（收到音频数据时调用）
-    private func resetInactivityTimer(task: URLSessionWebSocketTask, originalText: String) {
-        inactivityTimerWorkItem?.cancel()
-        
-        let workItem = DispatchWorkItem { [weak self] in
-            guard let self = self else { return }
-            guard self.edgeTTSWebSocketTask === task else { return }
-            if !self.hasReceivedAudio {
-                SyncLogger.shared.info("🔊 Edge-TTS: 15秒内未收到音频数据，跳过当前句子")
-                task.cancel()
-                EdgeTTSWebSocketDelegate.shared.removeHandler(for: task)
-                self.sentenceFinished()
-            }
-        }
-        
-        inactivityTimerWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + 15, execute: workItem)
-    }
-    
-    /// 循环接收 Edge-TTS 消息
-    private func receiveEdgeTTSMessages(task: URLSessionWebSocketTask, originalText: String) {
-        task.receive { [weak self] result in
-            guard let self = self else { return }
-            
-            // 检查任务是否已被取消
-            if task.state == .canceling || task.state == .completed {
-                return
-            }
-            
-            switch result {
-            case .success(let message):
-                switch message {
-                case .string(let text):
-                    // 解析文本消息
-                    SyncLogger.shared.info("🔊 Edge-TTS: 收到文本消息，大小=\(text.count)字符，前100字=\(String(text.prefix(100)))")
-                    if text.contains("Path:turn.end") {
-                        // 合成结束，播放累积的音频数据
-                        SyncLogger.shared.info("🔊 Edge-TTS: 合成结束，累积音频数据大小=\(self.edgeTTSAudioData.count)字节")
-                        if !self.edgeTTSAudioData.isEmpty {
-                            self.playEdgeTTSAudio()
-                        } else {
-                            SyncLogger.shared.info("🔊 Edge-TTS: 未收到音频数据，跳过当前句子")
-                            self.sentenceFinished()
-                        }
-                        return
-                    } else if text.contains("Path:turn.start") {
-                        SyncLogger.shared.info("🔊 Edge-TTS: 开始合成")
-                    } else if text.contains("Path:response.end") {
-                        SyncLogger.shared.info("🔊 Edge-TTS: 响应结束")
-                    }
-                    // 其他文本消息（audio.metadata 等）忽略
-                    
-                case .data(let data):
-                    // Edge-TTS 二进制消息格式：[2字节头部长度(大端序)][头部文本][音频数据]
-                    guard let audioData = parseEdgeTTSBinaryMessage(data) else {
-                        SyncLogger.shared.info("🔊 Edge-TTS: 收到无效的二进制消息，大小=\(data.count)字节")
-                        break
-                    }
-                    if !audioData.isEmpty {
-                        self.hasReceivedAudio = true
-                        // 累积音频数据
-                        self.edgeTTSAudioData.append(audioData)
-                        // 重置不活跃超时计时器
-                        self.resetInactivityTimer(task: task, originalText: originalText)
-                        // 每收到10个音频包记录一次日志
-                        if self.edgeTTSAudioData.count % 7200 < 720 {
-                            SyncLogger.shared.info("🔊 Edge-TTS: 累积音频数据=\(self.edgeTTSAudioData.count)字节，本次=\(audioData.count)字节，前8字节=\(audioData.prefix(8).map { String(format: "%02X", $0) }.joined())")
-                        }
-                    }
-                }
-                
-                // 继续接收下一条消息
-                self.receiveEdgeTTSMessages(task: task, originalText: originalText)
-                
-            case .failure(let error):
-                SyncLogger.shared.info("🔊 Edge-TTS: 接收消息失败 - \(error.localizedDescription)")
-                if !self.edgeTTSAudioData.isEmpty {
-                    SyncLogger.shared.info("🔊 Edge-TTS: 接收失败但已有音频数据（\(self.edgeTTSAudioData.count)字节），尝试播放")
-                    self.playEdgeTTSAudio()
-                } else {
-                    SyncLogger.shared.info("🔊 Edge-TTS: 接收失败且无音频数据，跳过当前句子")
-                    self.sentenceFinished()
-                }
-            }
-        }
-    }
-    
-    /// 播放累积的 Edge-TTS 音频数据
-    private func playEdgeTTSAudio() {
-        let data = edgeTTSAudioData
-        SyncLogger.shared.info("🔊 Edge-TTS: 准备播放音频，数据大小=\(data.count)字节，前16字节=\(data.prefix(16).map { String(format: "%02X", $0) }.joined())")
-        
-        do {
-            // 设置 AVAudioSession
-            let audioSession = AVAudioSession.sharedInstance()
-            try audioSession.setCategory(.playback, mode: .spokenAudio, options: [])
-            try audioSession.setActive(true)
-            
-            // 创建 AVAudioPlayer
-            audioPlayer = try AVAudioPlayer(data: data)
-            audioPlayer?.delegate = self
-            audioPlayer?.prepareToPlay()
-            
-            SyncLogger.shared.info("🔊 Edge-TTS: AVAudioPlayer 创建成功，时长=\(audioPlayer?.duration ?? 0)秒")
-            
-            let started = audioPlayer?.play() ?? false
-            SyncLogger.shared.info("🔊 Edge-TTS: 音频播放开始，结果=\(started)")
-            
-            if !started {
-                SyncLogger.shared.info("🔊 Edge-TTS: 播放失败，跳过当前句子")
-                sentenceFinished()
-            }
-        } catch {
-            SyncLogger.shared.info("🔊 Edge-TTS: 播放失败 - \(error.localizedDescription)，跳过当前句子")
-            sentenceFinished()
-        }
-    }
-    
-    private func buildSSML(text: String) -> String {
-        let ratePercent = Int((config.rate - 1.0) * 100)
-        let rateStr = ratePercent >= 0 ? "+\(ratePercent)%" : "\(ratePercent)%"
-        let pitchHz = config.pitch
-        let pitchStr = pitchHz >= 0 ? "+\(pitchHz)Hz" : "\(pitchHz)Hz"
-        
-        let escapedText = text
-            .replacingOccurrences(of: "&", with: "&amp;")
-            .replacingOccurrences(of: "<", with: "&lt;")
-            .replacingOccurrences(of: ">", with: "&gt;")
-        
-        return """
-        <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="zh-CN">
-            <voice name="\(config.edgeVoice)">
-                <prosody rate="\(rateStr)" pitch="\(pitchStr)">
-                    \(escapedText)
-                </prosody>
-            </voice>
-        </speak>
-        """
     }
     
     // MARK: - AVSpeechSynthesizerDelegate
