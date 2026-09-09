@@ -18,6 +18,7 @@ struct LectureReaderView: View {
     
     @State private var isPlaying = false
     @State private var isPaused = false
+    @State private var isLoading = false  // TTS是否正在加载音频
     @State private var currentSentenceIndex = 0
     @State private var totalSentences = 0
     @State private var currentSentence = ""
@@ -63,8 +64,7 @@ struct LectureReaderView: View {
                                 }
                             }
                             .padding(.horizontal)
-                            .padding(.top, 8)
-                            
+                            .padding(.top, 8)                            
                             Divider()
                             
                             // 讲稿内容（按句子显示，当前朗读句子高亮）
@@ -135,6 +135,9 @@ struct LectureReaderView: View {
                 if !sentences.isEmpty {
                     currentSentence = sentences[0]
                 }
+            }
+            .onReceive(TTSService.shared.$isLoading) { loading in
+                isLoading = loading
             }
             .onDisappear {
                 stopPlaying()
@@ -225,12 +228,20 @@ struct LectureReaderView: View {
                         Circle()
                             .fill(Color.orange)
                             .frame(width: 56, height: 56)
-                        Image(systemName: isPlaying ? (isPaused ? "play.fill" : "pause.fill") : "play.fill")
-                            .font(.title2)
-                            .foregroundColor(.white)
+                        if isLoading {
+                            // 加载状态：旋转动画
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                .scaleEffect(1.2)
+                        } else {
+                            Image(systemName: isPlaying ? (isPaused ? "play.fill" : "pause.fill") : "play.fill")
+                                .font(.title2)
+                                .foregroundColor(.white)
+                        }
                     }
                 }
                 .frame(width: 56, height: 56)
+                .disabled(isLoading)
                 
                 // 下一句
                 Button {

@@ -233,7 +233,8 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
     
     // MARK: - 音频预缓存
     private var audioCache: [Int: Data] = [:]  // 句子索引 -> 音频数据
-    private var preloadTask: URLSessionDataTask?  // 预下载任务
+    private var preloadTask: URLSessionDataTask?  // 预下载任务（保留兼容）
+    private var preloadTasks: [Int: URLSessionDataTask] = [:]  // 多句预下载任务管理
     private var pendingPlayIndex: Int?  // 暂停时下载完成，待播放的句子索引
     
     // MARK: - 后台音频保活
@@ -371,19 +372,38 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
         }
     }
     
-    /// 预下载下一句的音频
+    /// 预下载接下来的10句音频（后台播放保活优化：确保熄屏后有足够缓存连续播放）
     private func preloadNextSentence() {
-        let nextIndex = currentSentenceIndex + 1
-        guard nextIndex < sentences.count else { return }
-        guard audioCache[nextIndex] == nil else {
-            SyncLogger.shared.info("🔊 preloadNextSentence: 下一句已在缓存中，跳过预下载，index=\(nextIndex)")
-            return
-        }
         guard config.provider == .edgeTTSService else { return }
         
-        SyncLogger.shared.info("🔊 preloadNextSentence: 开始预下载下一句，index=\(nextIndex)")
+        let preloadCount = 10  // 预下载接下来的10句
+        var startedCount = 0
         
-        let sentence = sentences[nextIndex]
+        for offset in 1...preloadCount {
+            let targetIndex = currentSentenceIndex + offset
+            guard targetIndex < sentences.count else { break }
+            
+            // 已缓存或正在下载，跳过
+            guard audioCache[targetIndex] == nil else { continue }
+            guard preloadTasks[targetIndex] == nil else { continue }
+            
+            // 开始预下载
+            startedCount += 1
+            preloadSentence(at: targetIndex)
+        }
+        
+        if startedCount > 0 {
+            SyncLogger.shared.info("🔊 preloadNextSentence: 启动 \(startedCount) 个预下载任务（当前句=\(currentSentenceIndex)，预下载接下来\(preloadCount)句）")
+        }
+    }
+    
+    /// 预下载指定索引的句子音频
+    private func preloadSentence(at index: Int) {
+        guard index < sentences.count else { return }
+        guard audioCache[index] == nil else { return }
+        guard preloadTasks[index] == nil else { return }
+        
+        let sentence = sentences[index]
         let serviceURL = config.serviceURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !serviceURL.isEmpty, let url = URL(string: "\(serviceURL)/v1/audio/speech") else { return }
         
@@ -405,20 +425,28 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
         } catch { return }
         
-        preloadTask?.cancel()
         let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
             guard let self = self else { return }
+            
+            // 下载完成后从任务字典中移除
+            defer {
+                DispatchQueue.main.async {
+                    self.preloadTasks.removeValue(forKey: index)
+                }
+            }
+            
             guard error == nil,
                   let httpResponse = response as? HTTPURLResponse,
                   httpResponse.statusCode == 200,
                   let audioData = data, !audioData.isEmpty else {
-                SyncLogger.shared.warning("🔊 preloadNextSentence: 预下载失败，index=\(nextIndex)")
+                SyncLogger.shared.warning("🔊 preloadSentence: 预下载失败，index=\(index)")
                 return
             }
-            self.audioCache[nextIndex] = audioData
-            SyncLogger.shared.info("🔊 preloadNextSentence: 预下载成功，index=\(nextIndex)，大小=\(audioData.count)字节")
+            self.audioCache[index] = audioData
+            SyncLogger.shared.info("🔊 preloadSentence: 预下载成功，index=\(index)，大小=\(audioData.count)字节")
         }
-        preloadTask = task
+        
+        preloadTasks[index] = task
         task.resume()
     }
     
@@ -489,6 +517,11 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
         downloadTask = nil
         preloadTask?.cancel()
         preloadTask = nil
+        // 取消所有多句预下载任务
+        for (_, task) in preloadTasks {
+            task.cancel()
+        }
+        preloadTasks.removeAll()
         
         // 清理缓存（保留是为了下次播放，但这里 stop 是完全停止，所以清理）
         // audioCache = [:]  // 不清理，下次播放相同文本时可以复用
