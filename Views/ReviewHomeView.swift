@@ -30,37 +30,37 @@ struct ReviewHomeView: View {
                 // 顶部统计卡片
                 VStack(spacing: 14) {
                     HStack {
-                        VStack(alignment: .leading, spacing: 4) {
+                        VStack(alignment: .leading, spacing: AppSpacing.xs) {
                             Text("今日概览")
                                 .textStyle(.sectionTitle)
-                                .foregroundColor(.secondary)
+                                .foregroundColor(.textSecondary)
                             Text("\(stats.streakDays) 天连续打卡")
                                 .textStyle(.screenTitle)
-                                .foregroundColor(.orange)
+                                .foregroundColor(.brandPrimary)
                         }
                         Spacer()
                         Image(systemName: "flame.fill")
                             .textStyle(.screenTitle)
-                            .foregroundColor(.orange)
+                            .foregroundColor(.brandPrimary)
                     }
                     
-                    HStack(spacing: 12) {
+                    HStack(spacing: AppSpacing.md) {
                         StatCard(title: "待复习", value: "\(queue.count)",
                                  systemImage: "doc.richtext.fill",
                                  color: .blue, highlight: queue.count > 0)
                         StatCard(title: "新笔记", value: "\(newCount)",
                                  systemImage: "sparkles",
-                                 color: .orange)
+                                 color: .brandPrimary)
                         StatCard(title: "学习中", value: "\(learningCount)",
                                  systemImage: "book.fill",
-                                 color: .orange)
+                                 color: .brandPrimary)
                         StatCard(title: "已复习", value: "\(stats.reviewedToday)",
                                  systemImage: "checkmark.seal.fill",
                                  color: .green)
                     }
                 }
                 .padding(18)
-                .background(RoundedRectangle(cornerRadius: 18).fill(Color(.systemBackground)))
+                .background(RoundedRectangle(cornerRadius: AppCornerRadius.huge).fill(Color.bgCard))
                 .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
                 
                 // 开始复习按钮
@@ -71,21 +71,21 @@ struct ReviewHomeView: View {
                         if queue.isEmpty {
                             Image(systemName: "checkmark.circle.fill")
                                 .textStyle(.screenTitle)
-                                .foregroundColor(.orange)  // 统一橙色
-                            VStack(alignment: .leading, spacing: 4) {
+                                .foregroundColor(.brandPrimary)
+                            VStack(alignment: .leading, spacing: AppSpacing.xs) {
                                 Text("今日已完成")
                                     .textStyle(.subsectionTitle)
-                                    .foregroundColor(.orange)  // 统一橙色
+                                    .foregroundColor(.brandPrimary)
                                 Text("明天再来巩固记忆吧！")
                                     .textStyle(.secondaryText)
-                                    .foregroundColor(.secondary)
+                                    .foregroundColor(.textSecondary)
                             }
                         } else {
                             ZStack {
                                 Circle()
                                     .fill(
                                         LinearGradient(
-                                            colors: [Color.orange, Color.orange.opacity(0.7)],  // 统一橙色
+                                            colors: [Color.brandPrimary, Color.brandPrimary.opacity(0.7)],
                                             startPoint: .topLeading, endPoint: .bottomTrailing)
                                     )
                                     .frame(width: 52, height: 52)
@@ -93,29 +93,29 @@ struct ReviewHomeView: View {
                                     .textStyle(.screenTitle)
                                     .foregroundColor(.white)
                             }
-                            VStack(alignment: .leading, spacing: 4) {
+                            VStack(alignment: .leading, spacing: AppSpacing.xs) {
                                 Text("开始复习")
                                     .textStyle(.subsectionTitle)
                                 Text("共 \(queue.count) 篇笔记待复习 · 预计用时 \(estimatedTime(for: queue))")
                                     .textStyle(.secondaryText)
-                                    .foregroundColor(.secondary)
+                                    .foregroundColor(.textSecondary)
                             }
                         }
                         Spacer()
                         Image(systemName: "chevron.right")
-                            .foregroundColor(.secondary)
+                            .foregroundColor(.textSecondary)
                     }
                     .padding(18)
                     .background(
-                        RoundedRectangle(cornerRadius: 18)
-                            .fill(Color.orange.opacity(0.08))  // 统一极浅橙背景
+                        RoundedRectangle(cornerRadius: AppCornerRadius.huge)
+                            .fill(Color.brandPrimaryLight)
                     )
                 }
                 .buttonStyle(.plain)
                 .disabled(queue.isEmpty)
                 
                 // 7 天复习趋势
-                VStack(spacing: 12) {
+                VStack(spacing: AppSpacing.md) {
                     HStack {
                         Text("近 7 天复习量")
                             .textStyle(.sectionTitle)
@@ -125,7 +125,7 @@ struct ReviewHomeView: View {
                         .frame(height: 140)
                 }
                 .padding(18)
-                .background(RoundedRectangle(cornerRadius: 18).fill(Color(.systemBackground)))
+                .background(RoundedRectangle(cornerRadius: AppCornerRadius.huge).fill(Color.bgCard))
                 .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
                 
                 // 按文件夹复习
@@ -141,14 +141,14 @@ struct ReviewHomeView: View {
                             Spacer()
                             ProgressView()
                             Text("加载文件夹...")
-                                .foregroundColor(.secondary)
-                                .font(.subheadline)
+                                .foregroundColor(.textSecondary)
+                                .font(.appBody)
                             Spacer()
                         }
                         .padding(.vertical, 20)
                     } else if allFolders.isEmpty {
                         Text("暂无需要复习的文件夹")
-                            .foregroundColor(.secondary)
+                            .foregroundColor(.textSecondary)
                             .textStyle(.secondaryText)
                     }
                     ForEach(displayedFolders) { folder in
@@ -157,7 +157,7 @@ struct ReviewHomeView: View {
                         Button {
                             selectedFolderId = folder.id
                         } label: {
-                            HStack(spacing: 12) {
+                            HStack(spacing: AppSpacing.md) {
                                 Image(systemName: "folder.fill")
                                     .foregroundColor(.yellow)
                                     .frame(width: 24)
@@ -167,8 +167,8 @@ struct ReviewHomeView: View {
                                         .lineLimit(1)
                                     // 显示完整文件夹路径
                                     Text(folderPath)
-                                        .font(.caption2)
-                                        .foregroundColor(.secondary)
+                                        .font(.appCaption)
+                                        .foregroundColor(.textSecondary)
                                         .lineLimit(1)
                                 }
                                 Spacer()
@@ -185,8 +185,8 @@ struct ReviewHomeView: View {
                                 }
                             }
                             .padding()
-                            .background(Color(.secondarySystemBackground))
-                            .cornerRadius(10)
+                            .background(Color.bgInput)
+                            .cornerRadius(AppCornerRadius.standard)
                         }
                         .buttonStyle(.plain)
                         .disabled(count == 0)
@@ -199,12 +199,12 @@ struct ReviewHomeView: View {
                                 ProgressView()
                                     .padding(.vertical, 8)
                                 Text("加载中...")
-                                    .foregroundColor(.secondary)
-                                    .font(.subheadline)
+                                    .foregroundColor(.textSecondary)
+                                    .font(.appBody)
                             } else {
                                 Text("加载更多")
                                     .foregroundColor(.blue)
-                                    .font(.subheadline)
+                                    .font(.appBody)
                             }
                             Spacer()
                         }
@@ -220,12 +220,12 @@ struct ReviewHomeView: View {
                     }
                 }
                 .padding(18)
-                .background(RoundedRectangle(cornerRadius: 18).fill(Color(.systemBackground)))
+                .background(RoundedRectangle(cornerRadius: AppCornerRadius.huge).fill(Color.bgCard))
                 .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
             }
             .padding()
         }
-        .background(Color(.systemGroupedBackground))
+        .background(Color.bgPage)
         .navigationTitle("复习")
         .onAppear {
             stats = scheduler.computeStats()
