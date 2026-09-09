@@ -225,6 +225,27 @@ final class AppState: ObservableObject {
             }
         }
         isBootstrapped = true
+        // 7) 监听元数据/知识点缓存变更通知，自动推送到云端（防抖）
+        NotificationCenter.default.addObserver(
+            forName: .metadataSyncNeeded,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.pushMetadataAndKnowledgeCacheSilently()
+        }
+    }
+    
+    /// 静默推送元数据和知识点缓存到云端（防抖，不显示同步UI）
+    private func pushMetadataAndKnowledgeCacheSilently() {
+        guard !isSyncing, let fs = activeFS else { return }
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self = self else { return }
+            let metaPushed = MetadataSyncService.shared.pushToCloud(cloudFS: fs)
+            let knowledgePushed = MetadataSyncService.shared.pushKnowledgeCache(cloudFS: fs)
+            if metaPushed > 0 || knowledgePushed > 0 {
+                print("📤 静默推送: 元数据 \(metaPushed) 个，知识点缓存 \(knowledgePushed) 个")
+            }
+        }
     }
 
     func refreshStats() {
@@ -581,7 +602,10 @@ final class AppState: ObservableObject {
                 SyncLogger.shared.debug("云端 noteMetas: \(cloudNoteMetas.count) 条")
                 let mergedNoteMetas = MetadataSyncService.shared.mergeNoteMetas(local: localNoteMetasBackup, cloud: cloudNoteMetas)
                 // 【优化】只有合并后的数据与云端数据真的有变化时才写入，避免无数据变更时也更新文件修改时间触发不必要的推送
-                if mergedNoteMetas != cloudNoteMetas {
+                // 注意：mergeNoteMetas 返回的数组顺序不确定（字典values转换），需要按id排序后再比较
+                let sortedMerged = mergedNoteMetas.sorted { $0.id.uuidString < $1.id.uuidString }
+                let sortedCloud = cloudNoteMetas.sorted { $0.id.uuidString < $1.id.uuidString }
+                if sortedMerged != sortedCloud {
                     MetadataSyncService.shared.writeLocalNoteMetas(mergedNoteMetas)
                     SyncLogger.shared.info("SRS 数据合并后有变化，已写入 notes_index.json")
                 } else {

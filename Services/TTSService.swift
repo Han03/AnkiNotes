@@ -9,23 +9,47 @@ import Foundation
 import AVFoundation
 import CryptoKit
 
-// MARK: - Edge-TTS WebSocket 连接处理器（仅用于日志，不阻塞）
+// MARK: - Edge-TTS WebSocket 连接处理器
 
-/// Edge-TTS WebSocket 连接处理器，仅用于日志记录
+/// Edge-TTS WebSocket 连接处理器，支持为每个 task 注册独立的连接回调
 final class EdgeTTSWebSocketDelegate: NSObject, URLSessionWebSocketDelegate {
+    /// 单例（因为 URLSession 的 delegate 在创建时设置，需要共享）
+    static let shared = EdgeTTSWebSocketDelegate()
+    
+    /// 存储每个 task 的连接回调（key: taskIdentifier）
+    private var connectionHandlers: [Int: (onConnected: () -> Void, onError: (Error) -> Void)] = [:]
+    
+    /// 注册 task 的连接回调
+    func registerHandler(for task: URLSessionWebSocketTask, onConnected: @escaping () -> Void, onError: @escaping (Error) -> Void) {
+        connectionHandlers[task.taskIdentifier] = (onConnected, onError)
+    }
+    
+    /// 移除 task 的连接回调
+    func removeHandler(for task: URLSessionWebSocketTask) {
+        connectionHandlers.removeValue(forKey: task.taskIdentifier)
+    }
+    
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol protocol: String?) {
         SyncLogger.shared.info("🔊 Edge-TTS: WebSocket 连接建立成功，协议=\(`protocol` ?? "无")")
+        if let handler = connectionHandlers[webSocketTask.taskIdentifier] {
+            handler.onConnected()
+        }
     }
     
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
         let reasonStr = reason.flatMap { String(data: $0, encoding: .utf8) } ?? "无"
         SyncLogger.shared.info("🔊 Edge-TTS: WebSocket 连接关闭，code=\(closeCode.rawValue), reason=\(reasonStr)")
+        connectionHandlers.removeValue(forKey: webSocketTask.taskIdentifier)
     }
     
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         if let error = error {
             SyncLogger.shared.info("🔊 Edge-TTS: WebSocket 任务完成（错误）- \(error.localizedDescription)")
+            if let handler = connectionHandlers[task.taskIdentifier] {
+                handler.onError(error)
+            }
         }
+        connectionHandlers.removeValue(forKey: task.taskIdentifier)
     }
 }
 
@@ -173,8 +197,7 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
         config.timeoutIntervalForRequest = 30
         config.timeoutIntervalForResource = 60
         config.httpAdditionalHeaders = [:]
-        let delegate = EdgeTTSWebSocketDelegate()
-        return URLSession(configuration: config, delegate: delegate, delegateQueue: OperationQueue.main)
+        return URLSession(configuration: config, delegate: EdgeTTSWebSocketDelegate.shared, delegateQueue: OperationQueue.main)
     }()
     
     @Published private(set) var isSpeaking = false
@@ -443,52 +466,76 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
         // 使用共享的 URLSession 创建 WebSocket task（复用连接池）
         let task = TTSService.edgeTTSSession.webSocketTask(with: request)
         edgeTTSWebSocketTask = task
+        
+        let speechConfigMessage = buildSpeechConfigMessage(requestId: requestId)
+        let ssmlMessage = buildSSMLMessage(requestId: requestId, ssml: ssml)
+        
+        // 注册连接回调：连接建立成功后发送消息，连接失败时降级
+        EdgeTTSWebSocketDelegate.shared.registerHandler(
+            for: task,
+            onConnected: { [weak self] in
+                guard let self = self else { return }
+                SyncLogger.shared.info("🔊 Edge-TTS: 连接已建立，开始发送消息")
+                
+                // 发送 speech.config 消息
+                task.send(.string(speechConfigMessage)) { [weak self] error in
+                    guard let self = self else { return }
+                    if let error = error {
+                        SyncLogger.shared.info("🔊 Edge-TTS: 发送 speech.config 失败 - \(error.localizedDescription)")
+                        self.fallbackToiOSNative(text: text)
+                        return
+                    }
+                    
+                    SyncLogger.shared.info("🔊 Edge-TTS: speech.config 发送成功")
+                    
+                    // 发送 ssml 消息
+                    task.send(.string(ssmlMessage)) { [weak self] error in
+                        guard let self = self else { return }
+                        if let error = error {
+                            SyncLogger.shared.info("🔊 Edge-TTS: 发送 ssml 失败 - \(error.localizedDescription)")
+                            self.fallbackToiOSNative(text: text)
+                            return
+                        }
+                        
+                        SyncLogger.shared.info("🔊 Edge-TTS: ssml 发送成功，SSML前100字=\(String(ssml.prefix(100)))")
+                        SyncLogger.shared.info("🔊 Edge-TTS: 消息已发送，开始接收音频数据...")
+                        // 开始接收消息
+                        self.receiveEdgeTTSMessages(task: task, originalText: text)
+                    }
+                }
+            },
+            onError: { [weak self] error in
+                guard let self = self else { return }
+                SyncLogger.shared.info("🔊 Edge-TTS: 连接失败 - \(error.localizedDescription)，降级到 iOS 原生")
+                self.fallbackToiOSNative(text: text)
+            }
+        )
+        
         task.resume()
         
         SyncLogger.shared.info("🔊 Edge-TTS: 已创建 WebSocket task，正在建立连接... requestId=\(requestId)")
-        SyncLogger.shared.info("🔊 Edge-TTS: 注意：不阻塞主线程，连接建立后系统自动发送排队的消息")
+        SyncLogger.shared.info("🔊 Edge-TTS: 等待 didOpenWithProtocol 回调后发送消息")
         
-        // 关键修复：不使用 DispatchSemaphore 阻塞主线程！
-        // URLSessionWebSocketTask 支持在连接建立前就发送消息，系统会自动排队等待连接建立
-        // 这与 Python aiohttp 的 ws_connect 后立即 send 的逻辑完全一致
-        
-        // 直接发送 speech.config 消息（系统自动等待连接建立）
-        let speechConfigMessage = buildSpeechConfigMessage(requestId: requestId)
-        task.send(.string(speechConfigMessage)) { [weak self] error in
+        // 设置连接超时（15秒内未建立连接则降级）
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
             guard let self = self else { return }
-            if let error = error {
-                SyncLogger.shared.info("🔊 Edge-TTS: 发送 speech.config 失败（连接可能失败）- \(error.localizedDescription)")
+            if self.edgeTTSWebSocketTask === task && self.edgeTTSAudioData.isEmpty {
+                // 检查是否还在等待连接（没有收到任何消息）
+                SyncLogger.shared.info("🔊 Edge-TTS: 连接建立超时（15秒），降级到 iOS 原生")
+                task.cancel()
+                EdgeTTSWebSocketDelegate.shared.removeHandler(for: task)
                 self.fallbackToiOSNative(text: text)
-                return
-            }
-            
-            SyncLogger.shared.info("🔊 Edge-TTS: speech.config 发送成功（连接已建立）")
-            
-            // 发送 ssml 消息
-            let ssmlMessage = buildSSMLMessage(requestId: requestId, ssml: ssml)
-            task.send(.string(ssmlMessage)) { [weak self] error in
-                guard let self = self else { return }
-                if let error = error {
-                    SyncLogger.shared.info("🔊 Edge-TTS: 发送 ssml 失败 - \(error.localizedDescription)")
-                    self.fallbackToiOSNative(text: text)
-                    return
-                }
-                
-                SyncLogger.shared.info("🔊 Edge-TTS: ssml 发送成功，SSML前100字=\(String(ssml.prefix(100)))")
-                SyncLogger.shared.info("🔊 Edge-TTS: 消息已发送，开始接收音频数据...")
-                // 开始接收消息
-                self.receiveEdgeTTSMessages(task: task, originalText: text)
             }
         }
         
         // 设置整体超时（30秒，不阻塞主线程，使用 asyncAfter）
-        // 与 Python aiohttp 的 ClientTimeout(total=30) 逻辑一致
         DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [weak self] in
             guard let self = self else { return }
             // 检查是否还是当前任务，且未收到音频数据
             if self.edgeTTSWebSocketTask === task && self.edgeTTSAudioData.isEmpty {
                 SyncLogger.shared.info("🔊 Edge-TTS: 整体超时（30秒）且未收到音频数据，降级到 iOS 原生")
                 task.cancel()
+                EdgeTTSWebSocketDelegate.shared.removeHandler(for: task)
                 self.fallbackToiOSNative(text: text)
             }
         }

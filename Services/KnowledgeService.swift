@@ -95,6 +95,8 @@ final class KnowledgeService: ObservableObject {
         let result = KnowledgeExtractionResult(noteId: note.id, noteTitle: note.title, points: points)
         if let data = try? JSONEncoder().encode(result) {
             try? data.write(to: extractionCacheURL(for: note), options: .atomic)
+            // 标记知识点缓存已变更，触发防抖推送到云端
+            MetadataSyncService.shared.markDirty()
         }
     }
     
@@ -116,6 +118,8 @@ final class KnowledgeService: ObservableObject {
         guard !explanation.isEmpty else { return }
         if let data = explanation.data(using: .utf8) {
             try? data.write(to: explanationCacheURL(for: point, note: note), options: .atomic)
+            // 标记知识点缓存已变更，触发防抖推送到云端
+            MetadataSyncService.shared.markDirty()
         }
     }
     
