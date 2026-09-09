@@ -911,14 +911,6 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
         sentenceFinished()
     }
 }
-    
-    // MARK: - AVSpeechSynthesizerDelegate
-    
-    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
-        guard isSpeaking, !isPaused else { return }
-        sentenceFinished()
-    }
-}
 
 // MARK: - AVAudioPlayerDelegate
 
