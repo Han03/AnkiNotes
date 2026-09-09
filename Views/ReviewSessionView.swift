@@ -334,7 +334,6 @@ struct ReviewSessionView: View {
         }
         .buttonStyle(.plain)
     }
-    }
     
     // MARK: - 操作
     

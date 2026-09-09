@@ -286,9 +286,3 @@ struct ReviewHomeView: View {
         }
     }
 }
-
-// MARK: - UUID Identifiable 扩展（用于 fullScreenCover item）
-
-extension UUID: Identifiable {
-    public var id: UUID { self }
-}
