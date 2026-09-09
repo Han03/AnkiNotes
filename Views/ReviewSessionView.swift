@@ -426,18 +426,18 @@ struct ReviewSessionView: View {
         TTSService.shared.updateConfig(appState.ttsConfig)
         TTSService.shared.speak(
             text: text,
-            onSentenceComplete: { [weak self] index in
+            onSentenceComplete: { index in
                 DispatchQueue.main.async {
                     // 更新播放进度
                     let total = TTSService.shared.totalSentences
                     if total > 0 {
-                        self?.lecturePlayProgress = Double(index + 1) / Double(total)
+                        lecturePlayProgress = Double(index + 1) / Double(total)
                     }
                 }
             },
-            onComplete: { [weak self] in
+            onComplete: {
                 DispatchQueue.main.async {
-                    self?.lecturePlayProgress = 1.0
+                    lecturePlayProgress = 1.0
                 }
             }
         )
