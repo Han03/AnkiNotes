@@ -668,7 +668,7 @@ struct KnowledgeInlineText: View {
             if let attrRange = Range(range, in: attr) {
                 // 只设置虚线下划线，不改变文字颜色，避免大片橙色干扰阅读
                 attr[attrRange].underlineStyle = .patternDash
-                attr[attrRange].underlineColor = Color.brandPrimary.opacity(0.4)
+                attr[attrRange].underlineColor = UIColor(Color.brandPrimary.opacity(0.4))
                 // 设置自定义 URL scheme，用于点击拦截
                 attr[attrRange].link = URL(string: "knowledge://\(point.id.uuidString)")
             }
