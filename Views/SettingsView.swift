@@ -89,16 +89,16 @@ struct SettingsView: View {
     private var webDAVConfigForm: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Image(systemName: "network").foregroundStyle(.brandPrimary)
+                Image(systemName: "network").foregroundStyle(Color.brandPrimary)
                 Text("WebDAV 连接配置")
                     .textStyle(.subsectionTitle)
-                    .foregroundStyle(.textPrimary)
+                    .foregroundStyle(Color.textPrimary)
                 Spacer()
             }
             // 新 UX：先占位显示表单 → 填完地址/用户/密码 → 点 💾保存并应用 才真的把 activeFS 重写为 WebDAV 后端
             Text("填写以下配置后，点击底部「保存并应用 WebDAV 配置」按钮完成切换。可先点击「测试连接」确认连通性。")
                 .textStyle(.miniText)
-                .foregroundStyle(.textSecondary)
+                .foregroundStyle(Color.textSecondary)
                 .padding(.top, -2)
 
             GroupBox {
@@ -108,7 +108,7 @@ struct SettingsView: View {
                     field(label: "用户名（必填）", placeholder: "your@mail.com",
                           text: $appState.webDAVConfig.username)
                     VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                        Text("密码（必填，Keychain 加密保存）").textStyle(.miniText).foregroundStyle(.textSecondary)
+                        Text("密码（必填，Keychain 加密保存）").textStyle(.miniText).foregroundStyle(Color.textSecondary)
                         SecureField("应用专用密码：如坚果云「安全选项 → 添加应用 → 生成」",
                                     text: $appState.pendingWebDAVPassword)
                             .textStyle(.body)
@@ -153,7 +153,7 @@ struct SettingsView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
                     .background(RoundedRectangle(cornerRadius: AppCornerRadius.lg).fill(Color.brandPrimaryMedium))
-                    .foregroundStyle(.brandPrimary)
+                    .foregroundStyle(Color.brandPrimary)
                 }
                 .buttonStyle(.plain)
                 .disabled(isTesting)
