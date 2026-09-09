@@ -31,6 +31,7 @@
 		8F7E9719C666424FAAEB1E1B /* AppLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A0BB2AA2AE84C65AAA36F23 /* AppLogger.swift */; };
 		ANMetadataSyncService /* MetadataSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANMetadataSyncServiceRef /* MetadataSyncService.swift */; };
 		ANTTSService /* TTSService.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANTTSServiceRef /* TTSService.swift */; };
+		ANTTSCacheManager /* TTSCacheManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANTTSCacheManagerRef /* TTSCacheManager.swift */; };
 		ANLectureReaderView /* LectureReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANLectureReaderViewRef /* LectureReaderView.swift */; };
 		ANKnowledgeExplainView /* KnowledgeExplainView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANKnowledgeExplainViewRef /* KnowledgeExplainView.swift */; };
 		ANKnowledgeService /* KnowledgeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANKnowledgeServiceRef /* KnowledgeService.swift */; };
@@ -68,6 +69,7 @@
 		5A0BB2AA2AE84C65AAA36F23 /* AppLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLogger.swift; sourceTree = "<group>"; };
 		ANMetadataSyncServiceRef /* MetadataSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetadataSyncService.swift; sourceTree = "<group>"; };
 		ANTTSServiceRef /* TTSService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TTSService.swift; sourceTree = "<group>"; };
+		ANTTSCacheManagerRef /* TTSCacheManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TTSCacheManager.swift; sourceTree = "<group>"; };
 		ANLectureReaderViewRef /* LectureReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LectureReaderView.swift; sourceTree = "<group>"; };
 		ANKnowledgeExplainViewRef /* KnowledgeExplainView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnowledgeExplainView.swift; sourceTree = "<group>"; };
 		ANKnowledgeServiceRef /* KnowledgeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnowledgeService.swift; sourceTree = "<group>"; };
@@ -137,6 +139,7 @@
 				5A0BB2AA2AE84C65AAA36F23 /* AppLogger.swift */,
 				ANMetadataSyncServiceRef /* MetadataSyncService.swift */,
 				ANTTSServiceRef /* TTSService.swift */,
+				ANTTSCacheManagerRef /* TTSCacheManager.swift */,
 				ANKnowledgeServiceRef /* KnowledgeService.swift */,
 			);
 			path = Services;
@@ -281,6 +284,7 @@
 			8F7E9719C666424FAAEB1E1B /* AppLogger.swift in Sources */,
 			ANMetadataSyncService /* MetadataSyncService.swift in Sources */,
 			ANTTSService /* TTSService.swift in Sources */,
+			ANTTSCacheManager /* TTSCacheManager.swift in Sources */,
 			ANKnowledgeService /* KnowledgeService.swift in Sources */,
 			ANLectureReaderView /* LectureReaderView.swift in Sources */,
 			ANKnowledgeExplainView /* KnowledgeExplainView.swift in Sources */,

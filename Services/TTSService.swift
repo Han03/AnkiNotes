@@ -324,23 +324,52 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
         
         SyncLogger.shared.info("🔊 speakCurrentSentence: index=\(currentSentenceIndex)/\(sentences.count), provider=\(config.provider.displayName)")
         
-        // 检查缓存：如果已有音频数据，直接播放
+        // iOS 原生 TTS 不需要缓存，直接播放
+        guard config.provider == .edgeTTSService else {
+            isLoading = true
+            speakiOSNative(sentence)
+            isLoading = false
+            return
+        }
+        
+        // 计算缓存 key
+        let cacheKey = TTSCacheManager.shared.cacheKey(
+            for: sentence,
+            voice: config.edgeVoice,
+            speed: config.rate,
+            pitch: Int(config.pitch)
+        )
+        
+        // 一级缓存：内存缓存（audioCache，按索引存储，快速访问）
         if let cachedData = audioCache[currentSentenceIndex] {
-            SyncLogger.shared.info("🔊 speakCurrentSentence: 命中缓存，直接播放，index=\(currentSentenceIndex)")
+            SyncLogger.shared.info("🔊 speakCurrentSentence: 内存命中，直接播放，index=\(currentSentenceIndex)")
             playAudioData(cachedData)
-            // 预下载下一句
             preloadNextSentence()
             return
         }
         
-        // 没有缓存，需要下载
+        // 二级缓存：磁盘缓存（TTSCacheManager）
         isLoading = true
-        switch config.provider {
-        case .edgeTTSService:
-            speakEdgeTTSService(sentence)
-        case .iOSNative:
-            speakiOSNative(sentence)
-            isLoading = false
+        TTSCacheManager.shared.getCache(forKey: cacheKey) { [weak self] cachedData in
+            guard let self = self else { return }
+            
+            // 检查是否还是同一句子（可能用户已经切换了句子）
+            guard self.currentSentenceIndex < self.sentences.count,
+                  self.sentences[self.currentSentenceIndex] == sentence else {
+                SyncLogger.shared.info("🔊 speakCurrentSentence: 缓存返回时句子已切换，忽略")
+                return
+            }
+            
+            if let data = cachedData {
+                SyncLogger.shared.info("🔊 speakCurrentSentence: 磁盘命中，播放并写入内存缓存，index=\(self.currentSentenceIndex)")
+                self.audioCache[self.currentSentenceIndex] = data
+                self.playAudioData(data)
+                self.preloadNextSentence()
+            } else {
+                // 缓存未命中，需要网络下载
+                SyncLogger.shared.info("🔊 speakCurrentSentence: 缓存未命中，开始网络下载，index=\(self.currentSentenceIndex)")
+                self.speakEdgeTTSService(sentence)
+            }
         }
     }
     
@@ -378,22 +407,37 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
         
         let preloadCount = 10  // 预下载接下来的10句
         var startedCount = 0
+        var skippedCacheCount = 0
         
         for offset in 1...preloadCount {
             let targetIndex = currentSentenceIndex + offset
             guard targetIndex < sentences.count else { break }
             
-            // 已缓存或正在下载，跳过
+            // 内存已缓存，跳过
             guard audioCache[targetIndex] == nil else { continue }
+            // 正在下载，跳过
             guard preloadTasks[targetIndex] == nil else { continue }
+            
+            // 【优化】检查磁盘缓存，已缓存的不需要网络下载
+            let sentence = sentences[targetIndex]
+            let cacheKey = TTSCacheManager.shared.cacheKey(
+                for: sentence,
+                voice: config.edgeVoice,
+                speed: config.rate,
+                pitch: Int(config.pitch)
+            )
+            guard !TTSCacheManager.shared.hasDiskCache(forKey: cacheKey) else {
+                skippedCacheCount += 1
+                continue
+            }
             
             // 开始预下载
             startedCount += 1
             preloadSentence(at: targetIndex)
         }
         
-        if startedCount > 0 {
-            SyncLogger.shared.info("🔊 preloadNextSentence: 启动 \(startedCount) 个预下载任务（当前句=\(currentSentenceIndex)，预下载接下来\(preloadCount)句）")
+        if startedCount > 0 || skippedCacheCount > 0 {
+            SyncLogger.shared.info("🔊 preloadNextSentence: 启动 \(startedCount) 个预下载，跳过磁盘缓存 \(skippedCacheCount) 个（当前句=\(currentSentenceIndex)，预下载接下来\(preloadCount)句）")
         }
     }
     
@@ -442,7 +486,25 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
                 SyncLogger.shared.warning("🔊 preloadSentence: 预下载失败，index=\(index)")
                 return
             }
+            
+            // 写入内存缓存
             self.audioCache[index] = audioData
+            
+            // 【新增】写入磁盘缓存（持久化，下次播放直接使用）
+            TTSCacheManager.shared.setDiskCache(
+                audioData,
+                forKey: TTSCacheManager.shared.cacheKey(
+                    for: sentence,
+                    voice: self.config.edgeVoice,
+                    speed: self.config.rate,
+                    pitch: Int(self.config.pitch)
+                ),
+                sentence: sentence,
+                voice: self.config.edgeVoice,
+                speed: self.config.rate,
+                pitch: Int(self.config.pitch)
+            )
+            
             SyncLogger.shared.info("🔊 preloadSentence: 预下载成功，index=\(index)，大小=\(audioData.count)字节")
         }
         
@@ -871,8 +933,23 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
             
             SyncLogger.shared.info("🔊 Edge-TTS 服务: 合成成功，音频大小=\(audioData.count) 字节")
             
-            // 缓存音频数据
+            // 缓存音频数据到内存
             self.audioCache[self.currentSentenceIndex] = audioData
+            
+            // 【新增】写入磁盘缓存（持久化，下次播放直接使用）
+            TTSCacheManager.shared.setDiskCache(
+                audioData,
+                forKey: TTSCacheManager.shared.cacheKey(
+                    for: text,
+                    voice: self.config.edgeVoice,
+                    speed: self.config.rate,
+                    pitch: Int(self.config.pitch)
+                ),
+                sentence: text,
+                voice: self.config.edgeVoice,
+                speed: self.config.rate,
+                pitch: Int(self.config.pitch)
+            )
             
             // 检查暂停状态：如果已暂停，只缓存不播放
             guard !self.isPaused else {
