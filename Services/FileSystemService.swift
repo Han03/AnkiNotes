@@ -51,6 +51,45 @@ final class FileSystemService {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
+    
+    /// 直接遍历 Questions 目录下的所有 JSON 文件，加载所有题目（不依赖 notes/folders 数组）
+    /// 这是最健壮的加载方式，避免 folders 数组不完整导致路径计算错误
+    func loadAllQuestionsFromDisk() -> [Question] {
+        var allQuestions: [Question] = []
+        let fileManager = FileManager.default
+        let rootURL = questionsRootDirectory
+        
+        guard let enumerator = fileManager.enumerator(
+            at: rootURL,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else {
+            print("📂 loadAllQuestionsFromDisk: 无法创建目录枚举器")
+            return []
+        }
+        
+        var fileCount = 0
+        var successCount = 0
+        var failCount = 0
+        
+        for case let fileURL as URL in enumerator {
+            guard fileURL.pathExtension.lowercased() == "json" else { continue }
+            fileCount += 1
+            
+            do {
+                let data = try Data(contentsOf: fileURL)
+                let questions = try JSONDecoder().decode([Question].self, from: data)
+                allQuestions.append(contentsOf: questions)
+                successCount += 1
+            } catch {
+                failCount += 1
+                print("⚠️ loadAllQuestionsFromDisk: 解析失败 \(fileURL.lastPathComponent): \(error.localizedDescription)")
+            }
+        }
+        
+        print("📚 loadAllQuestionsFromDisk: 遍历 \(fileCount) 个文件，成功 \(successCount) 个，失败 \(failCount) 个，题目总数 \(allQuestions.count)")
+        return allQuestions
+    }
 
     /// JSON 索引目录（Documents/.metadata）
     var metadataDirectory: URL {

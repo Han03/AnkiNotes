@@ -48,19 +48,6 @@ struct KnowledgeExplainView: View {
                             .font(.body)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .fixedSize(horizontal: false, vertical: true)
-                        
-                        // 打字机光标
-                        if explanationStore.isLoading {
-                            HStack(spacing: 2) {
-                                Rectangle()
-                                    .fill(Color.blue)
-                                    .frame(width: 2, height: 16)
-                                    .opacity(0.6)
-                                Text("正在输入...")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
                     }
                     
                     // 来源提示

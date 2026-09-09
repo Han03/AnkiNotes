@@ -72,30 +72,10 @@ final class QuizService {
     // MARK: - 持久化
 
     private func load() {
-        // 按笔记文件夹结构加载题目：遍历所有笔记，读取对应的 Questions/[路径]/[标题].json
-        var allQuestions: [Question] = []
-        var loadedNotes = 0
-        var skippedNotes = 0
-        for note in notes {
-            do {
-                let noteQuestions = try fileSystem.readQuestions(
-                    folderId: note.folderId,
-                    title: note.title,
-                    folders: folders
-                )
-                if !noteQuestions.isEmpty {
-                    allQuestions.append(contentsOf: noteQuestions)
-                    loadedNotes += 1
-                } else {
-                    skippedNotes += 1
-                }
-            } catch {
-                // 该笔记没有题目文件，跳过
-                skippedNotes += 1
-            }
-        }
-        questions = allQuestions
-        print("📚 QuizService.load: 遍历 \(notes.count) 篇笔记，加载题目 \(questions.count) 道（有题目的笔记 \(loadedNotes) 篇，无题目 \(skippedNotes) 篇）")
+        // 【优化】直接遍历 Questions 目录下的所有 JSON 文件加载题目
+        // 不依赖 notes/folders 数组，避免 folders 数组不完整导致路径计算错误
+        // 这是最健壮的加载方式，确保所有文件夹的题目都能正确加载
+        questions = fileSystem.loadAllQuestionsFromDisk()
         
         // 加载已生成笔记 ID
         if let data = try? fileSystem.readNoteContent(from: generatedIdsURL).data(using: .utf8),
