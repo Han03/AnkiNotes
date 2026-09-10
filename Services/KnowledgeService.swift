@@ -487,8 +487,8 @@ final class KnowledgeService: ObservableObject {
                 )
                 streamSession = session
 
-                // 创建但不启动任务
-                let dataTask = session.dataTask(with: request, delegate: sessionDelegate)
+                // 创建但不启动任务（session 级 delegate 已挂载 SSEStreamParser，无需 task 级 delegate）
+                let dataTask = session.dataTask(with: request)
 
                 // 启动网络请求（同步返回，delegate 回调在后台队列异步执行）
                 dataTask.resume()
