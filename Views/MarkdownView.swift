@@ -737,7 +737,7 @@ private final class KnowledgeUnderlineLayoutManager: NSLayoutManager {
 
     override func drawUnderline(
         forGlyphRange glyphRange: NSRange,
-        underlineStyle: NSUnderlineStyle,
+        underlineType: NSUnderlineStyle,
         baselineOffset: CGFloat,
         lineFragmentRect: CGRect,
         lineFragmentGlyphRange: NSRange,
