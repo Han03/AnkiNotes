@@ -881,10 +881,10 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// 应用启动时后台静默同步（延迟 2 秒执行，不阻塞 UI）
+    /// 应用启动时后台静默同步（立即执行，不阻塞 UI）
     func performSilentSyncOnLaunch() {
         guard webDAVFS != nil else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+        DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             // 如果已经在同步，不重复执行
             guard !self.isSyncing && !self.isSilentSyncing else { return }

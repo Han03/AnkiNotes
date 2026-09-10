@@ -283,7 +283,6 @@ struct ReviewSessionView: View {
         let hasQuiz = appState.quizService.notesWithQuestionsCache.contains(note.id)
         let hasLecture = appState.storage?.hasLecture(for: note) ?? false
         let isPlaying = isPlayingLecture && !isPausedLecture
-        let secondaryButtonCount = (hasQuiz ? 1 : 0) + (hasLecture ? 1 : 0) + (hasLecture ? 1 : 0)  // 测评+讲稿+播放
         
         GeometryReader { geo in
             let safeAreaBottom = geo.safeAreaInsets.bottom
@@ -343,7 +342,7 @@ struct ReviewSessionView: View {
                 .ignoresSafeArea(edges: .bottom)
             )
         }
-        .frame(height: nil)  // 不限制高度，让 GeometryReader 自然计算
+        .frame(maxHeight: .infinity, alignment: .bottom) // 强制推到底部
     }
     
     // MARK: - 评级就地展开面板

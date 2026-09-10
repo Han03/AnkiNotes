@@ -772,23 +772,56 @@ private final class KnowledgeUnderlineLayoutManager: NSLayoutManager {
             let attrValue = textStorage.attribute(kKnowledgePointAttribute, at: searchLocation, effectiveRange: &effectiveRange)
             if attrValue != nil {
                 let intersection = NSIntersectionRange(glyphsToShow, effectiveRange)
-                if intersection.length > 0 {
-                    let boundingRect = self.boundingRect(forGlyphRange: intersection, in: textContainer)
-                    guard boundingRect.width > 0 else { continue }
+                guard intersection.length > 0 else { continue }
 
-                    let lineRect = CGRect(
-                        x: boundingRect.minX + containerOrigin.x,
-                        y: boundingRect.maxY + underlineOffset + containerOrigin.y,
-                        width: boundingRect.width,
-                        height: underlineHeight
-                    )
-                    let path = UIBezierPath(roundedRect: lineRect, cornerRadius: underlineHeight / 2)
-                    underlineColor.setFill()
-                    path.fill()
+                // 按行拆分绘制：遍历该范围内的每一个字形，检测换行
+                var currentLineRect: CGRect? = nil
+                var lineStartIndex = intersection.location
+
+                for i in 0..<intersection.length {
+                    let glyphIndex = intersection.location + i
+                    let lineRect = self.lineFragmentRect(forGlyphAt: glyphIndex, effectiveRange: nil)
+                    
+                    // 如果是第一行或者进入了新的一行
+                    if currentLineRect == nil || lineRect.minY != currentLineRect!.minY {
+                        // 绘制上一行的下划线（如果存在）
+                        if let rect = currentLineRect {
+                            drawSingleLineUnderline(from: lineStartIndex, to: glyphIndex, in: rect, containerOrigin: containerOrigin)
+                        }
+                        // 开启新行记录
+                        currentLineRect = lineRect
+                        lineStartIndex = glyphIndex
+                    }
+                }
+
+                // 绘制最后一行的下划线
+                if let rect = currentLineRect {
+                    drawSingleLineUnderline(from: lineStartIndex, to: NSMaxRange(intersection), in: rect, containerOrigin: containerOrigin)
                 }
             }
             searchLocation = NSMaxRange(effectiveRange)
         }
+    }
+
+    /// 绘制单行内的知识点下划线
+    private func drawSingleLineUnderline(from startGlyph: Int, to endGlyph: Int, in lineRect: CGRect, containerOrigin: CGPoint) {
+        // 获取该行内指定字形范围的精确边界
+        let range = NSRange(location: startGlyph, length: endGlyph - startGlyph)
+        let boundingRect = self.boundingRect(forGlyphRange: range, in: textContainer!)
+        
+        // 确保 Y 坐标基于当前行的基线位置
+        let y = lineRect.maxY + underlineOffset
+        
+        let lineRectFinal = CGRect(
+            x: boundingRect.minX + containerOrigin.x,
+            y: y + containerOrigin.y,
+            width: boundingRect.width,
+            height: underlineHeight
+        )
+        
+        let path = UIBezierPath(roundedRect: lineRectFinal, cornerRadius: underlineHeight / 2)
+        underlineColor.setFill()
+        path.fill()
     }
 }
 
