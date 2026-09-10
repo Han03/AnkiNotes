@@ -258,7 +258,8 @@ final class KnowledgeService: ObservableObject {
         var allPoints: [KnowledgePoint] = []
         var currentLine = ""
         
-        let task = Task {
+        let task = Task.detached(priority: .userInitiated) { [weak self] in
+            guard let self else { return }
             do {
                 let (bytes, response) = try await URLSession.shared.bytes(for: request)
                 
@@ -335,12 +336,12 @@ final class KnowledgeService: ObservableObject {
                     }
                 }
                 
-                // 保存缓存
-                self.saveExtraction(for: note, points: allPoints)
-                
+                // 保存缓存 + 状态回写统一回主线程（避免跨线程触碰单例状态）
+                let savedPoints = allPoints
                 DispatchQueue.main.async {
+                    self.saveExtraction(for: note, points: savedPoints)
                     self.isExtracting = false
-                    completion(allPoints)
+                    completion(savedPoints)
                 }
             } catch {
                 print("⚠️ 知识点提取失败: \(error.localizedDescription)")
@@ -408,7 +409,8 @@ final class KnowledgeService: ObservableObject {
         
         var fullText = ""
         
-        let task = Task {
+        let task = Task.detached(priority: .userInitiated) { [weak self] in
+            guard let self else { return }
             do {
                 let (bytes, response) = try await URLSession.shared.bytes(for: request)
                 
@@ -440,12 +442,12 @@ final class KnowledgeService: ObservableObject {
                     }
                 }
                 
-                // 保存缓存
-                self.saveExplanation(for: point, note: note, explanation: fullText)
-                
+                // 保存缓存 + 状态回写统一回主线程（避免跨线程触碰单例状态）
+                let finalText = fullText
                 DispatchQueue.main.async {
+                    self.saveExplanation(for: point, note: note, explanation: finalText)
                     self.isExplaining = false
-                    completion(fullText)
+                    completion(finalText)
                 }
             } catch {
                 print("⚠️ 知识点详解生成失败: \(error.localizedDescription)")
