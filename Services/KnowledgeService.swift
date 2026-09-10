@@ -19,6 +19,10 @@ final class KnowledgeExplanationStore: ObservableObject {
     private var pendingBuffer = ""      // 待刷出的累积内容
     private var flushTimer: Timer?      // 节流刷新定时器
     private var totalChunks = 0         // 累计收到的 chunk 数（日志用）
+    /// 每个 tick（50ms）显示的字符数（约 800 字/秒）
+    /// 关键：LLM 输出可能瞬间全部到达（网络缓冲），若一次性刷出全部 buffer 则打字机失效，
+    /// 因此限速刷出，剩余内容留到下一 tick，保证稳定的打字机视觉效果。
+    private let charsPerTick = 40
     
     func appendChunk(_ chunk: String) {
         totalChunks += 1
@@ -28,7 +32,7 @@ final class KnowledgeExplanationStore: ObservableObject {
         ensureFlushTimer()
     }
     
-    /// 启动节流刷新定时器（只启动一次，buffer 清空后由定时器自动停）
+    /// 启动节流刷新定时器（只启动一次，由 complete/reset 停止）
     private func ensureFlushTimer() {
         guard flushTimer == nil else { return }
         let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
@@ -36,23 +40,25 @@ final class KnowledgeExplanationStore: ObservableObject {
         }
         RunLoop.main.add(timer, forMode: .common)
         flushTimer = timer
-        SyncLogger.shared.info("📝 启动打字机节流定时器 (50ms)")
+        SyncLogger.shared.info("📝 启动打字机节流定时器 (50ms, 每tick显示\(charsPerTick)字)")
     }
     
-    /// 把累积内容刷到 displayedText（主线程调用）
+    /// 按限速节奏把部分累积内容刷到 displayedText（主线程调用）
     private func flushPending() {
-        guard !pendingBuffer.isEmpty else {
-            // buffer 为空且已结束时不自动停（避免频繁启停），complete/reset 时统一停
-            return
-        }
-        displayedText += pendingBuffer
-        SyncLogger.shared.info("📝 打字机刷新: 追加\(pendingBuffer.count)字, 当前总长=\(displayedText.count), 累计chunk=\(totalChunks)")
-        pendingBuffer = ""
+        guard !pendingBuffer.isEmpty else { return }
+        let takeCount = min(pendingBuffer.count, charsPerTick)
+        let toDisplay = String(pendingBuffer.prefix(takeCount))
+        displayedText += toDisplay
+        pendingBuffer.removeFirst(takeCount)
+        SyncLogger.shared.info("📝 打字机刷新: 本次显示\(takeCount)字, 剩余buffer=\(pendingBuffer.count), 总长=\(displayedText.count), 累计chunk=\(totalChunks)")
     }
     
     func complete(with text: String) {
-        // 先刷出剩余 buffer，再标记完成
-        flushPending()
+        // 结束时把剩余内容一次性刷出（避免尾部滞留）
+        if !pendingBuffer.isEmpty {
+            displayedText += pendingBuffer
+            pendingBuffer = ""
+        }
         fullText = text
         isLoading = false
         flushTimer?.invalidate()
@@ -158,6 +164,9 @@ final class SSEStreamParser: NSObject, URLSessionDataDelegate, @unchecked Sendab
               let content = delta["content"] as? String else {
             return
         }
+
+        // 过滤空 delta（部分模型会输出空 content 行），避免无意义的空派发
+        guard !content.isEmpty else { return }
 
         SyncLogger.shared.info("📡 SSE 收到行并 yield: 长度=\(content.count), 内容前20=\(String(content.prefix(20)))")
         continuation.yield(content)
