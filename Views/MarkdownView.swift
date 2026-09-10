@@ -601,8 +601,7 @@ struct KnowledgeInlineText: View {
 
         // 3. 应用粗体 / 斜体 / 行内代码样式
         for span in spans {
-            guard let r = Range(span.range, in: cleanText) else { continue }
-            let nsRange = NSRange(r, in: cleanText)
+            let nsRange = NSRange(span.range, in: cleanText)
             if span.isCode {
                 let codeFont = UIFont.monospacedSystemFont(ofSize: baseFont.pointSize, weight: .regular)
                 mutable.addAttribute(.font, value: codeFont, range: nsRange)
