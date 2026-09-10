@@ -593,6 +593,12 @@ final class WebDAVFS: CloudFileSystem {
     @discardableResult
     private func sendBlockingRequest(_ request: URLRequest, allowedStatus: Set<Int>) throws -> Data {
         guard config.isComplete else { throw WebDAVError.incompleteConfig }
+        // 【云端接口调用日志】记录每次 WebDAV 请求：方法 + URL + 状态码 + 耗时，便于排查同步问题
+        // URL 只记录 path（不含 query/凭据，避免敏感信息）；Authorization 在 header 中，不会出现在 URL
+        let startTime = Date()
+        let method = request.httpMethod ?? "?"
+        let urlPath = request.url?.path ?? "?"
+        SyncLogger.shared.info("🌐 WebDAV请求开始: \(method) \(urlPath)")
         let sema = DispatchSemaphore(value: 0)
         var outData: Data?
         var outResp: URLResponse?
@@ -603,18 +609,27 @@ final class WebDAVFS: CloudFileSystem {
         }.resume()
         // 增加超时保护：90 秒后如果还没回调，强制超时，避免无限等待
         let timeoutResult = sema.wait(timeout: .now() + 90)
+        let duration = Date().timeIntervalSince(startTime)
         if timeoutResult == .timedOut {
-            print("⚠️ WebDAV 请求超时（90秒）: \(request.httpMethod ?? "") \(request.url?.lastPathComponent ?? "")")
+            print("⚠️ WebDAV 请求超时（90秒）: \(method) \(urlPath)")
+            SyncLogger.shared.error("🌐 WebDAV请求超时(90s): \(method) \(urlPath) 耗时\(String(format: "%.2f", duration))s")
             throw NSError(domain: "WebDAVFS", code: -1, userInfo: [NSLocalizedDescriptionKey: "WebDAV 请求超时，请检查网络连接"])
         }
-        if let e = outError { throw e }
+        if let e = outError {
+            SyncLogger.shared.error("🌐 WebDAV请求失败: \(method) \(urlPath) 耗时\(String(format: "%.2f", duration))s 错误: \(e.localizedDescription)")
+            throw e
+        }
         guard let http = outResp as? HTTPURLResponse else {
+            SyncLogger.shared.error("🌐 WebDAV请求无HTTP响应: \(method) \(urlPath) 耗时\(String(format: "%.2f", duration))s")
             throw WebDAVError.httpError(0, "No HTTP response")
         }
         if !allowedStatus.contains(http.statusCode) {
             let body = outData.map { String(data: $0, encoding: .utf8) ?? "" } ?? ""
+            let bodyPreview = String(body.prefix(200))
+            SyncLogger.shared.error("🌐 WebDAV请求异常状态码: \(method) \(urlPath) → \(http.statusCode) 耗时\(String(format: "%.2f", duration))s body=\(bodyPreview)")
             throw WebDAVError.httpError(http.statusCode, body)
         }
+        SyncLogger.shared.info("🌐 WebDAV请求完成: \(method) \(urlPath) → \(http.statusCode) 耗时\(String(format: "%.2f", duration))s")
         return outData ?? Data()
     }
 

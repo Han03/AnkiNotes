@@ -539,8 +539,10 @@ final class StorageService: ObservableObject {
         var cloudFiles: [URL] = []
         // 收集目录的云端修改时间（下载成功后用于更新快照目录记录）
         var directoryTimes: [String: Date] = [:]
+        // 收集文件的云端修改时间（跳过分支用于更新快照，使快照收敛）
+        var fileTimes: [String: Date] = [:]
         // 传入快照和根目录，支持目录级和文件级跳过
-        collectMarkdownFilesFromFS(cloud, at: cloudRoot, skipNames: skipNames, into: &cloudFiles, rootURL: cloudRoot, snapshot: syncSnapshotService, directoryTimes: &directoryTimes)
+        collectMarkdownFilesFromFS(cloud, at: cloudRoot, skipNames: skipNames, into: &cloudFiles, rootURL: cloudRoot, snapshot: syncSnapshotService, directoryTimes: &directoryTimes, fileTimes: &fileTimes)
         report.scannedMarkdownFiles = cloudFiles.count
         syncProgressCallback?("扫描云端文件", 5, "发现 \(cloudFiles.count) 篇需要更新的笔记")
         // 云端 Notes 目录没有 .md 文件是正常状态（可能只同步讲稿/题目），不阻断后续同步
@@ -554,11 +556,8 @@ final class StorageService: ObservableObject {
                 let relativeComponents = relativePathComponents(of: srcURL, from: cloudRoot)
                 let folderComponents = Array(relativeComponents.dropLast())
                 let fileName = srcURL.lastPathComponent
-                let rawBody = try cloud.readData(at: srcURL)
-                let bodyStr = String(data: rawBody, encoding: .utf8) ?? ""
-                let parsed = MarkdownFrontmatterParser.parse(bodyStr)
                 // 直接取文件名去掉 .md/.markdown 后缀作为 title，不使用 frontmatter title
-                // 保证笔记 title 与题库/讲稿文件名匹配一致
+                // 保证笔记 title 与题库/讲稿文件名匹配一致（无需下载内容即可计算）
                 var title = fileName
                 if title.lowercased().hasSuffix(".markdown") {
                     title = String(title.dropLast(9))
@@ -567,6 +566,7 @@ final class StorageService: ObservableObject {
                 }
                 if title.isEmpty { title = "未命名-\(UUID().uuidString.prefix(6))" }
                 let folderId = try getOrCreateFolder(pathComponents: folderComponents, createdCount: &report.folderCreatedCount)
+                // 【优化】exists 判断提前到下载内容之前：本地已存在的文件无需 GET 云端全文
                 let exists = noteMetas.contains { m in
                     m.folderId == folderId && m.title.lowercased() == title.lowercased()
                 }
@@ -575,8 +575,18 @@ final class StorageService: ObservableObject {
                     if report.messages.count < 10 {
                         report.messages.append("⏭️ 跳过重复：\(folderComponents.joined(separator: "/"))/\(title)")
                     }
+                    // 【修复】跳过分支也更新快照（用扫描时已知的云端修改时间，不额外请求）
+                    // 使快照收敛：本地已存在的文件下次同步不再判定"有更新"，
+                    // 避免"判定有更新但本地已存在"的文件每次同步都重新下载全文，永不收敛
+                    if let snap = syncSnapshotService {
+                        updateSnapshotForSkippedFile(snap: snap, rootURL: cloudRoot, fileURL: srcURL, fileTimes: fileTimes, directoryTimes: directoryTimes)
+                    }
                     continue
                 }
+                // 只有真正需要创建时才下载内容
+                let rawBody = try cloud.readData(at: srcURL)
+                let bodyStr = String(data: rawBody, encoding: .utf8) ?? ""
+                let parsed = MarkdownFrontmatterParser.parse(bodyStr)
                 let bodyToUse = parsed.body.isEmpty ? bodyStr : parsed.body
                 // 尝试从云端元数据中恢复 SRS 记忆数据（通过文件夹路径+标题匹配）
                 let folderPath = folderComponents.joined(separator: "/")
@@ -667,8 +677,9 @@ final class StorageService: ObservableObject {
         var lectureFiles: [URL] = []
         // 收集目录的云端修改时间（下载成功后用于更新快照目录记录）
         var directoryTimes: [String: Date] = [:]
+        var fileTimes: [String: Date] = [:]
         // 传入快照和根目录，支持目录级和文件级跳过
-        collectFilesFromFS(cloud, at: lectureRoot, extensions: ["txt"], skipNames: [], into: &lectureFiles, rootURL: lectureRoot, snapshot: snapshot, directoryTimes: &directoryTimes)
+        collectFilesFromFS(cloud, at: lectureRoot, extensions: ["txt"], skipNames: [], into: &lectureFiles, rootURL: lectureRoot, snapshot: snapshot, directoryTimes: &directoryTimes, fileTimes: &fileTimes)
         report.scannedLectureFiles = lectureFiles.count
         print("📖 讲稿同步: 扫描到 \(lectureFiles.count) 个需要更新的讲稿文件")
         for srcURL in lectureFiles {
@@ -712,8 +723,9 @@ final class StorageService: ObservableObject {
         var questionFiles: [URL] = []
         // 收集目录的云端修改时间（下载成功后用于更新快照目录记录）
         var directoryTimes: [String: Date] = [:]
+        var fileTimes: [String: Date] = [:]
         // 传入快照和根目录，支持目录级和文件级跳过
-        collectFilesFromFS(cloud, at: questionsRoot, extensions: ["json"], skipNames: [], into: &questionFiles, rootURL: questionsRoot, snapshot: snapshot, directoryTimes: &directoryTimes)
+        collectFilesFromFS(cloud, at: questionsRoot, extensions: ["json"], skipNames: [], into: &questionFiles, rootURL: questionsRoot, snapshot: snapshot, directoryTimes: &directoryTimes, fileTimes: &fileTimes)
         report.scannedQuestionFiles = questionFiles.count
         print("📚 题库同步: 扫描到 \(questionFiles.count) 个题目文件")
         for srcURL in questionFiles {
@@ -855,11 +867,11 @@ final class StorageService: ObservableObject {
     }
 
     /// 从指定 FS 递归扫描 .md 文件
-    private func collectMarkdownFilesFromFS(_ fs: CloudFileSystem, at url: URL, skipNames: Set<String>, into result: inout [URL], rootURL: URL? = nil, snapshot: SyncSnapshotService? = nil, directoryTimes: inout [String: Date]) {
-        collectFilesFromFS(fs, at: url, extensions: ["md", "markdown"], skipNames: skipNames, into: &result, rootURL: rootURL, snapshot: snapshot, directoryTimes: &directoryTimes)
+    private func collectMarkdownFilesFromFS(_ fs: CloudFileSystem, at url: URL, skipNames: Set<String>, into result: inout [URL], rootURL: URL? = nil, snapshot: SyncSnapshotService? = nil, directoryTimes: inout [String: Date], fileTimes: inout [String: Date]) {
+        collectFilesFromFS(fs, at: url, extensions: ["md", "markdown"], skipNames: skipNames, into: &result, rootURL: rootURL, snapshot: snapshot, directoryTimes: &directoryTimes, fileTimes: &fileTimes)
     }
     
-    private func collectFilesFromFS(_ fs: CloudFileSystem, at url: URL, extensions: [String], skipNames: Set<String>, into result: inout [URL], rootURL: URL? = nil, snapshot: SyncSnapshotService? = nil, directoryTimes: inout [String: Date]) {
+    private func collectFilesFromFS(_ fs: CloudFileSystem, at url: URL, extensions: [String], skipNames: Set<String>, into result: inout [URL], rootURL: URL? = nil, snapshot: SyncSnapshotService? = nil, directoryTimes: inout [String: Date], fileTimes: inout [String: Date]) {
         // 使用 contentsOfDirectoryWithMetadata 一次获取子项和类型及修改时间，避免对每个子项发起额外请求
         // （WebDAV 下 contentsOfDirectory 是网络请求，逐个调用容易超时失败导致目录被跳过）
         let children: [(url: URL, isDirectory: Bool, lastModified: Date?)]
@@ -871,11 +883,15 @@ final class StorageService: ObservableObject {
             if extensions.contains(ext) {
                 // 文件级跳过：基于【上次】快照判断，有更新才加入下载列表
                 // 【修复】不在扫描阶段写入快照（旧逻辑先 updateFile 再 isFileUpdated 导致永远判定无更新被跳过）
-                // 快照只在文件实际下载成功后更新，避免下载失败的文件被永久跳过
+                // 快照只在文件实际下载成功/确认本地已存在后更新，避免下载失败的文件被永久跳过
                 if let root = rootURL, let snap = snapshot {
                     let relativePath = snap.relativePath(for: child, rootURL: root)
                     // key 加根目录前缀，避免 Notes/Lecture/Questions 下同名子目录互相覆盖
                     let prefixedPath = root.lastPathComponent + "/" + relativePath
+                    // 收集文件的云端修改时间（跳过分支用于更新快照，支持下次文件级跳过）
+                    if let modified = lastModified {
+                        fileTimes[prefixedPath] = modified
+                    }
                     if !snap.isFileUpdated(relativePath: prefixedPath, lastModified: lastModified) {
                         continue  // 文件无更新，跳过
                     }
@@ -895,7 +911,7 @@ final class StorageService: ObservableObject {
                         continue  // 目录无更新且已有成功记录，跳过
                     }
                 }
-                collectFilesFromFS(fs, at: child, extensions: extensions, skipNames: skipNames, into: &result, rootURL: rootURL, snapshot: snapshot, directoryTimes: &directoryTimes)
+                collectFilesFromFS(fs, at: child, extensions: extensions, skipNames: skipNames, into: &result, rootURL: rootURL, snapshot: snapshot, directoryTimes: &directoryTimes, fileTimes: &fileTimes)
             }
         }
     }
@@ -914,6 +930,34 @@ final class StorageService: ObservableObject {
         }
         
         // 更新所有父目录记录（用扫描时收集的云端目录修改时间，支持下次目录级跳过）
+        var dirPath = String(prefixedPath.dropLast(fileURL.lastPathComponent.count))
+        if dirPath.hasSuffix("/") { dirPath = String(dirPath.dropLast()) }
+        while !dirPath.isEmpty {
+            if let dirTime = directoryTimes[dirPath] {
+                snap.updateDirectory(relativePath: dirPath, lastModified: dirTime)
+            }
+            if let idx = dirPath.lastIndex(of: "/") {
+                dirPath = String(dirPath[..<idx])
+            } else {
+                break
+            }
+        }
+    }
+
+    /// 跳过分支更新快照（文件 + 父目录），用扫描时已知的云端修改时间，不额外发起请求
+    /// 目的：本地已存在的文件（exists 跳过）也记录快照，使快照收敛，
+    /// 避免"判定有更新但本地已存在"的文件每次同步都重新下载判定，永不收敛
+    private func updateSnapshotForSkippedFile(snap: SyncSnapshotService, rootURL: URL, fileURL: URL, fileTimes: [String: Date], directoryTimes: [String: Date]) {
+        let rootName = rootURL.lastPathComponent
+        let relativePath = snap.relativePath(for: fileURL, rootURL: rootURL)
+        let prefixedPath = rootName + "/" + relativePath
+
+        // 文件记录（用扫描时收集的云端修改时间，不额外请求）
+        if let modified = fileTimes[prefixedPath] {
+            snap.updateFile(relativePath: prefixedPath, lastModified: modified)
+        }
+
+        // 更新所有父目录记录（与 updateSnapshotAfterFileSync 相同逻辑）
         var dirPath = String(prefixedPath.dropLast(fileURL.lastPathComponent.count))
         if dirPath.hasSuffix("/") { dirPath = String(dirPath.dropLast()) }
         while !dirPath.isEmpty {

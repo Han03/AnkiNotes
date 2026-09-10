@@ -12,6 +12,8 @@ struct SettingsView: View {
     @EnvironmentObject var appState: AppState
     @State private var testResult: (success: Bool, message: String)? = nil
     @State private var isTesting = false
+    /// 存储方式草稿：切换 Picker 只改草稿，点击"保存设置"才真正应用（避免误操作立即生效）
+    @State private var pendingProvider: CloudProviderType = .local
     @Environment(\.openURL) private var openURL
 
     var body: some View {
@@ -30,6 +32,10 @@ struct SettingsView: View {
         .background(Color.bgPage)
         .navigationTitle("设置")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            // 进入设置页时，草稿与当前生效值同步
+            pendingProvider = appState.selectedProvider
+        }
     }
 
     // MARK: - 同步与存储
@@ -38,15 +44,15 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: AppSpacing.lg) {
             sectionHeader(title: "同步与存储", systemImage: "externaldrive.badge.icloud")
 
-            // 存储方式选择（分段控件）
-            Picker("存储方式", selection: $appState.selectedProvider) {
+            // 存储方式选择（分段控件）——只修改草稿，点击"保存设置"才应用
+            Picker("存储方式", selection: $pendingProvider) {
                 ForEach(CloudProviderType.allCases) { type in
                     Text(type.displayName).tag(type)
                 }
             }
             .pickerStyle(.segmented)
 
-            // 当前状态简洁展示
+            // 当前状态简洁展示（展示实际生效的存储方式）
             HStack(spacing: AppSpacing.sm) {
                 Image(systemName: statusIcon)
                     .foregroundColor(statusColor)
@@ -58,11 +64,39 @@ struct SettingsView: View {
             .padding(AppSpacing.md)
             .background(RoundedRectangle(cornerRadius: AppCornerRadius.standard).fill(Color.bgInput))
 
-            // WebDAV配置（选择WebDAV时展开）
-            if appState.selectedProvider == .webDAV {
+            // 未保存提示 + 保存按钮（草稿与生效值不一致时显示）
+            if pendingProvider != appState.selectedProvider {
+                VStack(spacing: AppSpacing.sm) {
+                    HStack(spacing: AppSpacing.xs) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(Color.orange)
+                        Text("存储方式有未保存的更改，点击下方保存后生效")
+                            .font(.appCaption)
+                            .foregroundColor(.textSecondary)
+                        Spacer()
+                    }
+                    Button {
+                        runSaveSettings()
+                    } label: {
+                        HStack(spacing: AppSpacing.xs) {
+                            Image(systemName: "checkmark.circle.fill")
+                            Text("保存设置")
+                                .fontWeight(.semibold)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, AppSpacing.md)
+                        .background(RoundedRectangle(cornerRadius: AppCornerRadius.lg).fill(Color.brandPrimary.gradient))
+                        .foregroundStyle(.white)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            // WebDAV配置（草稿选择WebDAV时展开）
+            if pendingProvider == .webDAV {
                 webDAVConfigForm
                     .transition(.opacity.combined(with: .move(edge: .top)))
-            } else if appState.selectedProvider == .iCloud {
+            } else if pendingProvider == .iCloud {
                 iCloudHint
                     .transition(.opacity.combined(with: .move(edge: .top)))
             } else {
@@ -218,6 +252,8 @@ struct SettingsView: View {
         isTesting = true
         defer { isTesting = false }
         let ok = appState.saveAndApplyWebDAV()
+        // 保存成功后草稿与实际生效值同步（失败占位时 selectedProvider 仍为 .webDAV）
+        pendingProvider = appState.selectedProvider
         if let msg = appState.providerStatus {
             testResult = (ok, msg)
         } else if ok {
@@ -225,6 +261,23 @@ struct SettingsView: View {
         } else {
             testResult = (false, "切换失败，请查看状态提示。")
         }
+    }
+
+    /// 保存存储方式草稿：Local/iCloud 直接应用；WebDAV 走严格校验（配置齐全才真正切换）
+    private func runSaveSettings() {
+        let target = pendingProvider
+        if target == .webDAV {
+            // 与表单"保存并应用"一致的严格流程（内部处理 selectedProvider 设置与 Keychain 密码写入）
+            let ok = appState.saveAndApplyWebDAV()
+            if let msg = appState.providerStatus {
+                testResult = (ok, msg)
+            }
+        } else {
+            // Local/iCloud：赋值触发 didSet → applyFileSystem 立即生效
+            appState.selectedProvider = target
+        }
+        // 草稿同步为实际生效值（WebDAV 配置不完整时 selectedProvider 停留在 .webDAV 占位）
+        pendingProvider = appState.selectedProvider
     }
 
     private var iCloudHint: some View {
