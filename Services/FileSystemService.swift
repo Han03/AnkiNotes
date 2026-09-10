@@ -16,6 +16,8 @@ final class FileSystemService {
     // MARK: - 后端 Provider（由 AppState 在 bootstrap/applyProvider 时注入）
 
     let cloudFS: CloudFileSystem
+    /// 同步快照服务（上传后更新快照，避免下次同步冗余 GET 比对）
+    weak var syncSnapshotService: SyncSnapshotService?
 
     init(cloudFS: CloudFileSystem) {
         self.cloudFS = cloudFS
@@ -227,6 +229,11 @@ final class FileSystemService {
     
     /// 异步同步文件到云端
     private func syncToCloud(data: Data, to url: URL) {
+        // 在异步块前计算快照 key 和修改时间，避免竞态
+        let docsPath = localDocumentsDirectory.path
+        let relativePath = url.path.replacingOccurrences(of: docsPath, with: "")
+        let snapshotKey = relativePath.hasPrefix("/") ? String(relativePath.dropFirst()) : relativePath
+        let modDate = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self = self else { return }
             let cloudURL = self.cloudURL(forLocalURL: url)
@@ -234,6 +241,10 @@ final class FileSystemService {
             do {
                 try self.cloudFS.writeData(data, to: cloudURL)
                 SyncLogger.shared.stepDone("☁️ 上传笔记")
+                // 上传成功后更新快照，避免下次同步时冗余 GET 比对
+                if let modDate = modDate {
+                    self.syncSnapshotService?.updateFile(relativePath: snapshotKey, lastModified: modDate)
+                }
             } catch {
                 SyncLogger.shared.stepFail("☁️ 上传笔记", error: error)
             }

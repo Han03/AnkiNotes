@@ -133,6 +133,10 @@ final class KnowledgeService: ObservableObject {
     
     private let fileManager = FileManager.default
     private weak var storageService: StorageService?
+    /// 云端文件系统（用于知识点缓存文件的直接上传）
+    weak var cloudFS: CloudFileSystem?
+    /// 同步快照服务（上传后更新快照，避免下次同步冗余 GET 比对）
+    weak var syncSnapshotService: SyncSnapshotService?
     
     /// 配置 StorageService 引用（用于获取文件夹路径）
     func configure(storageService: StorageService) {
@@ -195,14 +199,28 @@ final class KnowledgeService: ObservableObject {
         return name.components(separatedBy: invalidChars).joined(separator: "_")
     }
     
-    /// 计算缓存文件相对 .knowledge_cache 根目录的路径（形如 .knowledge_cache/笔记路径/文件.md），
-    /// 用于登记"待推送的知识点缓存文件"实现精准推送（避免全量 GET 比对触发云端限流）
-    private func knowledgeRelativePath(of url: URL) -> String {
-        let base = cacheDirectory.path
-        let full = url.path
-        guard full.hasPrefix(base) else { return url.lastPathComponent }
-        let rel = String(full.dropFirst(base.count))
-        return ".knowledge_cache" + rel
+    /// 将知识点缓存文件直接上传到云端（与题库上传 syncToCloud 同模式，无锁无防抖）
+    private func syncKnowledgeFileToCloud(localURL: URL, data: Data) {
+        guard let cloudFS = cloudFS else { return }
+        let docsPath = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0].path
+        let relativePath = localURL.path.replacingOccurrences(of: docsPath, with: "")
+        // 去掉前导 "/"，与 pullKnowledgeCache 中的快照 key 格式一致
+        let snapshotKey = relativePath.hasPrefix("/") ? String(relativePath.dropFirst()) : relativePath
+        // 在异步块前捕获修改时间，避免竞态
+        let modDate = (try? fileManager.attributesOfItem(atPath: localURL.path))?[.modificationDate] as? Date
+        let cloudURL = cloudFS.rootDirectory.appendingPathComponent(relativePath)
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            do {
+                try cloudFS.createDirectoryIfNeeded(at: cloudURL.deletingLastPathComponent())
+                try cloudFS.writeData(data, to: cloudURL)
+                // 上传成功后更新快照，避免下次同步时冗余 GET 比对
+                if let modDate = modDate {
+                    self?.syncSnapshotService?.updateFile(relativePath: snapshotKey, lastModified: modDate)
+                }
+            } catch {
+                print("⚠️ 知识点缓存上传失败: \(error.localizedDescription)")
+            }
+        }
     }
     
     // MARK: - 知识点提取缓存
@@ -245,8 +263,7 @@ final class KnowledgeService: ObservableObject {
         if let data = try? JSONEncoder().encode(result) {
             let url = extractionCacheURL(for: note)
             try? data.write(to: url, options: .atomic)
-            // 标记知识点缓存已变更：精准推送该文件到云端（不做全量 GET 比对，避免限流）
-            MetadataSyncService.shared.markKnowledgeFileDirty(relativePath: knowledgeRelativePath(of: url))
+            syncKnowledgeFileToCloud(localURL: url, data: data)
         }
     }
     
@@ -269,8 +286,7 @@ final class KnowledgeService: ObservableObject {
         if let data = explanation.data(using: .utf8) {
             let url = explanationCacheURL(for: point, note: note)
             try? data.write(to: url, options: .atomic)
-            // 标记知识点缓存已变更：精准推送该文件到云端（不做全量 GET 比对，避免限流）
-            MetadataSyncService.shared.markKnowledgeFileDirty(relativePath: knowledgeRelativePath(of: url))
+            syncKnowledgeFileToCloud(localURL: url, data: data)
         }
     }
     

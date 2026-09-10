@@ -242,11 +242,6 @@ final class AppState: ObservableObject {
             if knowledgePulled > 0 {
                 print("📥 启动时知识点缓存同步: 拉取 \(knowledgePulled) 个文件")
             }
-            // 恢复上次未推送完成的知识点缓存文件（App 被杀重启兜底），并触发精准推送
-            MetadataSyncService.shared.restorePendingKnowledgeFiles()
-            if MetadataSyncService.shared.hasPendingKnowledgeFiles() {
-                self.pushMetadataAndKnowledgeCacheSilently()
-            }
             // 【优化】bootstrap 拉取完成后再触发静默同步（串行执行），
             // 此时快照已更新，silentSync 的根目录检查大概率发现无变更直接跳过，
             // 避免与 bootstrap 并发执行导致双重 PROPFIND + 双重锁获取
@@ -255,30 +250,6 @@ final class AppState: ObservableObject {
             }
         }
         isBootstrapped = true
-        // 6) 监听元数据/知识点缓存变更通知，自动推送到云端（防抖）
-        NotificationCenter.default.addObserver(
-            forName: .metadataSyncNeeded,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            self?.pushMetadataAndKnowledgeCacheSilently()
-        }
-    }
-    
-    /// 静默推送元数据和知识点缓存到云端（防抖，不显示同步UI）
-    /// 知识点缓存采用精准推送：只推送本地新写入/变更的文件，不做全量 GET 比对，
-    /// 避免大量云端 GET 请求触发坚果云限流（原逻辑每次生成一条详解都会全量比对整个 .knowledge_cache）
-    private func pushMetadataAndKnowledgeCacheSilently() {
-        guard !isSyncing, let fs = activeFS else { return }
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            guard let self = self else { return }
-            let metaPushed = MetadataSyncService.shared.pushToCloud(cloudFS: fs)
-            let pending = MetadataSyncService.shared.takePendingKnowledgeFiles()
-            let knowledgePushed = MetadataSyncService.shared.pushKnowledgeCache(cloudFS: fs, onlyPaths: pending)
-            if metaPushed > 0 || knowledgePushed > 0 {
-                print("📤 静默推送: 元数据 \(metaPushed) 个，知识点缓存 \(knowledgePushed) 个")
-            }
-        }
     }
 
     func refreshStats() {
@@ -486,12 +457,21 @@ final class AppState: ObservableObject {
                 return
             }
             SyncLogger.shared.stepStart("检查根目录更新状态（获取锁前）")
+            // 【优化】一次 PROPFIND Depth:1 同时完成"判断是否有变更"和"获取子项列表供下游使用"，
+            // 替代原来的 getItemMetadata(root) + contentsOfDirectoryWithMetadata(root) 两次调用
+            var rootScanChildren: [(url: URL, isDirectory: Bool, lastModified: Date?)] = []
             if self.syncSnapshotService.hasSnapshot {
                 do {
-                    let rootMeta = try fs.getItemMetadata(at: fs.rootDirectory)
-                    SyncLogger.shared.debug("根目录元数据: lastModified=\(rootMeta.lastModified)")
-                    if !self.syncSnapshotService.isRootDirectoryUpdated(lastModified: rootMeta.lastModified) {
-                        SyncLogger.shared.info("根目录无更新，跳过整个同步（获取锁前检查）")
+                    rootScanChildren = try fs.contentsOfDirectoryWithMetadata(at: fs.rootDirectory)
+                    // 逐一检查各子目录的快照，全部未更新则跳过整个同步
+                    let allDirsSkipped = rootScanChildren.allSatisfy { child in
+                        guard child.isDirectory else { return true }  // 文件不影响判断
+                        let name = child.url.lastPathComponent
+                        guard let modDate = child.lastModified else { return false }  // 无修改时间，保守认为有更新
+                        return !self.syncSnapshotService.isDirectoryUpdated(relativePath: name, lastModified: modDate)
+                    }
+                    if allDirsSkipped {
+                        SyncLogger.shared.info("所有子目录均无更新，跳过整个同步（获取锁前检查）")
                         DispatchQueue.main.async {
                             self.providerStatus = "✅ 云端无更新，跳过同步"
                             self.syncStep = "同步完成"
@@ -503,11 +483,10 @@ final class AppState: ObservableObject {
                         SyncLogger.shared.stepDone("检查根目录更新状态（获取锁前）")
                         completion?(StorageService.ImportReport())
                         return
-                    } else {
-                        SyncLogger.shared.info("根目录有更新，开始同步")
                     }
+                    SyncLogger.shared.info("检测到子目录有更新，开始同步")
                 } catch {
-                    SyncLogger.shared.error("无法获取根目录元数据，执行全量同步：\(error.localizedDescription)")
+                    SyncLogger.shared.error("无法获取根目录子项，执行全量同步：\(error.localizedDescription)")
                 }
             } else {
                 SyncLogger.shared.info("无同步快照，执行全量同步")
@@ -640,7 +619,7 @@ final class AppState: ObservableObject {
             }
             SyncLogger.shared.stepStart("拉取云端元数据")
             let metaPullStartTime = Date()
-            let pulled = MetadataSyncService.shared.pullFromCloud(cloudFS: fs)
+            let pulled = MetadataSyncService.shared.pullFromCloud(cloudFS: fs, rootScanChildren: rootScanChildren)
             let metaPullDuration = Date().timeIntervalSince(metaPullStartTime)
             SyncLogger.shared.stepDone("拉取云端元数据", duration: metaPullDuration)
             SyncLogger.shared.info("拉取云端元数据: \(pulled) 个文件，耗时 \(String(format: "%.2f", metaPullDuration))秒")
@@ -674,7 +653,7 @@ final class AppState: ObservableObject {
             }
             SyncLogger.shared.stepStart("拉取知识点缓存")
             let knowledgePullStartTime = Date()
-            let knowledgePulled = MetadataSyncService.shared.pullKnowledgeCache(cloudFS: fs)
+            let knowledgePulled = MetadataSyncService.shared.pullKnowledgeCache(cloudFS: fs, rootScanChildren: rootScanChildren)
             let knowledgePullDuration = Date().timeIntervalSince(knowledgePullStartTime)
             SyncLogger.shared.stepDone("拉取知识点缓存", duration: knowledgePullDuration)
             SyncLogger.shared.info("拉取知识点缓存: \(knowledgePulled) 个文件，耗时 \(String(format: "%.2f", knowledgePullDuration))秒")
@@ -682,7 +661,7 @@ final class AppState: ObservableObject {
             // 从云端扫描并导入到本地（此时内存中的索引为空，会创建所有笔记）
             SyncLogger.shared.stepStart("从云端导入数据（笔记/讲稿/题目）")
             let importStartTime = Date()
-            let report = self.storage.importFromCloud()
+            let report = self.storage.importFromCloud(rootScanChildren: rootScanChildren)
             let importDuration = Date().timeIntervalSince(importStartTime)
             SyncLogger.shared.stepDone("从云端导入数据", duration: importDuration)
             SyncLogger.shared.info("导入完成: 扫描 \(report.scannedMarkdownFiles) 个笔记文件，新增 \(report.importedCount)，跳过 \(report.skippedCount)，失败 \(report.failedCount)，讲稿 \(report.lectureImportedCount) 个，耗时 \(String(format: "%.2f", importDuration))秒")
@@ -803,19 +782,6 @@ final class AppState: ObservableObject {
             SyncLogger.shared.stepDone("推送元数据到云端", duration: metaPushDuration)
             SyncLogger.shared.info("推送元数据到云端: \(pushed) 个文件，耗时 \(String(format: "%.2f", metaPushDuration))秒")
             opSteps.append("推送元数据(\(pushed)个)")
-            // 推送知识点缓存
-            DispatchQueue.main.async {
-                self.syncStep = "推送知识点缓存"
-                self.syncProgress = 98
-                self.syncDetail = "正在上传 .knowledge_cache 到云端..."
-            }
-            SyncLogger.shared.stepStart("推送知识点缓存到云端")
-            let knowledgePushStartTime = Date()
-            let knowledgePushed = MetadataSyncService.shared.pushKnowledgeCache(cloudFS: fs)
-            let knowledgePushDuration = Date().timeIntervalSince(knowledgePushStartTime)
-            SyncLogger.shared.stepDone("推送知识点缓存到云端", duration: knowledgePushDuration)
-            SyncLogger.shared.info("推送知识点缓存到云端: \(knowledgePushed) 个文件，耗时 \(String(format: "%.2f", knowledgePushDuration))秒")
-            opSteps.append("推送知识点(\(knowledgePushed)个)")
             
             // 推送完成，释放锁（全程只释放一次）
             CloudLockService.shared.releaseLock(cloudFS: fs)
@@ -991,8 +957,12 @@ final class AppState: ObservableObject {
         MetadataSyncService.shared.configure(syncSnapshotService: syncSnapshotService)
         // 注入到 KnowledgeService，用于按笔记文件夹路径存储知识点缓存
         KnowledgeService.shared.configure(storageService: storage)
+        KnowledgeService.shared.syncSnapshotService = syncSnapshotService
         // 设置云端文件系统（用于锁验证）
         quizService.cloudFS = webDAVFS ?? localFS
+        KnowledgeService.shared.cloudFS = webDAVFS ?? localFS
+        // 注入到 FileSystemService，用于上传后更新快照
+        localFileSvc.syncSnapshotService = syncSnapshotService
         // 更新 quizService 的笔记和文件夹列表（用于按文件夹结构存储题目）
         quizService.updateNotes(storage.getAllNotes(), folders: storage.getAllFolders())
         refreshStats()

@@ -14,8 +14,6 @@ final class MetadataSyncService {
     
     private let fileManager = FileManager.default
     private var lastPushTimestamps: [String: Date] = [:]
-    private var pushWorkItem: DispatchWorkItem?
-    private let pushQueue = DispatchQueue(label: "com.ankinotes.metadata.push", qos: .utility)
     
     /// 同步快照服务（用于知识点缓存的增量同步跳过）
     private weak var syncSnapshotService: SyncSnapshotService?
@@ -110,15 +108,32 @@ final class MetadataSyncService {
     // MARK: - Pull：从云端拉取元数据到本地缓存
     
     /// 从云端拉取所有元数据文件到本地缓存
-    /// - Parameter cloudFS: 云端文件系统
+    /// - Parameters:
+    ///   - cloudFS: 云端文件系统
+    ///   - rootScanChildren: 根目录 PROPFIND Depth:1 的直接子项结果（由 syncFromCloud 传入），
+    ///     用于 .metadata 目录的快照门控，避免额外的 PROPFIND
     /// - Returns: 成功拉取的文件数
     @discardableResult
-    func pullFromCloud(cloudFS: CloudFileSystem) -> Int {
+    func pullFromCloud(cloudFS: CloudFileSystem,
+                       rootScanChildren: [(url: URL, isDirectory: Bool, lastModified: Date?)]? = nil) -> Int {
         let metadataDir = cloudFS.rootDirectory.appendingPathComponent(".metadata", isDirectory: true)
         var pulledCount = 0
         var skippedBySnapshot = 0
         
-        // 【优化】一次 PROPFIND Depth:1 列举 .metadata/ 目录，替代对每个文件单独 getItemMetadata（3 次 PROPFIND → 1 次）
+        // 【优化】利用根目录扫描结果中 .metadata 的修改时间做快照门控，
+        // 快照命中时跳过整个 pull（0 次 PROPFIND），避免额外的 contentsOfDirectoryWithMetadata 调用
+        if let children = rootScanChildren,
+           let metadataEntry = children.first(where: { $0.url.lastPathComponent == ".metadata" }),
+           let metadataModDate = metadataEntry.lastModified,
+           let snap = syncSnapshotService {
+            if !snap.isDirectoryUpdated(relativePath: ".metadata", lastModified: metadataModDate) {
+                print("📥 元数据同步: .metadata 目录无更新，跳过整个拉取（根目录扫描快照命中）")
+                return 0
+            }
+            snap.updateDirectory(relativePath: ".metadata", lastModified: metadataModDate)
+        }
+        
+        // 一次 PROPFIND Depth:1 列举 .metadata/ 目录，替代对每个文件单独 getItemMetadata（3 次 PROPFIND → 1 次）
         let dirChildren: [(url: URL, isDirectory: Bool, lastModified: Date?)]
         do {
             dirChildren = try cloudFS.contentsOfDirectoryWithMetadata(at: metadataDir)
@@ -266,74 +281,6 @@ final class MetadataSyncService {
         fileManager.fileExists(atPath: localCacheURL(for: fileName).path)
     }
     
-    // MARK: - Debounced Push（防抖推送）
-    
-    /// 标记元数据已变更，延迟推送（debounce 5秒）
-    func markDirty() {
-        pushWorkItem?.cancel()
-        
-        let workItem = DispatchWorkItem { [weak self] in
-            // 实际推送由 AppState 触发（需要 cloudFS）
-            NotificationCenter.default.post(name: .metadataSyncNeeded, object: nil)
-        }
-        pushWorkItem = workItem
-        pushQueue.asyncAfter(deadline: .now() + 5, execute: workItem)
-    }
-    
-    /// 立即执行待推送的任务（App 进入后台时调用）
-    func flush() {
-        pushWorkItem?.cancel()
-        pushWorkItem = nil
-        NotificationCenter.default.post(name: .metadataSyncNeeded, object: nil)
-    }
-    
-    // MARK: - 知识点缓存精准推送（pending 机制）
-    
-    /// 待推送的知识点缓存文件相对路径（形如 .knowledge_cache/xxx/yyy.md）
-    /// 仅在本地缓存写入时登记（saveExtraction/saveExplanation），推送时只处理这些文件，
-    /// 避免每次生成一条详解都全量扫描比对整个 .knowledge_cache（大量 GET 触发坚果云限流）。
-    private var pendingKnowledgeFiles: Set<String> = []
-    private let pendingKnowledgeQueue = DispatchQueue(label: "com.ankinotes.knowledge.pending")
-    private let pendingKnowledgeKey = "pendingKnowledgeFiles"
-    
-    /// 标记知识点缓存文件已变更（写入本地缓存后调用），触发防抖推送
-    func markKnowledgeFileDirty(relativePath: String) {
-        pendingKnowledgeQueue.sync {
-            pendingKnowledgeFiles.insert(relativePath)
-        }
-        // 持久化到 UserDefaults：App 被杀重启后仍能恢复推送，避免本地变更丢失
-        var saved = UserDefaults.standard.stringArray(forKey: pendingKnowledgeKey) ?? []
-        if !saved.contains(relativePath) {
-            saved.append(relativePath)
-            UserDefaults.standard.set(saved, forKey: pendingKnowledgeKey)
-        }
-        markDirty()
-    }
-    
-    /// 取走待推送文件列表并清空（推送完成后调用）
-    func takePendingKnowledgeFiles() -> [String] {
-        let files = pendingKnowledgeQueue.sync {
-            let f = Array(pendingKnowledgeFiles)
-            pendingKnowledgeFiles.removeAll()
-            return f
-        }
-        UserDefaults.standard.removeObject(forKey: pendingKnowledgeKey)
-        return files
-    }
-    
-    /// 是否有待推送的知识点文件
-    func hasPendingKnowledgeFiles() -> Bool {
-        pendingKnowledgeQueue.sync { !pendingKnowledgeFiles.isEmpty }
-    }
-    
-    /// 启动时恢复未推送的知识点文件（App 被杀重启后兜底）
-    func restorePendingKnowledgeFiles() {
-        let saved = UserDefaults.standard.stringArray(forKey: pendingKnowledgeKey) ?? []
-        pendingKnowledgeQueue.sync {
-            pendingKnowledgeFiles = Set(saved)
-        }
-    }
-    
     // MARK: - 知识点缓存同步（.knowledge_cache）
     
     /// 本地知识点缓存目录（Documents/.knowledge_cache）
@@ -345,21 +292,32 @@ final class MetadataSyncService {
     }
     
     /// 从云端拉取知识点缓存到本地（支持递归扫描子目录和快照跳过）
-    func pullKnowledgeCache(cloudFS: CloudFileSystem) -> Int {
+    /// - Parameters:
+    ///   - cloudFS: 云端文件系统
+    ///   - rootScanChildren: 根目录 PROPFIND Depth:1 的直接子项结果（由 syncFromCloud 传入），
+    ///     用于 .knowledge_cache 目录的快照门控，避免额外的 getItemMetadata 调用
+    func pullKnowledgeCache(cloudFS: CloudFileSystem,
+                            rootScanChildren: [(url: URL, isDirectory: Bool, lastModified: Date?)]? = nil) -> Int {
         let cloudDir = cloudFS.rootDirectory.appendingPathComponent(".knowledge_cache", isDirectory: true)
         var pulledCount = 0
         var skippedBySnapshot = 0
         
-        // 【优化】根目录级跳过：一次 getItemMetadata 同时用于检查和更新快照，
-        // 替代原来两次 getItemMetadata 调用（检查一次 + 更新一次）
-        if let snap = syncSnapshotService,
-           let meta = try? cloudFS.getItemMetadata(at: cloudDir),
-           let date = meta.lastModified {
+        // 【优化】根目录级跳过：优先使用根目录扫描结果中 .knowledge_cache 的修改时间，
+        // 省去单独的 getItemMetadata PROPFIND；若无预扫描结果则回退到 getItemMetadata
+        let knowledgeCacheModDate: Date?
+        if let children = rootScanChildren,
+           let entry = children.first(where: { $0.url.lastPathComponent == ".knowledge_cache" }) {
+            knowledgeCacheModDate = entry.lastModified
+        } else if let meta = try? cloudFS.getItemMetadata(at: cloudDir) {
+            knowledgeCacheModDate = meta.lastModified
+        } else {
+            knowledgeCacheModDate = nil
+        }
+        if let snap = syncSnapshotService, let date = knowledgeCacheModDate {
             if !snap.isDirectoryUpdated(relativePath: ".knowledge_cache", lastModified: date) {
                 print("📥 知识点缓存同步: 根目录无更新，跳过整个同步（快照跳过）")
                 return 0
             }
-            // 复用已获取的 date 更新快照，不再第二次调用 getItemMetadata
             snap.updateDirectory(relativePath: ".knowledge_cache", lastModified: date)
         }
         
@@ -466,161 +424,6 @@ final class MetadataSyncService {
         return result
     }
     
-    /// 将本地知识点缓存推送到云端（支持递归扫描子目录和快照跳过）
-    /// - Parameter onlyPaths: 精准推送模式——只推送指定的相对路径文件（本地刚生成的最新版本，
-    ///   直接 PUT 不做云端比对），传 nil 走原有全量逻辑；传空数组直接返回 0。
-    func pushKnowledgeCache(cloudFS: CloudFileSystem, onlyPaths: [String]? = nil) -> Int {
-        let cloudDir = cloudFS.rootDirectory.appendingPathComponent(".knowledge_cache", isDirectory: true)
-        try? cloudFS.createDirectoryIfNeeded(at: cloudDir)
-        var pushedCount = 0
-        var skippedBySnapshot = 0
-        
-        // 精准模式：只推送指定文件（本地刚写入的最新版本），不做 GET 比对，避免全量扫描触发限流
-        if let onlyPaths = onlyPaths {
-            guard !onlyPaths.isEmpty else { return 0 }
-            let set = Set(onlyPaths)
-            let allLocalFiles = scanLocalDirectoryRecursive(at: localKnowledgeCacheDir, baseRelativePath: ".knowledge_cache")
-            let filesToPush = allLocalFiles.filter { set.contains($0.relativePath) }
-            if filesToPush.isEmpty {
-                return 0
-            }
-            print("📤 知识点缓存同步: 精准推送 \(filesToPush.count) 个变更文件")
-            for file in filesToPush {
-                let localURL = file.url
-                let fileRelativePath = file.relativePath
-                guard fileManager.fileExists(atPath: localURL.path) else { continue }
-                do {
-                    let localData = try Data(contentsOf: localURL)
-                    let cloudRelativePath = fileRelativePath.replacingOccurrences(of: ".knowledge_cache/", with: "")
-                    let cloudURL = cloudDir.appendingPathComponent(cloudRelativePath)
-                    try? cloudFS.createDirectoryIfNeeded(at: cloudURL.deletingLastPathComponent())
-                    try cloudFS.writeData(localData, to: cloudURL)
-                    pushedCount += 1
-                    print("📤 知识点缓存同步: 精准推送 \(fileRelativePath) (\(localData.count) bytes)")
-                } catch {
-                    print("⚠️ 知识点缓存推送失败 \(fileRelativePath): \(error.localizedDescription)")
-                }
-            }
-            return pushedCount
-        }
-        
-        // 根目录级跳过：检查本地 .knowledge_cache 目录的修改时间，如果没有更新，跳过整个推送
-        if let snap = syncSnapshotService {
-            let dirRelativePath = ".knowledge_cache"
-            if let dirAttributes = try? fileManager.attributesOfItem(atPath: localKnowledgeCacheDir.path),
-               let dirModDate = dirAttributes[.modificationDate] as? Date,
-               !snap.isDirectoryUpdated(relativePath: dirRelativePath, lastModified: dirModDate) {
-                print("📤 知识点缓存同步: 根目录无更新，跳过整个推送（快照跳过）")
-                return 0
-            }
-        }
-        
-        // 递归扫描本地目录，获取所有文件（包含子目录中的文件）
-        let allLocalFiles = scanLocalDirectoryRecursive(at: localKnowledgeCacheDir, baseRelativePath: ".knowledge_cache")
-        
-        for file in allLocalFiles {
-            let localURL = file.url
-            let fileRelativePath = file.relativePath
-            
-            guard fileManager.fileExists(atPath: localURL.path) else { continue }
-            
-            // 文件级快照跳过：检查本地文件的修改时间，如果没有更新，跳过该文件
-            if let snap = syncSnapshotService,
-               let localModDate = file.lastModified,
-               !snap.isFileUpdated(relativePath: fileRelativePath, lastModified: localModDate) {
-                skippedBySnapshot += 1
-                continue
-            }
-            
-            do {
-                let localData = try Data(contentsOf: localURL)
-                
-                // 计算云端路径：将相对路径中的 .knowledge_cache/ 替换为云端目录
-                let cloudRelativePath = fileRelativePath.replacingOccurrences(of: ".knowledge_cache/", with: "")
-                let cloudURL = cloudDir.appendingPathComponent(cloudRelativePath)
-                
-                // 比较云端内容
-                var needPush = true
-                if let cloudData = try? cloudFS.readData(at: cloudURL),
-                   cloudData == localData {
-                    needPush = false
-                }
-                
-                if !needPush {
-                    // 内容相同，更新文件的修改时间到快照
-                    if let snap = syncSnapshotService,
-                       let localModDate = file.lastModified {
-                        snap.updateFile(relativePath: fileRelativePath, lastModified: localModDate)
-                    }
-                    continue
-                }
-                
-                // 写入云端
-                try? cloudFS.createDirectoryIfNeeded(at: cloudURL.deletingLastPathComponent())
-                try cloudFS.writeData(localData, to: cloudURL)
-                pushedCount += 1
-                
-                // 更新文件的修改时间到快照
-                if let snap = syncSnapshotService,
-                   let localModDate = file.lastModified {
-                    snap.updateFile(relativePath: fileRelativePath, lastModified: localModDate)
-                }
-                
-                print("📤 知识点缓存同步: 推送 \(fileRelativePath)")
-            } catch {
-                print("⚠️ 知识点缓存推送失败 \(fileRelativePath): \(error.localizedDescription)")
-            }
-        }
-        
-        if skippedBySnapshot > 0 {
-            print("📤 知识点缓存同步: 快照跳过 \(skippedBySnapshot) 个文件，实际推送 \(pushedCount) 个文件")
-        }
-        
-        return pushedCount
-    }
-    
-    /// 递归扫描本地目录，返回所有文件（包含子目录中的文件）
-    private func scanLocalDirectoryRecursive(
-        at dirURL: URL,
-        baseRelativePath: String
-    ) -> [(url: URL, relativePath: String, lastModified: Date?)] {
-        var result: [(url: URL, relativePath: String, lastModified: Date?)] = []
-        
-        guard let children = try? fileManager.contentsOfDirectory(at: dirURL, includingPropertiesForKeys: [.contentModificationDateKey, .isDirectoryKey]) else {
-            return result
-        }
-        
-        for child in children {
-            let childRelativePath = "\(baseRelativePath)/\(child.lastPathComponent)"
-            
-            let resourceValues = try? child.resourceValues(forKeys: [.contentModificationDateKey, .isDirectoryKey])
-            let isDirectory = resourceValues?.isDirectory ?? false
-            let lastModified = resourceValues?.contentModificationDate
-            
-            if isDirectory {
-                // 子目录级跳过：检查子目录的修改时间，如果没有更新，跳过整个子目录
-                if let snap = syncSnapshotService,
-                   let dirModDate = lastModified,
-                   !snap.isDirectoryUpdated(relativePath: childRelativePath, lastModified: dirModDate) {
-                    continue
-                }
-                // 更新子目录的修改时间到快照
-                if let snap = syncSnapshotService,
-                   let dirModDate = lastModified {
-                    snap.updateDirectory(relativePath: childRelativePath, lastModified: dirModDate)
-                }
-                // 递归扫描子目录
-                let subFiles = scanLocalDirectoryRecursive(at: child, baseRelativePath: childRelativePath)
-                result.append(contentsOf: subFiles)
-            } else {
-                // 是文件，添加到结果
-                result.append((url: child, relativePath: childRelativePath, lastModified: lastModified))
-            }
-        }
-        
-        return result
-    }
-    
     // MARK: - 递归扫描文件工具
     
     private func listFilesRecursive(cloudFS: CloudFileSystem, at url: URL, maxDepth: Int = 10, currentDepth: Int = 0) -> [URL] {
@@ -668,8 +471,3 @@ final class MetadataSyncService {
     }
 }
 
-// MARK: - Notification
-
-extension Notification.Name {
-    static let metadataSyncNeeded = Notification.Name("MetadataSyncNeeded")
-}

@@ -543,7 +543,7 @@ final class StorageService: ObservableObject {
     // MARK: - 云端同步
 
     /// 从云端同步笔记到本地（下拉刷新调用）
-    func importFromCloud() -> ImportReport {
+    func importFromCloud(rootScanChildren: [(url: URL, isDirectory: Bool, lastModified: Date?)]? = nil) -> ImportReport {
         var report = ImportReport()
         guard let cloud = cloudSyncFS else {
             report.warningMessages.append("未配置云端同步")
@@ -579,7 +579,7 @@ final class StorageService: ObservableObject {
         // 收集文件的云端修改时间（跳过分支用于更新快照，使快照收敛）
         var fileTimes: [String: Date] = [:]
         // 传入快照和根目录，支持目录级和文件级跳过
-        collectMarkdownFilesFromFS(cloud, at: cloudRoot, skipNames: skipNames, into: &cloudFiles, rootURL: cloudRoot, snapshot: syncSnapshotService, directoryTimes: &directoryTimes, fileTimes: &fileTimes)
+        collectMarkdownFilesFromFS(cloud, at: cloudRoot, skipNames: skipNames, into: &cloudFiles, rootURL: cloudRoot, snapshot: syncSnapshotService, directoryTimes: &directoryTimes, fileTimes: &fileTimes, rootScanChildren: rootScanChildren)
         report.scannedMarkdownFiles = cloudFiles.count
         syncProgressCallback?("扫描云端文件", 5, "发现 \(cloudFiles.count) 篇需要更新的笔记")
         // 云端 Notes 目录没有 .md 文件是正常状态（可能只同步讲稿/题目），不阻断后续同步
@@ -665,9 +665,9 @@ final class StorageService: ObservableObject {
         
         // 同步课堂讲稿（Lecture 目录下的 .txt 文件）
         syncProgressCallback?("同步讲稿", 55, "正在扫描云端讲稿...")
-        syncLecturesFromCloud(cloud: cloud, report: &report, snapshot: syncSnapshotService)
+        syncLecturesFromCloud(cloud: cloud, report: &report, snapshot: syncSnapshotService, rootScanChildren: rootScanChildren)
         syncProgressCallback?("同步题库", 75, "正在扫描云端题库...")
-        syncQuestionsFromCloud(cloud: cloud, report: &report, snapshot: syncSnapshotService)
+        syncQuestionsFromCloud(cloud: cloud, report: &report, snapshot: syncSnapshotService, rootScanChildren: rootScanChildren)
         syncProgressCallback?("同步完成", 100, "笔记 \(report.importedCount) 篇，讲稿 \(report.lectureImportedCount) 个，题库已同步")
         
         return report
@@ -709,14 +709,15 @@ final class StorageService: ObservableObject {
     }
 
     /// 从云端同步课堂讲稿
-    private func syncLecturesFromCloud(cloud: CloudFileSystem, report: inout ImportReport, snapshot: SyncSnapshotService? = nil) {
+    private func syncLecturesFromCloud(cloud: CloudFileSystem, report: inout ImportReport, snapshot: SyncSnapshotService? = nil, rootScanChildren: [(url: URL, isDirectory: Bool, lastModified: Date?)]? = nil) {
         let lectureRoot = cloud.rootDirectory.appendingPathComponent("Lecture", isDirectory: true)
         var lectureFiles: [URL] = []
         // 收集目录的云端修改时间（下载成功后用于更新快照目录记录）
         var directoryTimes: [String: Date] = [:]
         var fileTimes: [String: Date] = [:]
-        // 传入快照和根目录，支持目录级和文件级跳过
-        collectFilesFromFS(cloud, at: lectureRoot, extensions: ["txt"], skipNames: [], into: &lectureFiles, rootURL: lectureRoot, snapshot: snapshot, directoryTimes: &directoryTimes, fileTimes: &fileTimes)
+        // 【优化】从根目录扫描结果中查找 Lecture 子项，省去一次 PROPFIND
+        let lectureChildren = rootScanChildren?.first(where: { $0.url.lastPathComponent == "Lecture" })
+        collectFilesFromFS(cloud, at: lectureRoot, extensions: ["txt"], skipNames: [], into: &lectureFiles, rootURL: lectureRoot, snapshot: snapshot, directoryTimes: &directoryTimes, fileTimes: &fileTimes, rootScanChildren: lectureChildren)
         report.scannedLectureFiles = lectureFiles.count
         print("📖 讲稿同步: 扫描到 \(lectureFiles.count) 个需要更新的讲稿文件")
         for srcURL in lectureFiles {
@@ -755,14 +756,15 @@ final class StorageService: ObservableObject {
     }
     
     /// 从云端同步题库（Questions 目录，按笔记文件夹结构存储）
-    private func syncQuestionsFromCloud(cloud: CloudFileSystem, report: inout ImportReport, snapshot: SyncSnapshotService? = nil) {
+    private func syncQuestionsFromCloud(cloud: CloudFileSystem, report: inout ImportReport, snapshot: SyncSnapshotService? = nil, rootScanChildren: [(url: URL, isDirectory: Bool, lastModified: Date?)]? = nil) {
         let questionsRoot = cloud.rootDirectory.appendingPathComponent("Questions", isDirectory: true)
         var questionFiles: [URL] = []
         // 收集目录的云端修改时间（下载成功后用于更新快照目录记录）
         var directoryTimes: [String: Date] = [:]
         var fileTimes: [String: Date] = [:]
-        // 传入快照和根目录，支持目录级和文件级跳过
-        collectFilesFromFS(cloud, at: questionsRoot, extensions: ["json"], skipNames: [], into: &questionFiles, rootURL: questionsRoot, snapshot: snapshot, directoryTimes: &directoryTimes, fileTimes: &fileTimes)
+        // 【优化】从根目录扫描结果中查找 Questions 子项，省去一次 PROPFIND
+        let questionsChildren = rootScanChildren?.first(where: { $0.url.lastPathComponent == "Questions" })
+        collectFilesFromFS(cloud, at: questionsRoot, extensions: ["json"], skipNames: [], into: &questionFiles, rootURL: questionsRoot, snapshot: snapshot, directoryTimes: &directoryTimes, fileTimes: &fileTimes, rootScanChildren: questionsChildren)
         report.scannedQuestionFiles = questionFiles.count
         print("📚 题库同步: 扫描到 \(questionFiles.count) 个题目文件")
         for srcURL in questionFiles {
@@ -904,15 +906,26 @@ final class StorageService: ObservableObject {
     }
 
     /// 从指定 FS 递归扫描 .md 文件
-    private func collectMarkdownFilesFromFS(_ fs: CloudFileSystem, at url: URL, skipNames: Set<String>, into result: inout [URL], rootURL: URL? = nil, snapshot: SyncSnapshotService? = nil, directoryTimes: inout [String: Date], fileTimes: inout [String: Date]) {
-        collectFilesFromFS(fs, at: url, extensions: ["md", "markdown"], skipNames: skipNames, into: &result, rootURL: rootURL, snapshot: snapshot, directoryTimes: &directoryTimes, fileTimes: &fileTimes)
+    private func collectMarkdownFilesFromFS(_ fs: CloudFileSystem, at url: URL, skipNames: Set<String>, into result: inout [URL], rootURL: URL? = nil, snapshot: SyncSnapshotService? = nil, directoryTimes: inout [String: Date], fileTimes: inout [String: Date], rootScanChildren: [(url: URL, isDirectory: Bool, lastModified: Date?)]? = nil) {
+        collectFilesFromFS(fs, at: url, extensions: ["md", "markdown"], skipNames: skipNames, into: &result, rootURL: rootURL, snapshot: snapshot, directoryTimes: &directoryTimes, fileTimes: &fileTimes, rootScanChildren: rootScanChildren)
     }
     
-    private func collectFilesFromFS(_ fs: CloudFileSystem, at url: URL, extensions: [String], skipNames: Set<String>, into result: inout [URL], rootURL: URL? = nil, snapshot: SyncSnapshotService? = nil, directoryTimes: inout [String: Date], fileTimes: inout [String: Date]) {
-        // 使用 contentsOfDirectoryWithMetadata 一次获取子项和类型及修改时间，避免对每个子项发起额外请求
-        // （WebDAV 下 contentsOfDirectory 是网络请求，逐个调用容易超时失败导致目录被跳过）
+    /// 递归收集指定扩展名的云端文件
+    /// - Parameter rootScanChildren: 预获取的目录子项列表（由根目录扫描传入），非 nil 时省去一次 PROPFIND
+    private func collectFilesFromFS(_ fs: CloudFileSystem, at url: URL, extensions: [String], skipNames: Set<String>, into result: inout [URL], rootURL: URL? = nil, snapshot: SyncSnapshotService? = nil, directoryTimes: inout [String: Date], fileTimes: inout [String: Date], rootScanChildren: [(url: URL, isDirectory: Bool, lastModified: Date?)]? = nil) {
+        // 【优化】如果传入了预扫描的子项列表（来自根目录 PROPFIND Depth:1），直接使用，省去一次 PROPFIND
         let children: [(url: URL, isDirectory: Bool, lastModified: Date?)]
-        do { children = try fs.contentsOfDirectoryWithMetadata(at: url) } catch { return }
+        if let preScanned = rootScanChildren {
+            children = preScanned
+        } else {
+            // 使用 contentsOfDirectoryWithMetadata 一次获取子项和类型及修改时间，避免对每个子项发起额外请求
+            do { children = try fs.contentsOfDirectoryWithMetadata(at: url) } catch { return }
+        }
+        processChildItems(children, fs: fs, extensions: extensions, skipNames: skipNames, into: &result, rootURL: rootURL, snapshot: snapshot, directoryTimes: &directoryTimes, fileTimes: &fileTimes)
+    }
+    
+    /// 处理目录子项：收集匹配文件、递归子目录（从 collectFilesFromFS 提取，避免代码重复）
+    private func processChildItems(_ children: [(url: URL, isDirectory: Bool, lastModified: Date?)], fs: CloudFileSystem, extensions: [String], skipNames: Set<String>, into result: inout [URL], rootURL: URL?, snapshot: SyncSnapshotService?, directoryTimes: inout [String: Date], fileTimes: inout [String: Date]) {
         for (child, isDirectory, lastModified) in children {
             let name = child.lastPathComponent
             if skipNames.contains(name) { continue }
@@ -948,6 +961,7 @@ final class StorageService: ObservableObject {
                         continue  // 目录无更新且已有成功记录，跳过
                     }
                 }
+                // 递归子目录（不再传递 rootScanChildren，子目录需要自己的 PROPFIND）
                 collectFilesFromFS(fs, at: child, extensions: extensions, skipNames: skipNames, into: &result, rootURL: rootURL, snapshot: snapshot, directoryTimes: &directoryTimes, fileTimes: &fileTimes)
             }
         }
