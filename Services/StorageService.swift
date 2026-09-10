@@ -716,7 +716,7 @@ final class StorageService: ObservableObject {
         var directoryTimes: [String: Date] = [:]
         var fileTimes: [String: Date] = [:]
         // 【优化】从根目录扫描结果中查找 Lecture 子项，省去一次 PROPFIND
-        let lectureChildren = rootScanChildren?.first(where: { $0.url.lastPathComponent == "Lecture" })
+        let lectureChildren = rootScanChildren?.first(where: { $0.url.lastPathComponent == "Lecture" }).flatMap { [$0] }
         collectFilesFromFS(cloud, at: lectureRoot, extensions: ["txt"], skipNames: [], into: &lectureFiles, rootURL: lectureRoot, snapshot: snapshot, directoryTimes: &directoryTimes, fileTimes: &fileTimes, rootScanChildren: lectureChildren)
         report.scannedLectureFiles = lectureFiles.count
         print("📖 讲稿同步: 扫描到 \(lectureFiles.count) 个需要更新的讲稿文件")
@@ -763,7 +763,7 @@ final class StorageService: ObservableObject {
         var directoryTimes: [String: Date] = [:]
         var fileTimes: [String: Date] = [:]
         // 【优化】从根目录扫描结果中查找 Questions 子项，省去一次 PROPFIND
-        let questionsChildren = rootScanChildren?.first(where: { $0.url.lastPathComponent == "Questions" })
+        let questionsChildren = rootScanChildren?.first(where: { $0.url.lastPathComponent == "Questions" }).flatMap { [$0] }
         collectFilesFromFS(cloud, at: questionsRoot, extensions: ["json"], skipNames: [], into: &questionFiles, rootURL: questionsRoot, snapshot: snapshot, directoryTimes: &directoryTimes, fileTimes: &fileTimes, rootScanChildren: questionsChildren)
         report.scannedQuestionFiles = questionFiles.count
         print("📚 题库同步: 扫描到 \(questionFiles.count) 个题目文件")

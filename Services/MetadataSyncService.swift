@@ -321,7 +321,7 @@ final class MetadataSyncService {
         // 用共用方法扫描云端目录（目录级 + 文件级快照跳过，与笔记/讲稿/题目完全一致）
         var directoryTimes: [String: Date] = [:]
         var fileTimes: [String: Date] = [:]
-        let kcChildren = rootScanChildren?.first(where: { $0.url.lastPathComponent == ".knowledge_cache" })
+        let kcChildren = rootScanChildren?.first(where: { $0.url.lastPathComponent == ".knowledge_cache" }).flatMap { [$0] }
         var allFiles: [URL] = []
         storage.collectFilesFromFS(
             cloudFS, at: cloudDir, extensions: ["json", "md"],
