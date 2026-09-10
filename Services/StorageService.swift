@@ -25,6 +25,9 @@ final class StorageService: ObservableObject {
     /// 讲稿存在性缓存（避免频繁检查文件系统）
     private var lectureExistsCache: [UUID: Bool] = [:]
     
+    /// 文件夹路径缓存：folderId -> 完整路径字符串 (用于 O(1) 快速查询)
+    private var folderPathCache: [UUID: String] = [:]
+    
     /// 清除讲稿存在性缓存（讲稿/笔记发生变化时调用）
     func clearLectureCache() {
         lectureExistsCache.removeAll()
@@ -36,6 +39,8 @@ final class StorageService: ObservableObject {
         self.noteMetas = fileSystem.loadNoteIndex()
         self.reviewLogs = fileSystem.loadReviewLogs()
         consistencyCheck()
+        // 初始化时构建文件夹路径缓存
+        rebuildFolderPathCache()
     }
     
     /// 从本地缓存重新加载所有元数据（元数据同步后调用）
@@ -44,7 +49,17 @@ final class StorageService: ObservableObject {
         noteMetas = fileSystem.loadNoteIndex()
         reviewLogs = fileSystem.loadReviewLogs()
         clearLectureCache()  // 重新加载后清除讲稿缓存
+        rebuildFolderPathCache() // 重新加载后重建路径缓存
         triggerRefresh()
+    }
+    
+    /// 重建文件夹路径缓存
+    private func rebuildFolderPathCache() {
+        folderPathCache.removeAll()
+        for folder in folders {
+            let path = computeFolderPath(folderId: folder.id, folders: folders)
+            folderPathCache[folder.id] = path.isEmpty ? "根目录" : path
+        }
     }
     
     // MARK: - 文件夹 CRUD
@@ -65,6 +80,9 @@ final class StorageService: ObservableObject {
         let folder = Folder(name: name, parentId: parentId)
         folders.append(folder)
         persistFolders()
+        // 更新缓存：直接计算并存储新文件夹的路径
+        let path = computeFolderPath(folderId: folder.id, folders: folders)
+        folderPathCache[folder.id] = path.isEmpty ? "根目录" : path
         // 创建物理目录
         _ = try? fileSystem.createPhysicalFolder(named: name, parentFolderId: parentId, folders: folders)
         return folder
@@ -76,6 +94,9 @@ final class StorageService: ObservableObject {
         updated.updatedAt = Date()
         folders[idx] = updated
         persistFolders()
+        // 更新缓存
+        let path = computeFolderPath(folderId: folder.id, folders: folders)
+        folderPathCache[folder.id] = path.isEmpty ? "根目录" : path
     }
     
     /// 重命名文件夹（同时重命名物理目录并更新云端）
@@ -91,6 +112,13 @@ final class StorageService: ObservableObject {
         updated.updatedAt = Date()
         folders[idx] = updated
         persistFolders()
+        
+        // 更新缓存：重新计算该文件夹及其所有子文件夹的路径
+        let affectedIds = collectDescendantFolderIds(from: id)
+        for fid in affectedIds {
+            let path = computeFolderPath(folderId: fid, folders: folders)
+            folderPathCache[fid] = path.isEmpty ? "根目录" : path
+        }
         
         // 重命名物理目录（本地 + 云端）
         let oldURL = fileSystem.noteFileURL(
@@ -185,6 +213,9 @@ final class StorageService: ObservableObject {
         persistFolders()
         persistNoteIndex()
         
+        // 更新缓存：移除已删除文件夹的路径
+        folderIdsToDelete.forEach { folderPathCache.removeValue(forKey: $0) }
+        
         // 删除相关题目
         if !deletedNoteIds.isEmpty {
             quizService?.deleteQuestions(for: deletedNoteIds)
@@ -278,6 +309,10 @@ final class StorageService: ObservableObject {
 
     func getFolderPath(for folderId: UUID?) -> String {
         guard let folderId = folderId else { return "根目录" }
+        if let cached = folderPathCache[folderId] {
+            return cached
+        }
+        // 缓存未命中，回退到计算逻辑
         var components: [String] = []
         var currentId: UUID? = folderId
         while let fid = currentId {
@@ -288,7 +323,9 @@ final class StorageService: ObservableObject {
                 break
             }
         }
-        return components.joined(separator: "/")
+        let path = components.joined(separator: "/")
+        folderPathCache[folderId] = path.isEmpty ? "根目录" : path
+        return folderPathCache[folderId]!
     }
 
     /// 获取笔记所在文件夹的路径

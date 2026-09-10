@@ -731,8 +731,8 @@ private extension UIFont {
 
 private final class KnowledgeUnderlineLayoutManager: NSLayoutManager {
     private let underlineColor = UIColor(Color.brandPrimary)
-    private let underlineHeight: CGFloat = 2.0   // 下划线粗细
-    private let underlineOffset: CGFloat = 2.0   // 下划线与文字基线的距离
+    private let underlineHeight: CGFloat = 1.0   // 下划线粗细
+    private let underlineOffset: CGFloat = -1.0  // 下划线偏移（负值 = 从包围盒底部上移，紧贴文字底端）
 
     // 知识点下划线由 drawGlyphs 统一绘制，此处拦截系统默认绘制（避免细线叠加导致粗细不一致）
     override func drawUnderline(

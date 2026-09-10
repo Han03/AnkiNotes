@@ -174,7 +174,7 @@ struct ReviewSessionView: View {
                 Color.black.opacity(0.0001)
                     .contentShape(Rectangle())
                     .onTapGesture {
-                        withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
+                        withAnimation(.spring(response: 0.18, dampingFraction: 0.7)) {
                             showRatingExpanded = false
                         }
                     }
@@ -280,59 +280,70 @@ struct ReviewSessionView: View {
     
     @ViewBuilder
     private func bottomOperationBar(note: Note, scheduler: SchedulerService) -> some View {
-        let hasQuiz = appState.quizService.generatedNoteIds.contains(note.id)
+        let hasQuiz = appState.quizService.notesWithQuestionsCache.contains(note.id)
         let hasLecture = appState.storage?.hasLecture(for: note) ?? false
         let isPlaying = isPlayingLecture && !isPausedLecture
         let secondaryButtonCount = (hasQuiz ? 1 : 0) + (hasLecture ? 1 : 0) + (hasLecture ? 1 : 0)  // 测评+讲稿+播放
         
-        VStack(spacing: 0) {
-            // 播放进度条（仅播放/暂停时显示，2pt细条）
-            if isPlayingLecture {
-                GeometryReader { geometry in
-                    ZStack(alignment: .leading) {
-                        Color.gray.opacity(0.1)
-                        Color.brandPrimary
-                            .frame(width: geometry.size.width * CGFloat(lecturePlayProgress))
+        GeometryReader { geo in
+            let safeAreaBottom = geo.safeAreaInsets.bottom
+            let extensionHeight = safeAreaBottom / 2.0
+            
+            VStack(spacing: 0) {
+                // 播放进度条（仅播放/暂停时显示，2pt细条）
+                if isPlayingLecture {
+                    GeometryReader { geometry in
+                        ZStack(alignment: .leading) {
+                            Color.gray.opacity(0.1)
+                            Color.brandPrimary
+                                .frame(width: geometry.size.width * CGFloat(lecturePlayProgress))
+                        }
+                    }
+                    .frame(height: 2)
+                }
+                
+                // 顶部分割线
+                Divider()
+                    .opacity(0.2)
+                
+                HStack(spacing: AppSpacing.sm) {
+                    // 评级主按钮（始终显示，占主要空间）
+                    ratingButton(note: note, scheduler: scheduler)
+                        .frame(maxWidth: .infinity)
+                    
+                    // 测评按钮（有题目时显示）
+                    if hasQuiz {
+                        quizButton()
+                            .frame(width: 52)
+                    }
+                    
+                    // 讲稿按钮（有讲稿时显示）
+                    if hasLecture {
+                        lectureButton(note: note)
+                            .frame(width: 52)
+                    }
+                    
+                    // 播放/暂停按钮（有讲稿时显示）
+                    if hasLecture {
+                        playPauseButton(note: note, isPlaying: isPlaying)
+                            .frame(width: 52)
                     }
                 }
-                .frame(height: 2)
+                .padding(.horizontal, 16)  // 与笔记内容宽度一致
+                .padding(.vertical, 10)
+                .padding(.bottom, max(14 - extensionHeight, 0))  // 调整底部间距，让背景侵入安全区一半
             }
-            
-            // 顶部分割线
-            Divider()
-                .opacity(0.2)
-            
-            HStack(spacing: AppSpacing.sm) {
-                // 评级主按钮（始终显示，占主要空间）
-                ratingButton(note: note, scheduler: scheduler)
-                    .frame(maxWidth: .infinity)
-                
-                // 测评按钮（有题目时显示）
-                if hasQuiz {
-                    quizButton()
-                        .frame(width: 52)
+            .background(
+                ZStack {
+                    Color.bgCard
+                    // 透明区域推到底部，让彩色背景延伸到安全区一半
+                    Color.clear
+                        .frame(height: extensionHeight)
                 }
-                
-                // 讲稿按钮（有讲稿时显示）
-                if hasLecture {
-                    lectureButton(note: note)
-                        .frame(width: 52)
-                }
-                
-                // 播放/暂停按钮（有讲稿时显示）
-                if hasLecture {
-                    playPauseButton(note: note, isPlaying: isPlaying)
-                        .frame(width: 52)
-                }
-            }
-            .padding(.horizontal, AppSpacing.lg)
-            .padding(.vertical, 10)
-            .padding(.bottom, 14)  // 进入 Safe Area 约 20pt
+                .ignoresSafeArea(edges: .bottom)
+            )
         }
-        .background(
-            Color.bgCard
-                .ignoresSafeArea(edges: .bottom)  // 背景延伸到屏幕底部
-        )
+        .frame(height: nil)  // 不限制高度，让 GeometryReader 自然计算
     }
     
     // MARK: - 评级就地展开面板
@@ -394,7 +405,7 @@ struct ReviewSessionView: View {
         let previewText = scheduler.previewNextInterval(note: note, rating: recommendedRating)
         
         return Button {
-            withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) {
+            withAnimation(.spring(response: 0.18, dampingFraction: 0.7)) {
                 showRatingExpanded.toggle()
             }
         } label: {
@@ -419,10 +430,9 @@ struct ReviewSessionView: View {
                     .padding(.bottom, AppButtonHeight.standard + 8)  // 面板底边 = 按钮顶边 - 8
                     .transition(
                         .asymmetric(
-                            insertion: .scale(scale: 0.85, anchor: .bottom)
-                                .combined(with: .opacity)
-                                .combined(with: .offset(y: 6)),
-                            removal: .scale(scale: 0.92, anchor: .bottom)
+                            insertion: .scale(scale: 0.92, anchor: .bottom)
+                                .combined(with: .opacity),
+                            removal: .scale(scale: 0.96, anchor: .bottom)
                                 .combined(with: .opacity)
                         )
                     )

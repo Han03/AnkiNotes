@@ -334,10 +334,10 @@ struct QuizHomeView: View {
         .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
     }
 
-    /// 是否还有未生成题目的笔记（按 generatedNoteIds 判断，与题目生成逻辑保持一致）
+    /// 是否还有未生成题目的笔记（通过校验缓存集合判断，O(1) 复杂度）
     private var hasPendingQuestionNotes: Bool {
         guard let quiz = appState.quizService else { return false }
-        return quiz.notes.contains { !quiz.generatedNoteIds.contains($0.id) }
+        return quiz.notes.contains { !quiz.notesWithQuestionsCache.contains($0.id) && !quiz.failedNoteIds.contains($0.id) }
     }
 
     // MARK: - 全部题组（按题目文件）
@@ -444,10 +444,9 @@ struct QuizHomeView: View {
     }
 
     private func buildGroups() -> [QuestionGroupItem] {
-        guard let quiz = appState.quizService, !quiz.questions.isEmpty else { return [] }
-        let grouped = Dictionary(grouping: quiz.questions) { $0.noteId }
+        guard let quiz = appState.quizService, !quiz.questionGroupsCache.isEmpty else { return [] }
         var items: [QuestionGroupItem] = []
-        for (noteId, qs) in grouped {
+        for (noteId, qs) in quiz.questionGroupsCache {
             let title = qs.first?.noteTitle ?? "未知笔记"
             // 优先用笔记索引计算路径；笔记索引缺失（笔记已删/未加载）时回退到题目文件系统路径
             var folderPath = ""

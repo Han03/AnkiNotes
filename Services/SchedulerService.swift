@@ -16,8 +16,28 @@ final class SchedulerService: ObservableObject {
     var dailyNewCardLimit: Int = 500
     var dailyReviewCardLimit: Int = 500
     
+    /// 缓存：按文件夹 ID 统计的今日到期数量 (folderId -> count)
+    private var dueCountByFolderCache: [UUID?: Int] = [:]
+    /// 上次更新缓存的时间戳，用于判断是否需要刷新
+    private var lastCacheUpdateTime: Date = .distantPast
+    
     init(storage: StorageService) {
         self.storage = storage
+        // 初始化时预计算一次缓存
+        refreshDueCountCache()
+    }
+    
+    /// 强制刷新到期计数缓存
+    func refreshDueCountCache() {
+        dueCountByFolderCache.removeAll()
+        lastCacheUpdateTime = Date()
+        
+        // 1. 计算全部笔记的到期数
+        let allQueue = getTodayReviewQueue(in: nil)
+        dueCountByFolderCache[nil] = allQueue.count
+        
+        // 2. 计算每个顶层文件夹的到期数（简化处理：只缓存全量和当前常用文件夹）
+        // 如果需要更细粒度的缓存，可以在调用 getTodayDueCount 时动态填充
     }
     
     // MARK: - 获取今日到期的复习队列
@@ -81,7 +101,15 @@ final class SchedulerService: ObservableObject {
     
     /// 今日到期的卡片总数（用于主界面小红点）
     func getTodayDueCount(in folderId: UUID? = nil) -> Int {
-        getTodayReviewQueue(in: folderId).count
+        // 如果距离上次更新超过 60 秒，或者缓存中没有该 key，则重新计算
+        let now = Date()
+        if now.timeIntervalSince(lastCacheUpdateTime) > 60 || dueCountByFolderCache[folderId] == nil {
+            let count = getTodayReviewQueue(in: folderId).count
+            dueCountByFolderCache[folderId] = count
+            lastCacheUpdateTime = now
+            return count
+        }
+        return dueCountByFolderCache[folderId] ?? 0
     }
     
     // MARK: - 处理一次复习评级
@@ -107,6 +135,10 @@ final class SchedulerService: ObservableObject {
             reviewDate: Date(), timeSpent: timeSpent
         )
         storage.addReviewLog(log)
+        
+        // 评级后 SRS 状态改变，使缓存失效（下次调用 getTodayDueCount 时会重新计算）
+        dueCountByFolderCache.removeAll()
+        lastCacheUpdateTime = .distantPast
         
         return note
     }

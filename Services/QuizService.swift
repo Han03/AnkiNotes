@@ -28,7 +28,10 @@ struct BailianConfig: Codable, Hashable {
 /// 题库服务：管理题目存储、生成、选题
 final class QuizService {
     private(set) var questions: [Question] = []
-    private(set) var generatedNoteIds: Set<UUID> = []  // 已生成题目的笔记 ID
+    /// 缓存：已拥有题目的笔记 ID 集合（用于 O(1) 快速查询）
+    private(set) var notesWithQuestionsCache: Set<UUID> = []
+    /// 缓存：按笔记 ID 分组的题目列表 (noteId -> [Question])，用于题库主页极速渲染
+    private(set) var questionGroupsCache: [UUID: [Question]] = [:]
     private(set) var isGenerating = false  // 是否正在生成题目
     private(set) var isCancelled = false    // 是否被用户取消
     private(set) var failedNoteIds: Set<UUID> = []  // 生成失败的笔记ID（可重试）
@@ -39,7 +42,6 @@ final class QuizService {
     @Published var generatedCharCount: Int = 0  // 当前笔记已生成字数（实时进度）
     var onError: ((String) -> Void)?  // 生成题目报错回调
 
-    private let generatedIdsURL: URL
     private let fileSystem: FileSystemService
     /// 云端文件系统（用于锁验证，由 AppState 设置）
     weak var cloudFS: CloudFileSystem?
@@ -51,7 +53,6 @@ final class QuizService {
     
     init(fileSystem: FileSystemService) {
         self.fileSystem = fileSystem
-        self.generatedIdsURL = fileSystem.metadataDirectory.appendingPathComponent("quiz_generated_notes.json")
         load()
     }
     
@@ -75,17 +76,11 @@ final class QuizService {
 
     private func load() {
         // 【优化】直接遍历 Questions 目录下的所有 JSON 文件加载题目
-        // 不依赖 notes/folders 数组，避免 folders 数组不完整导致路径计算错误
-        // 这是最健壮的加载方式，确保所有文件夹的题目都能正确加载
         questions = fileSystem.loadAllQuestionsFromDisk()
         // 记录 noteId → 题目文件目录映射（题组展示真实路径，不依赖笔记索引）
         notePaths = fileSystem.loadQuestionNotePaths()
-        
-        // 加载已生成笔记 ID
-        if let data = try? fileSystem.readNoteContent(from: generatedIdsURL).data(using: .utf8),
-           let decoded = try? JSONDecoder().decode([UUID].self, from: data) {
-            generatedNoteIds = Set(decoded)
-        }
+        // 同步更新缓存
+        updateNotesWithQuestionsCache()
     }
 
     private func save() {
@@ -105,12 +100,6 @@ final class QuizService {
                 print("⚠️ 保存题目失败 \(note.title): \(error.localizedDescription)")
             }
         }
-        
-        // 保存已生成笔记 ID
-        if let data = try? JSONEncoder().encode(Array(generatedNoteIds)),
-           let str = String(data: data, encoding: .utf8) {
-            try? fileSystem.writeNoteContent(str, to: generatedIdsURL)
-        }
     }
     
     /// 只保存单个笔记的题目（生成题目时使用，提高性能）
@@ -126,11 +115,15 @@ final class QuizService {
         } catch {
             print("⚠️ 保存题目失败 \(note.title): \(error.localizedDescription)")
         }
-        // 保存已生成笔记 ID
-        if let data = try? JSONEncoder().encode(Array(generatedNoteIds)),
-           let str = String(data: data, encoding: .utf8) {
-            try? fileSystem.writeNoteContent(str, to: generatedIdsURL)
-        }
+        // 同步更新缓存
+        updateNotesWithQuestionsCache()
+    }
+    
+    /// 更新缓存集合
+    private func updateNotesWithQuestionsCache() {
+        notesWithQuestionsCache = Set(questions.map { $0.noteId })
+        // 同步更新分组缓存
+        questionGroupsCache = Dictionary(grouping: questions, by: { $0.noteId })
     }
 
     // MARK: - 题库统计
@@ -139,17 +132,13 @@ final class QuizService {
     func deleteQuestions(for noteId: UUID) {
         let before = questions.count
         questions.removeAll { $0.noteId == noteId }
-        generatedNoteIds.remove(noteId)
         failedNoteIds.remove(noteId)
         // 删除对应的 .json 文件
         if let note = notes.first(where: { $0.id == noteId }) {
             fileSystem.deleteQuestions(folderId: note.folderId, title: note.title, folders: folders)
         }
-        // 保存 generatedNoteIds
-        if let data = try? JSONEncoder().encode(Array(generatedNoteIds)),
-           let str = String(data: data, encoding: .utf8) {
-            try? fileSystem.writeNoteContent(str, to: generatedIdsURL)
-        }
+        // 同步更新缓存
+        updateNotesWithQuestionsCache()
         if questions.count != before {
             print("🗑️ 删除笔记 \(noteId) 的题目: \(before - questions.count) 道")
         }
@@ -160,7 +149,6 @@ final class QuizService {
         let before = questions.count
         let idSet = Set(noteIds)
         questions.removeAll { idSet.contains($0.noteId) }
-        noteIds.forEach { generatedNoteIds.remove($0) }
         noteIds.forEach { failedNoteIds.remove($0) }
         // 删除对应的 .json 文件
         for noteId in noteIds {
@@ -168,11 +156,8 @@ final class QuizService {
                 fileSystem.deleteQuestions(folderId: note.folderId, title: note.title, folders: folders)
             }
         }
-        // 保存 generatedNoteIds
-        if let data = try? JSONEncoder().encode(Array(generatedNoteIds)),
-           let str = String(data: data, encoding: .utf8) {
-            try? fileSystem.writeNoteContent(str, to: generatedIdsURL)
-        }
+        // 同步更新缓存
+        updateNotesWithQuestionsCache()
         if questions.count != before {
             print("🗑️ 删除多个笔记的题目: \(before - questions.count) 道")
         }
@@ -291,37 +276,9 @@ final class QuizService {
         isGenerating = true
         isCancelled = false
 
-        // 二次检查：修复 generatedNoteIds 与 questions 状态不一致的问题
-        let allNoteIds = Set(notes.map { $0.id })
-        
-        // 1. 删除关联笔记已被删除的题目
-        let orphanQuestions = questions.filter { !allNoteIds.contains($0.noteId) }
-        if !orphanQuestions.isEmpty {
-            questions.removeAll { !allNoteIds.contains($0.noteId) }
-            print("🗑️ 清理已删除笔记的题目: \(orphanQuestions.count) 道")
-        }
-        
-        // 2. 若所有笔记都被标记为已生成，通过 questions 重新计算 generatedNoteIds
-        if generatedNoteIds.isSuperset(of: allNoteIds) {
-            let notesWithQuestions = Set(questions.map { $0.noteId })
-            let missingNotes = allNoteIds.subtracting(notesWithQuestions)
-            if !missingNotes.isEmpty {
-                // 移除没有题目的笔记的标记，允许重新生成
-                generatedNoteIds.subtract(missingNotes)
-                print("🔄 修复 generatedNoteIds: 移除 \(missingNotes.count) 个没有题目的笔记标记")
-                save()
-            }
-        }
-        
-        // 3. 清理 generatedNoteIds 中已删除笔记的标记
-        let orphanGeneratedIds = generatedNoteIds.subtracting(allNoteIds)
-        if !orphanGeneratedIds.isEmpty {
-            generatedNoteIds.subtract(orphanGeneratedIds)
-            save()
-        }
-
-        // 筛选未生成题目的笔记（排除之前失败的，允许重试）
-        let pendingNotes = notes.filter { !generatedNoteIds.contains($0.id) }
+        // 筛选未生成题目的笔记（通过校验 questions 数组判断）
+        let notesWithQuestions = Set(questions.map { $0.noteId })
+        let pendingNotes = notes.filter { !notesWithQuestions.contains($0.id) && !failedNoteIds.contains($0.id) }
         guard !pendingNotes.isEmpty else {
             isGenerating = false
             completion(0, 0, false)
@@ -350,11 +307,11 @@ final class QuizService {
                 if !newQuestions.isEmpty {
                     self.questions.append(contentsOf: newQuestions)
                     totalNewQuestions += newQuestions.count
-                    // 生成成功，标记该笔记已生成
-                    self.generatedNoteIds.insert(note.id)
+                    // 生成成功，从失败集合中移除并更新缓存
                     self.failedNoteIds.remove(note.id)
+                    self.notesWithQuestionsCache.insert(note.id)
                 } else {
-                    // 生成失败，记录到失败集合，不标记为已生成（下次可重试）
+                    // 生成失败，记录到失败集合，下次可重试
                     self.failedNoteIds.insert(note.id)
                 }
                 processedNotes += 1
