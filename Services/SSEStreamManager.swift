@@ -110,12 +110,23 @@ final class SSEStreamManager: NSObject, URLSessionDataDelegate, @unchecked Senda
         continuation?.finish()
     }
     
-    /// 解析单行 SSE 事件（data: {content}），返回 content；空行/[DONE]/非 data 行返回 nil
+    /// 解析单行 SSE 事件（data: {json}），提取 choices[0].delta.content 返回纯文本
+    /// - 空行 / [DONE] / 非 data 行 / 解析失败均返回 nil
     private static func parseSSELine(_ line: String) -> String? {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         guard trimmed.hasPrefix("data:") else { return nil }
-        let content = String(trimmed.dropFirst(5)).trimmingCharacters(in: .whitespaces)
-        guard !content.isEmpty, content != "[DONE]" else { return nil }
+        let jsonStr = String(trimmed.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+        guard !jsonStr.isEmpty, jsonStr != "[DONE]" else { return nil }
+
+        // 解析 SSE JSON，提取 choices[0].delta.content
+        guard let data = jsonStr.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let choices = json["choices"] as? [[String: Any]],
+              let first = choices.first,
+              let delta = first["delta"] as? [String: Any],
+              let content = delta["content"] as? String else {
+            return nil
+        }
         return content
     }
 }
