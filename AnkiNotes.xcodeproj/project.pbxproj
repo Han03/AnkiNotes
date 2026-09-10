@@ -45,6 +45,7 @@
 		ANQuizService /* QuizService.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANQuizServiceRef /* QuizService.swift */; };
 		ANQuizHome /* QuizHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANQuizHomeRef /* QuizHomeView.swift */; };
 		ANQuizSession /* QuizSessionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANQuizSessionRef /* QuizSessionView.swift */; };
+		ANMetadataPushService /* MetadataPushService.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANMetadataPushServiceRef /* MetadataPushService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -86,6 +87,7 @@
 		ANQuizServiceRef /* QuizService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuizService.swift; sourceTree = "<group>"; };
 		ANQuizHomeRef /* QuizHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuizHomeView.swift; sourceTree = "<group>"; };
 		ANQuizSessionRef /* QuizSessionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuizSessionView.swift; sourceTree = "<group>"; };
+		ANMetadataPushServiceRef /* MetadataPushService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetadataPushService.swift; sourceTree = "<group>"; };
 		ANInfoPlist /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		ANEntitlements /* AnkiNotes.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = AnkiNotes.entitlements; sourceTree = "<group>"; };
 		ANProductApp /* AnkiNotes.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AnkiNotes.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -147,6 +149,7 @@
 				ANTTSServiceRef /* TTSService.swift */,
 				ANTTSCacheManagerRef /* TTSCacheManager.swift */,
 				ANKnowledgeServiceRef /* KnowledgeService.swift */,
+				ANMetadataPushServiceRef /* MetadataPushService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -296,6 +299,7 @@
 			ANKnowledgeService /* KnowledgeService.swift in Sources */,
 			ANLectureReaderView /* LectureReaderView.swift in Sources */,
 			ANKnowledgeExplainView /* KnowledgeExplainView.swift in Sources */,
+			ANMetadataPushService /* MetadataPushService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
