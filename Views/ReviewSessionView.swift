@@ -26,8 +26,8 @@ struct ReviewSessionView: View {
     // 测评
     @State private var showReviewQuiz = false  // 是否显示测评界面
     
-    // 评级弹窗
-    @State private var showRatingDialog = false  // 是否显示评级选择弹窗
+    // 评级展开面板
+    @State private var showRatingExpanded = false  // 是否展开评级选项（就地展开）
     
     // 播放状态
     @State private var isPlayingLecture = false  // 是否正在播放讲稿
@@ -150,6 +150,8 @@ struct ReviewSessionView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 // 切换笔记时重置滚动位置到顶部
                 .onChange(of: currentIndex) { _ in
+                    // 切换卡片时收起评级展开面板
+                    showRatingExpanded = false
                     withAnimation(.easeOut(duration: 0.2)) {
                         proxy.scrollTo("top", anchor: .top)
                     }
@@ -177,15 +179,7 @@ struct ReviewSessionView: View {
         .onReceive(TTSService.shared.$isPaused) { paused in
             isPausedLecture = paused
         }
-        // 评级选择弹窗
-        .confirmationDialog("请选择掌握程度评级", isPresented: $showRatingDialog) {
-            ForEach(ReviewRating.allCases) { rating in
-                Button("\(rating.description)（\(scheduler.previewNextInterval(note: queue[currentIndex], rating: rating))）") {
-                    applyRating(rating)
-                }
-            }
-            Button("取消", role: .cancel) {}
-        }
+        // 评级选择（就地展开面板，见 bottomOperationBar）
         // 测评界面
         .sheet(isPresented: $showReviewQuiz) {
             if let note = currentIndex < queue.count ? queue[currentIndex] : nil {
@@ -307,6 +301,57 @@ struct ReviewSessionView: View {
             Color.bgCard
                 .ignoresSafeArea(edges: .bottom)  // 背景延伸到屏幕底部
         )
+        // 评级就地展开面板（从底部栏向上弹出，不额外占用常驻空间）
+        .overlay(alignment: .bottom) {
+            if showRatingExpanded {
+                ratingExpandedPanel(note: note, scheduler: scheduler)
+                    .padding(.horizontal, AppSpacing.lg)
+                    .padding(.bottom, 66)  // 悬浮在按钮行上方
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .zIndex(10)
+            }
+        }
+    }
+    
+    // MARK: - 评级就地展开面板
+    
+    /// 点击评级主按钮后，在底部栏上方展开的 4 个评级选项（推荐项橙色高亮）
+    private func ratingExpandedPanel(note: Note, scheduler: SchedulerService) -> some View {
+        VStack(spacing: AppSpacing.xs) {
+            ForEach(ReviewRating.allCases) { rating in
+                let isRecommended = rating == .good
+                Button {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) {
+                        showRatingExpanded = false
+                    }
+                    applyRating(rating)
+                } label: {
+                    HStack(spacing: AppSpacing.md) {
+                        Text(rating.description)
+                            .font(.appBody)
+                            .fontWeight(isRecommended ? .semibold : .regular)
+                        Spacer()
+                        Text(scheduler.previewNextInterval(note: note, rating: rating))
+                            .font(.appTag)
+                            .foregroundColor(isRecommended ? .white.opacity(0.9) : .textSecondary)
+                    }
+                    .padding(.horizontal, AppSpacing.md)
+                    .frame(height: 44)
+                    .background(
+                        RoundedRectangle(cornerRadius: AppCornerRadius.standard)
+                            .fill(isRecommended ? Color.brandPrimary : Color.bgInput)
+                    )
+                    .foregroundColor(isRecommended ? .white : .primary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(AppSpacing.sm)
+        .background(
+            RoundedRectangle(cornerRadius: AppCornerRadius.lg)
+                .fill(Color.bgCard)
+                .shadow(color: .black.opacity(0.14), radius: 14, y: 5)
+        )
     }
     
     // MARK: - 评级主按钮（橙色主色调）
@@ -316,14 +361,16 @@ struct ReviewSessionView: View {
         let previewText = scheduler.previewNextInterval(note: note, rating: recommendedRating)
         
         return Button {
-            showRatingDialog = true
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) {
+                showRatingExpanded.toggle()
+            }
         } label: {
             VStack(spacing: 3) {
-                Text("评级")
+                Text(showRatingExpanded ? "收起" : "评级")
                     .font(.appSubheading)
                 Text("\(recommendedRating.description) · \(previewText)")
                     .font(.appTag)
-                    .foregroundColor(.textSecondary)
+                    .foregroundColor(showRatingExpanded ? .white.opacity(0.9) : .textSecondary)
             }
             .frame(maxWidth: .infinity)
             .frame(height: AppButtonHeight.standard)  // 统一44pt高度（HIG标准）
