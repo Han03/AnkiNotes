@@ -379,6 +379,29 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: AppSpacing.lg) {
             sectionHeader(title: "AI 功能", systemImage: "brain.head.profile")
 
+            // 引导提示
+            HStack(alignment: .top, spacing: AppSpacing.xs) {
+                Image(systemName: "info.circle")
+                    .foregroundStyle(Color.textSecondary)
+                VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                    Text("使用 AI 功能需配置阿里云百炼 API Key")
+                        .font(.appCaption)
+                        .foregroundColor(.textSecondary)
+                    Button {
+                        if let url = URL(string: "https://bailian.console.aliyun.com/") { openURL(url) }
+                    } label: {
+                        HStack(spacing: AppSpacing.xs) {
+                            Text("前往百炼平台获取 API Key 并开启模型")
+                            Image(systemName: "arrow.up.right.square")
+                        }
+                        .font(.appCaption)
+                    }
+                }
+                Spacer()
+            }
+            .padding(AppSpacing.md)
+            .background(RoundedRectangle(cornerRadius: AppCornerRadius.standard).fill(Color.bgInput))
+
             VStack(alignment: .leading, spacing: AppSpacing.md) {
                 field(label: "API Key", placeholder: "sk-xxxxxxxxxxxxxxxx",
                       text: $appState.bailianConfig.apiKey, isSecure: true)
