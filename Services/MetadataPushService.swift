@@ -9,8 +9,8 @@
 import Foundation
 
 /// 元数据推送服务
-final class MetadataPushService {
-    static let shared = MetadataPushService()
+public final class MetadataPushService {
+    public static let shared = MetadataPushService()
     
     private var dirtyFiles: Set<String> = []
     private var pushTimer: Timer?
@@ -30,7 +30,7 @@ final class MetadataPushService {
     // MARK: - 公共接口
     
     /// 标记元数据文件为"脏"（有变更待推送）
-    func markDirty(_ fileName: String) {
+    public func markDirty(_ fileName: String) {
         dirtyFiles.insert(fileName)
         savePendingFiles()
         schedulePush()
