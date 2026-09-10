@@ -591,7 +591,8 @@ final class AppState: ObservableObject {
                     self.providerStatus = "❌ 获取云端锁失败，已重试 \(maxLockRetries) 次，请稍后重试"
                     self.recordCloudOperation(operation: "云端同步", outcome: .failure,
                                               summary: "获取云端锁失败",
-                                              detail: "已重试 \(maxLockRetries) 次后仍未获取到云端锁，请稍后重试。可能原因：其他设备正在同步、网络异常或云端限流。", steps: opSteps)
+                                              steps: opSteps,
+                                              detail: "已重试 \(maxLockRetries) 次后仍未获取到云端锁，请稍后重试。可能原因：其他设备正在同步、网络异常或云端限流。")
                 }
                 completion?(StorageService.ImportReport())
                 return
