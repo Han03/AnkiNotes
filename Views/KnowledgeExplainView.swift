@@ -93,10 +93,8 @@ struct KnowledgeExplainView: View {
             noteContent: noteContent,
             config: config,
             onChunk: { chunk in
-                // 流式打字机效果：使用 ObservableObject 确保异步闭包中修改能触发 UI 更新
-                DispatchQueue.main.async {
-                    explanationStore.appendChunk(chunk)
-                }
+                // 服务端（Task.detached）已保证每个 chunk 回主线程回调，直接追加实现打字机
+                explanationStore.appendChunk(chunk)
             },
             completion: { finalText in
                 DispatchQueue.main.async {

@@ -469,7 +469,10 @@ final class KnowledgeService: ObservableObject {
         // URLSession.shared.bytes(for:) 会缓冲整个响应，导致打字机效果失效
         var fullText = ""
         
-        let task = Task { [weak self] in
+        // 关键：必须用 Task.detached 在后台线程消费流。
+        // 若用 Task{}（继承主 actor），AsyncStream 缓冲的多个值会被主 actor job
+        // 一次性连续消费，所有 onChunk 排队到流结束后批量执行，打字机效果失效。
+        let task = Task.detached(priority: .userInitiated) { [weak self] in
             let byteStream: AsyncStream<String>
             let sessionDelegate: SSEStreamParser
             let streamSession: URLSession
@@ -493,7 +496,7 @@ final class KnowledgeService: ObservableObject {
                 // 启动网络请求（同步返回，delegate 回调在后台队列异步执行）
                 dataTask.resume()
 
-                // 消费流：delegate 每收到网络数据就 yield，实时传递到 UI
+                // 消费流：后台线程逐 chunk 消费，每个 chunk 独立回主线程刷新 UI
                 for try await chunk in byteStream {
                     fullText += chunk
                     DispatchQueue.main.async {
