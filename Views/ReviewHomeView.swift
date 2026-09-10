@@ -226,6 +226,8 @@ struct ReviewHomeView: View {
             .padding()
         }
         .background(Color.bgPage)
+        .navigationTitle("复习")
+        .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             stats = scheduler.computeStats()
             // 异步计算文件夹列表，避免阻塞主线程影响初次加载性能
