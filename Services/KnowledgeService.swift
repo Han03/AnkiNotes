@@ -490,8 +490,8 @@ final class KnowledgeService: ObservableObject {
         let task = Task.detached(priority: .userInitiated) { [weak self] in
             var fullText = ""
             do {
-                // 发起请求并等待响应头（bytes(for:) 返回即服务端已开始响应）
-                let (_, asyncBytes) = try await URLSession.shared.bytes(for: request)
+                // 发起请求并等待响应（bytes(for:) 返回 (AsyncBytes, URLResponse)，AsyncBytes 在前）
+                let (asyncBytes, _) = try await URLSession.shared.bytes(for: request)
                 SyncLogger.shared.info("📡 SSE 首字节到达: \(Date())")
                 
                 // 逐行消费 SSE 流（后台线程，逐行 yield，不缓冲整个响应）
