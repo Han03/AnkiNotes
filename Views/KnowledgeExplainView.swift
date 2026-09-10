@@ -38,7 +38,7 @@ struct KnowledgeExplainView: View {
                     if explanationStore.isLoading && explanationStore.displayedText.isEmpty {
                         HStack {
                             ProgressView()
-                            Text("正在生成详解...")
+                            Text("正在生成详解，模型思考中…")
                                 .foregroundColor(.textSecondary)
                         }
                         .padding(.vertical, 40)

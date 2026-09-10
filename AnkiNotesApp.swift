@@ -716,7 +716,7 @@ final class AppState: ObservableObject {
             
             // 立即保存同步快照（即使推送失败，快照也已保存，下次同步可增量跳过）
             SyncLogger.shared.stepStart("保存同步快照")
-            self.syncSnapshotService.save()
+            self.syncSnapshotService.flush()
             SyncLogger.shared.stepDone("保存同步快照")
             SyncLogger.shared.info("同步快照已保存，下次同步可增量跳过已同步内容")
             

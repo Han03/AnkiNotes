@@ -111,73 +111,6 @@ final class KnowledgePointsStore: ObservableObject {
     }
 }
 
-// MARK: - SSE 流式解析器
-
-/// SSE 流式解析器：通过 URLSession delegate 模式实现真正的逐 chunk 流式接收
-/// 解决 URLSession.shared.bytes(for:) 缓冲整个响应导致流式效果失效的问题
-final class SSEStreamParser: NSObject, URLSessionDataDelegate, @unchecked Sendable {
-    private var continuation: AsyncStream<String>.Continuation
-    private var pendingData = ""  // 跨 chunk 的不完整数据缓冲
-    private var didReceiveFirstByte = false  // 首字节标记（用于测 TTFT）
-
-    init(continuation: AsyncStream<String>.Continuation) {
-        self.continuation = continuation
-    }
-
-    /// 每收到一段网络数据时立即调用（delegate 模式，不缓冲）
-    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
-        if !didReceiveFirstByte {
-            didReceiveFirstByte = true
-            SyncLogger.shared.info("📡 SSE 首字节到达: \(Date())")
-        }
-        guard let text = String(data: data, encoding: .utf8) else { return }
-        pendingData += text
-
-        // 按行切分，最后一个不完整行保留到下次
-        while let newlineRange = pendingData.range(of: "\n") {
-            let line = String(pendingData[..<newlineRange.lowerBound])
-            pendingData = String(pendingData[newlineRange.upperBound...])
-            processSSELine(line)
-        }
-    }
-
-    /// 请求结束时调用（成功或失败）
-    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        // 处理最后残留的不完整行
-        if !pendingData.isEmpty {
-            let remaining = pendingData.trimmingCharacters(in: .whitespacesAndNewlines)
-            pendingData = ""
-            if !remaining.isEmpty {
-                processSSELine(remaining)
-            }
-        }
-        continuation.finish()
-    }
-
-    /// 解析单行 SSE 事件，提取 delta content 并 yield 到 AsyncStream
-    private func processSSELine(_ line: String) {
-        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.hasPrefix("data: ") else { return }
-        let jsonStr = String(trimmed.dropFirst(6))
-        if jsonStr == "[DONE]" { return }
-
-        guard let data = jsonStr.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let choices = json["choices"] as? [[String: Any]],
-              let first = choices.first,
-              let delta = first["delta"] as? [String: Any],
-              let content = delta["content"] as? String else {
-            return
-        }
-
-        // 过滤空 delta（部分模型会输出空 content 行），避免无意义的空派发
-        guard !content.isEmpty else { return }
-
-        SyncLogger.shared.info("📡 SSE 收到行并 yield: 长度=\(content.count), 内容前20=\(String(content.prefix(20)))")
-        continuation.yield(content)
-    }
-}
-
 /// 知识点服务：提取知识点关键字、生成详解、缓存管理
 final class KnowledgeService: ObservableObject {
     static let shared = KnowledgeService()
@@ -543,53 +476,43 @@ final class KnowledgeService: ObservableObject {
         
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         
-        // 使用自定义 URLSession + delegate 实现真正的 SSE 流式接收
-        // URLSession.shared.bytes(for:) 会缓冲整个响应，导致打字机效果失效
-        var fullText = ""
+        // 使用 URLSession.shared.bytes(for:) 流式读取 SSE：
+        // 1) URLSession.shared 共享连接池，跨请求复用 TCP/TLS 连接（keep-alive）。
+        //    原实现每次请求新建 URLSession(delegate:) 实例，连接池不跨请求复用，
+        //    每次都是全新握手——日志实证：第一次详解 TTFT 0.7s，第二次 26.3s。
+        // 2) AsyncBytes.lines 逐行 yield（iOS 16+），SSE 逐行解析天然适配，不会缓冲整个响应。
+        //    （历史注释称 bytes(for:) 会缓冲导致打字机失效，实为主 actor for-await 一次性消费
+        //     全部缓冲的错误归因；用 Task.detached 后台消费即可保持流式。）
         
         // 关键：必须用 Task.detached 在后台线程消费流。
-        // 若用 Task{}（继承主 actor），AsyncStream 缓冲的多个值会被主 actor job
+        // 若用 Task{}（继承主 actor），bytes 的多个值会被主 actor job
         // 一次性连续消费，所有 onChunk 排队到流结束后批量执行，打字机效果失效。
         let task = Task.detached(priority: .userInitiated) { [weak self] in
-            let byteStream: AsyncStream<String>
-            let sessionDelegate: SSEStreamParser
-            let streamSession: URLSession
+            var fullText = ""
             do {
-                var continuation: AsyncStream<String>.Continuation!
-                let stream = AsyncStream<String> { continuation = $0 }
-                let parser = SSEStreamParser(continuation: continuation)
-                sessionDelegate = parser
-                byteStream = stream
-
-                let session = URLSession(
-                    configuration: .default,
-                    delegate: sessionDelegate,
-                    delegateQueue: nil  // 系统创建串行 OperationQueue，保证 SSE 行按序处理
-                )
-                streamSession = session
-
-                // 创建但不启动任务（session 级 delegate 已挂载 SSEStreamParser，无需 task 级 delegate）
-                let dataTask = session.dataTask(with: request)
-
-                // 启动网络请求（同步返回，delegate 回调在后台队列异步执行）
-                dataTask.resume()
-                SyncLogger.shared.info("📡 详解请求已发出（dataTask.resume），等待首字节...")
-
-                // 消费流：后台线程逐 chunk 消费，每个 chunk 独立回主线程刷新 UI
+                // 发起请求并等待响应头（bytes(for:) 返回即服务端已开始响应）
+                let (_, asyncBytes) = try await URLSession.shared.bytes(for: request)
+                SyncLogger.shared.info("📡 SSE 首字节到达: \(Date())")
+                
+                // 逐行消费 SSE 流（后台线程，逐行 yield，不缓冲整个响应）
                 var chunkCount = 0
-                for try await chunk in byteStream {
-                    fullText += chunk
+                for try await line in asyncBytes.lines {
+                    // SSE 行格式：data: {content}，忽略空行/注释/事件行
+                    guard line.hasPrefix("data:") else { continue }
+                    let content = line.dropFirst(5)
+                        .trimmingCharacters(in: .whitespaces)
+                    guard !content.isEmpty, content != "[DONE]" else { continue }
+                    
+                    fullText += content
                     chunkCount += 1
                     let n = chunkCount
-                    let len = chunk.count
+                    let len = content.count
                     DispatchQueue.main.async {
                         SyncLogger.shared.info("📡 派发UI: chunk#\(n), 长度=\(len)")
-                        onChunk(chunk)
+                        onChunk(content)
                     }
                 }
                 SyncLogger.shared.info("📡 流结束: 共消费 \(chunkCount) 个 chunk, fullText长度=\(fullText.count), 总耗时=\(String(format: "%.2f", Date().timeIntervalSince(requestStartTime)))秒（含TTFT）")
-
-                streamSession.invalidateAndCancel()
             } catch {
                 print("⚠️ 知识点详解生成失败: \(error.localizedDescription)")
                 DispatchQueue.main.async {
@@ -598,7 +521,7 @@ final class KnowledgeService: ObservableObject {
                 }
                 return
             }
-
+            
             // 保存缓存 + 状态回写统一回主线程（避免跨线程触碰单例状态）
             let finalText = fullText
             DispatchQueue.main.async {
