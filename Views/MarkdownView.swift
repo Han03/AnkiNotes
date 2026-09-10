@@ -251,7 +251,6 @@ private struct BlockView: View {
         case .paragraph(let text):
             KnowledgeInlineText(
                 text: text,
-                font: bodyFont,
                 color: textColor,
                 knowledgePoints: knowledgePoints,
                 onKnowledgeTap: onKnowledgeTap
@@ -264,7 +263,7 @@ private struct BlockView: View {
                     .frame(width: 4)
                 KnowledgeInlineText(
                     text: text,
-                    font: .body.italic(),
+                    isItalic: true,
                     color: .secondary,
                     knowledgePoints: knowledgePoints,
                     onKnowledgeTap: onKnowledgeTap
@@ -278,7 +277,6 @@ private struct BlockView: View {
                         Text("•").bold()
                         KnowledgeInlineText(
                             text: item,
-                            font: bodyFont,
                             color: textColor,
                             knowledgePoints: knowledgePoints,
                             onKnowledgeTap: onKnowledgeTap
@@ -293,7 +291,6 @@ private struct BlockView: View {
                         Text("\(idx + 1).").bold().frame(width: 24, alignment: .trailing)
                         KnowledgeInlineText(
                             text: item,
-                            font: bodyFont,
                             color: textColor,
                             knowledgePoints: knowledgePoints,
                             onKnowledgeTap: onKnowledgeTap
@@ -568,54 +565,64 @@ struct InlineMarkdownText: View {
 // MARK: - 带知识点标记的行内文本渲染
 
 /// 支持知识点标记的行内文本渲染器
-/// 使用 AttributedString + 自定义 URL scheme 实现可点击的知识点虚线下划线
+/// 使用 UIKit 文本系统（UITextView + 自定义 NSLayoutManager）实现
+/// 「文字不动、下划线独立下移 + 可调粗细」的实线主题色知识点标记
 struct KnowledgeInlineText: View {
     let text: String
-    var font: Font = .body
+    var isItalic: Bool = false  // 引用块等斜体场景
     var color: Color = .primary
     var knowledgePoints: [KnowledgePoint] = []
     var onKnowledgeTap: ((KnowledgePoint) -> Void)? = nil
     
     var body: some View {
-        let attributed = buildAttributedString()
-        Text(attributed)
-            .font(font)
-            .foregroundColor(color)
-            .environment(\.openURL, OpenURLAction { url in
-                if url.scheme == "knowledge",
-                   let pointId = UUID(uuidString: url.host ?? ""),
-                   let point = knowledgePoints.first(where: { $0.id == pointId }) {
-                    onKnowledgeTap?(point)
-                    return .handled
-                }
-                return .systemAction
-            })
+        let attributed = buildNSAttributedString()
+        MarkdownTextView(attributed: attributed) { pointId in
+            guard let point = knowledgePoints.first(where: { $0.id == pointId }) else { return }
+            onKnowledgeTap?(point)
+        }
+        .fixedSize(horizontal: false, vertical: true)
     }
     
-    private func buildAttributedString() -> AttributedString {
+    /// 构建 UIKit 富文本：行内样式 + 知识点自定义 attribute（下划线由自定义 LayoutManager 绘制）
+    private func buildNSAttributedString() -> NSAttributedString {
         // 1. 移除行内 Markdown 符号（**、*、`），同时记录样式区间（基于无符号文本）
         let (cleanText, spans) = stripInlineMarkdown(from: text)
 
-        var attr = AttributedString(cleanText)
-        attr.font = font
-        attr.foregroundColor = color
+        let mutable = NSMutableAttributedString(string: cleanText)
 
-        // 2. 应用粗体 / 斜体 / 行内代码样式
+        // 2. 基础字体与颜色（UIKit body 体系，自动响应动态字体）
+        var baseFont = UIFont.preferredFont(forTextStyle: .body)
+        if isItalic {
+            baseFont = baseFont.withTraits(.traitItalic)
+        }
+        let fullRange = NSRange(location: 0, length: (cleanText as NSString).length)
+        mutable.addAttribute(.font, value: baseFont, range: fullRange)
+        mutable.addAttribute(.foregroundColor, value: UIColor(color), range: fullRange)
+
+        // 3. 应用粗体 / 斜体 / 行内代码样式
         for span in spans {
-            guard let r = Range(span.range, in: attr) else { continue }
+            guard let r = Range(span.range, in: cleanText) else { continue }
+            let nsRange = NSRange(r, in: cleanText)
             if span.isCode {
-                attr[r].font = .system(.callout, design: .monospaced)
+                let codeFont = UIFont.monospacedSystemFont(ofSize: baseFont.pointSize, weight: .regular)
+                mutable.addAttribute(.font, value: codeFont, range: nsRange)
             } else if let intent = span.intent {
-                attr[r].inlinePresentationIntent = intent
+                mutable.addAttribute(.font, value: font(with: intent, base: baseFont), range: nsRange)
             }
         }
 
-        // 3. 标记知识点（在无符号文本上匹配，keyword 为纯文本）
-        for point in knowledgePoints {
-            markKnowledgePoint(&attr, cleanText: cleanText, point: point)
-        }
+        // 4. 标记知识点（粗体 + 自定义 attribute + 触发下划线绘制；相邻知识点插入空格断开）
+        applyKnowledgeMarks(mutable, cleanText: cleanText, baseFont: baseFont)
 
-        return attr
+        return mutable
+    }
+    
+    private func font(with intent: InlinePresentationIntent, base: UIFont) -> UIFont {
+        var traits: UIFontDescriptor.SymbolicTraits = []
+        if intent.contains(.stronglyEmphasized) { traits.insert(.traitBold) }
+        if intent.contains(.emphasized) { traits.insert(.traitItalic) }
+        guard !traits.isEmpty else { return base }
+        return base.withTraits(traits)
     }
 
     /// 行内样式区间（范围基于无符号文本）
@@ -661,23 +668,157 @@ struct KnowledgeInlineText: View {
         return (clean, spans)
     }
 
-    /// 标记知识点：虚线下划线 + 可点击链接（在无符号文本上匹配）
-    private func markKnowledgePoint(_ attr: inout AttributedString, cleanText: String, point: KnowledgePoint) {
-        let keyword = point.keyword
-        guard !keyword.isEmpty else { return }
-
-        var searchRange = cleanText.startIndex..<cleanText.endIndex
-        while let range = cleanText.range(of: keyword, options: .caseInsensitive, range: searchRange) {
-            if let attrRange = Range(range, in: attr) {
-                // 虚线下划线：必须同时包含 .single 位（NSUnderlineStyle 的 pattern 位单独设置不绘制）
-                attr[attrRange].underlineStyle = [.single, .patternDash]
-                attr[attrRange].underlineColor = UIColor(Color.brandPrimary.opacity(0.4))
-                // 保持正文颜色，覆盖 link 默认蓝色
-                attr[attrRange].foregroundColor = color
-                // 设置自定义 URL scheme，用于点击拦截
-                attr[attrRange].link = URL(string: "knowledge://\(point.id.uuidString)")
-            }
-            searchRange = range.upperBound..<cleanText.endIndex
+    /// 标记知识点：粗体 + 自定义 attribute（触发自定义 LayoutManager 绘制实线主题色下划线）
+    /// 相邻知识点之间插入半角空格断开下划线
+    private func applyKnowledgeMarks(_ mutable: NSMutableAttributedString, cleanText: String, baseFont: UIFont) {
+        // 收集所有匹配（跨多个知识点，按位置排序，重叠时保留先出现的）
+        struct Match {
+            let range: Range<String.Index>
+            let point: KnowledgePoint
         }
+        var matches: [Match] = []
+        for point in knowledgePoints {
+            guard !point.keyword.isEmpty else { continue }
+            var searchRange = cleanText.startIndex..<cleanText.endIndex
+            while let r = cleanText.range(of: point.keyword, options: .caseInsensitive, range: searchRange) {
+                matches.append(Match(range: r, point: point))
+                searchRange = r.upperBound..<cleanText.endIndex
+            }
+        }
+        matches.sort { $0.range.lowerBound < $1.range.lowerBound }
+        var merged: [Match] = []
+        for m in matches {
+            if let last = merged.last, m.range.lowerBound < last.range.upperBound { continue }
+            merged.append(m)
+        }
+
+        // 降序处理：先设置属性，再处理相邻间隔（插入空格会改变后续索引，降序保证前面的匹配不受影响）
+        let boldFont = baseFont.withTraits(.traitBold)
+        for (i, m) in merged.enumerated().reversed() {
+            let nsRange = NSRange(m.range, in: cleanText)
+            // 知识点文字加粗（覆盖行内普通样式）
+            mutable.addAttribute(.font, value: boldFont, range: nsRange)
+            // 保持正文颜色
+            mutable.addAttribute(.foregroundColor, value: UIColor(color), range: nsRange)
+            // 知识点 ID（绘制与点击命中识别）
+            mutable.addAttribute(kKnowledgePointAttribute, value: m.point.id.uuidString, range: nsRange)
+            // 设置系统下划线样式触发 drawUnderline 回调（绘制由自定义 LayoutManager 完成）
+            mutable.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: nsRange)
+            mutable.addAttribute(.underlineColor, value: UIColor.clear, range: nsRange)
+
+            // 相邻知识点间隔：与前一个匹配紧邻（中间无任何字符）时，在起点插入半角空格断开下划线
+            if i > 0, merged[i - 1].range.upperBound == m.range.lowerBound {
+                mutable.insert(NSAttributedString(string: " "), at: nsRange.location)
+            }
+        }
+    }
+}
+
+// MARK: - 知识点自定义 attribute
+
+private let kKnowledgePointAttribute = NSAttributedString.Key("com.ankinotes.knowledgePoint")
+
+// MARK: - UIFont 辅助
+
+private extension UIFont {
+    /// 合成粗体/斜体等 symbolic traits（size 0 = 保持当前字号）
+    func withTraits(_ traits: UIFontDescriptor.SymbolicTraits) -> UIFont {
+        guard let descriptor = fontDescriptor.withSymbolicTraits(traits) else { return self }
+        return UIFont(descriptor: descriptor, size: 0)
+    }
+}
+
+// MARK: - 自定义 LayoutManager：知识点粗实线下划线（文字不动，下划线独立下移）
+
+private final class KnowledgeUnderlineLayoutManager: NSLayoutManager {
+    private let underlineColor = UIColor(Color.brandPrimary)
+    private let underlineHeight: CGFloat = 2.5   // 下划线粗细
+    private let underlineOffset: CGFloat = 3     // 下划线与文字底部的距离
+
+    override func drawUnderline(
+        forGlyphRange glyphRange: NSRange,
+        underlineStyle: NSUnderlineStyle,
+        baselineOffset: CGFloat,
+        lineFragmentRect: CGRect,
+        lineFragmentGlyphRange: NSRange,
+        containerOrigin: CGPoint
+    ) {
+        guard let textStorage, glyphRange.length > 0 else { return }
+        let charRange = characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
+        guard charRange.location != NSNotFound,
+              charRange.location < textStorage.length,
+              textStorage.attribute(kKnowledgePointAttribute, at: charRange.location, effectiveRange: nil) != nil
+        else { return }
+
+        guard let container = textContainer(forGlyphAt: glyphRange.location, effectiveRange: nil) else { return }
+        let rect = boundingRect(forGlyphRange: glyphRange, in: container)
+
+        // 文字不动：下划线画在文字字形底部下方 offset 处
+        let lineRect = CGRect(
+            x: rect.minX + containerOrigin.x,
+            y: rect.maxY + underlineOffset + containerOrigin.y,
+            width: rect.width,
+            height: underlineHeight
+        )
+        guard lineRect.width > 0 else { return }
+        let path = UIBezierPath(roundedRect: lineRect, cornerRadius: underlineHeight / 2)
+        underlineColor.setFill()
+        path.fill()
+    }
+}
+
+// MARK: - 知识点文本视图（触摸命中知识点）
+
+private final class KnowledgeTextView: UITextView {
+    var onKnowledgeTap: ((UUID) -> Void)?
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        defer { super.touchesEnded(touches, with: event) }
+        guard let touch = touches.first else { return }
+        let point = touch.location(in: self)
+        let index = layoutManager.characterIndex(for: point, in: textContainer, fractionOfDistanceBetweenInsertionPoints: nil)
+        guard index < textStorage.length else { return }
+        guard let pid = textStorage.attribute(kKnowledgePointAttribute, at: index, effectiveRange: nil) as? String,
+              let uuid = UUID(uuidString: pid) else { return }
+        onKnowledgeTap?(uuid)
+    }
+}
+
+// MARK: - UIKit 文本视图桥接（SwiftUI 自适应高度）
+
+private struct MarkdownTextView: UIViewRepresentable {
+    let attributed: NSAttributedString
+    var onKnowledgeTap: ((UUID) -> Void)? = nil
+
+    func makeUIView(context: Context) -> KnowledgeTextView {
+        let storage = NSTextStorage()
+        let layoutManager = KnowledgeUnderlineLayoutManager()
+        let container = NSTextContainer(size: .zero)
+        container.lineFragmentPadding = 0
+        container.widthTracksTextView = true
+        layoutManager.addTextContainer(container)
+        storage.addLayoutManager(layoutManager)
+
+        let tv = KnowledgeTextView(frame: .zero, textContainer: container)
+        tv.isEditable = false
+        tv.isSelectable = false
+        tv.isScrollEnabled = false
+        tv.backgroundColor = .clear
+        tv.textContainerInset = .zero
+        tv.onKnowledgeTap = { uuid in onKnowledgeTap?(uuid) }
+        return tv
+    }
+
+    func updateUIView(_ uiView: KnowledgeTextView, context: Context) {
+        if uiView.attributedText != attributed {
+            uiView.attributedText = attributed
+        }
+        uiView.onKnowledgeTap = { uuid in onKnowledgeTap?(uuid) }
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: KnowledgeTextView, context: Context) -> CGSize? {
+        let width = max(proposal.width ?? uiView.bounds.width, 1)
+        let size = uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
+        return CGSize(width: size.width, height: size.height)
     }
 }

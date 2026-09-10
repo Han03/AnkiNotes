@@ -87,85 +87,103 @@ struct ReviewSessionView: View {
         let note = queue[currentIndex]
         let progress = Double(reviewedCount) / Double(queue.count)
         
-        return VStack(spacing: 0) {
-            // 顶部进度条 + 关闭
-            HStack {
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .textStyle(.screenTitle)
+        return ZStack(alignment: .bottom) {
+            // 复习内容（顶部进度条 + 笔记正文）
+            VStack(spacing: 0) {
+                // 顶部进度条 + 关闭
+                HStack {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .textStyle(.screenTitle)
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    Text("\(reviewedCount) / \(queue.count)")
+                        .textStyle(.primaryText)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Text("已学 \(Int(progress * 100))%")
+                        .textStyle(.tertiaryText)
                         .foregroundColor(.secondary)
                 }
-                Spacer()
-                Text("\(reviewedCount) / \(queue.count)")
-                    .textStyle(.primaryText)
-                    .foregroundColor(.secondary)
-                Spacer()
-                Text("已学 \(Int(progress * 100))%")
-                    .textStyle(.tertiaryText)
-                    .foregroundColor(.secondary)
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-            
-            ProgressView(value: progress)
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                
+                ProgressView(value: progress)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                
+                // 笔记内容区（直接展示完整内容，取消翻卡机制）
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 12) {
+                            // 顶部锚点，用于重置滚动位置
+                            Color.clear
+                                .frame(height: 1)
+                                .id("top")
+                            // 笔记标题和状态
+                            HStack(spacing: 8) {
+                                stateLabel(note.srs.cardState)
+                                Text(note.title)
+                                    .font(.headline)
+                                    .lineLimit(2)
+                                Spacer()
+                                let sched = SM2Algorithm.dueDescription(note.srs.dueDate)
+                                Text(sched)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        
+                        Divider()
+                        
+                        // 完整笔记内容（带知识点标记）
+                        MarkdownView(
+                            markdown: note.markdownContent,
+                            knowledgePoints: knowledgeStore.points,
+                            onKnowledgeTap: { point in
+                                selectedKnowledgePoint = point
+                            }
+                        )
+                        }
+                        .padding(20)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    // 切换笔记时重置滚动位置到顶部
+                    .onChange(of: currentIndex) { _ in
+                        // 切换卡片时收起评级展开面板
+                        showRatingExpanded = false
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            proxy.scrollTo("top", anchor: .top)
+                        }
+                    }
+                }
+                .background(
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Color(.systemBackground))
+                )
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
-            
-            // 笔记内容区（直接展示完整内容，取消翻卡机制）
-            ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 12) {
-                        // 顶部锚点，用于重置滚动位置
-                        Color.clear
-                            .frame(height: 1)
-                            .id("top")
-                        // 笔记标题和状态
-                        HStack(spacing: 8) {
-                            stateLabel(note.srs.cardState)
-                            Text(note.title)
-                                .font(.headline)
-                                .lineLimit(2)
-                            Spacer()
-                            let sched = SM2Algorithm.dueDescription(note.srs.dueDate)
-                            Text(sched)
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                    
-                    Divider()
-                    
-                    // 完整笔记内容（带知识点标记）
-                    MarkdownView(
-                        markdown: note.markdownContent,
-                        knowledgePoints: knowledgeStore.points,
-                        onKnowledgeTap: { point in
-                            selectedKnowledgePoint = point
-                        }
-                    )
-                    }
-                    .padding(20)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                // 切换笔记时重置滚动位置到顶部
-                .onChange(of: currentIndex) { _ in
-                    // 切换卡片时收起评级展开面板
-                    showRatingExpanded = false
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        proxy.scrollTo("top", anchor: .top)
-                    }
-                }
             }
-            .background(
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(Color(.systemBackground))
-            )
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
+            .zIndex(0)
             
-            // 底部操作栏（主按钮+图标按钮组合，背景延伸至屏幕底部）
+            // 评级展开时：全屏透明点击层（正文之上、底部栏之下），点击外部任意处收起
+            if showRatingExpanded {
+                Color.black.opacity(0.0001)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
+                            showRatingExpanded = false
+                        }
+                    }
+                    .ignoresSafeArea()
+                    .zIndex(1)
+            }
+            
+            // 底部操作栏（提到点击层之上，保证按钮与展开面板可点）
             bottomOperationBar(note: note, scheduler: scheduler)
+                .zIndex(2)
         }
         .background(Color(.systemGroupedBackground))
         // 监听 TTSService 播放状态
@@ -301,57 +319,58 @@ struct ReviewSessionView: View {
             Color.bgCard
                 .ignoresSafeArea(edges: .bottom)  // 背景延伸到屏幕底部
         )
-        // 评级就地展开面板（从底部栏向上弹出，不额外占用常驻空间）
-        .overlay(alignment: .bottom) {
-            if showRatingExpanded {
-                ratingExpandedPanel(note: note, scheduler: scheduler)
-                    .padding(.horizontal, AppSpacing.lg)
-                    .padding(.bottom, 66)  // 悬浮在按钮行上方
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                    .zIndex(10)
-            }
-        }
     }
     
     // MARK: - 评级就地展开面板
     
-    /// 点击评级主按钮后，在底部栏上方展开的 4 个评级选项（推荐项橙色高亮）
+    /// 点击评级主按钮后，从按钮上方展开的 4 个评级选项（推荐项橙色高亮）
     private func ratingExpandedPanel(note: Note, scheduler: SchedulerService) -> some View {
-        VStack(spacing: AppSpacing.xs) {
-            ForEach(ReviewRating.allCases) { rating in
-                let isRecommended = rating == .good
-                Button {
-                    withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) {
-                        showRatingExpanded = false
-                    }
-                    applyRating(rating)
-                } label: {
-                    HStack(spacing: AppSpacing.md) {
-                        Text(rating.description)
-                            .font(.appBody)
-                            .fontWeight(isRecommended ? .semibold : .regular)
-                        Spacer()
-                        Text(scheduler.previewNextInterval(note: note, rating: rating))
-                            .font(.appTag)
-                            .foregroundColor(isRecommended ? .white.opacity(0.9) : .textSecondary)
-                    }
-                    .padding(.horizontal, AppSpacing.md)
-                    .frame(height: 44)
-                    .background(
-                        RoundedRectangle(cornerRadius: AppCornerRadius.standard)
-                            .fill(isRecommended ? Color.brandPrimary : Color.bgInput)
-                    )
-                    .foregroundColor(isRecommended ? .white : .primary)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(AppSpacing.sm)
-        .background(
-            RoundedRectangle(cornerRadius: AppCornerRadius.lg)
+        VStack(spacing: 0) {
+            // 顶部小三角箭头（指向评级按钮）
+            Rectangle()
                 .fill(Color.bgCard)
-                .shadow(color: .black.opacity(0.14), radius: 14, y: 5)
-        )
+                .frame(width: 12, height: 12)
+                .rotationEffect(.degrees(45))
+                .offset(y: 6)
+            
+            // 选项卡片
+            VStack(spacing: AppSpacing.xs) {
+                ForEach(ReviewRating.allCases) { rating in
+                    let isRecommended = rating == .good
+                    Button {
+                        withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
+                            showRatingExpanded = false
+                        }
+                        applyRating(rating)
+                    } label: {
+                        HStack(spacing: AppSpacing.md) {
+                            Text(rating.description)
+                                .font(.appBody)
+                                .fontWeight(isRecommended ? .semibold : .regular)
+                            Spacer()
+                            Text(scheduler.previewNextInterval(note: note, rating: rating))
+                                .font(.appTag)
+                                .foregroundColor(isRecommended ? .white.opacity(0.9) : .textSecondary)
+                        }
+                        .padding(.horizontal, AppSpacing.md)
+                        .frame(height: 44)
+                        .background(
+                            RoundedRectangle(cornerRadius: AppCornerRadius.standard)
+                                .fill(isRecommended ? Color.brandPrimary : Color.bgInput)
+                        )
+                        .foregroundColor(isRecommended ? .white : .primary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(AppSpacing.sm)
+            .background(
+                RoundedRectangle(cornerRadius: AppCornerRadius.lg)
+                    .fill(Color.bgCard)
+                    .shadow(color: .black.opacity(0.14), radius: 14, y: 5)
+            )
+        }
+        .padding(.bottom, 8)  // 与按钮顶部的间距
     }
     
     // MARK: - 评级主按钮（橙色主色调）
@@ -379,6 +398,22 @@ struct ReviewSessionView: View {
             .cornerRadius(AppCornerRadius.standard)
         }
         .buttonStyle(.plain)
+        // 展开面板锚定在按钮上：宽度与按钮一致，从按钮上方长出
+        .overlay(alignment: .bottom) {
+            if showRatingExpanded {
+                ratingExpandedPanel(note: note, scheduler: scheduler)
+                    .padding(.bottom, AppButtonHeight.standard + 8)  // 面板底边 = 按钮顶边 - 8
+                    .transition(
+                        .asymmetric(
+                            insertion: .scale(scale: 0.85, anchor: .bottom)
+                                .combined(with: .opacity)
+                                .combined(with: .offset(y: 6)),
+                            removal: .scale(scale: 0.92, anchor: .bottom)
+                                .combined(with: .opacity)
+                        )
+                    )
+            }
+        }
     }
     
     // MARK: - 测评图标按钮（中性色）
