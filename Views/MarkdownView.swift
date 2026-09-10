@@ -732,8 +732,9 @@ private extension UIFont {
 private final class KnowledgeUnderlineLayoutManager: NSLayoutManager {
     private let underlineColor = UIColor(Color.brandPrimary)
     private let underlineHeight: CGFloat = 2.0   // 下划线粗细
-    private let underlineOffset: CGFloat = 0.1   // 下划线与文字底部的距离（避免与下一行文字重合）
+    private let underlineOffset: CGFloat = 2.0   // 下划线与文字基线的距离
 
+    // 知识点下划线由 drawGlyphs 统一绘制，此处拦截系统默认绘制（避免细线叠加导致粗细不一致）
     override func drawUnderline(
         forGlyphRange glyphRange: NSRange,
         underlineType: NSUnderlineStyle,
@@ -747,22 +748,47 @@ private final class KnowledgeUnderlineLayoutManager: NSLayoutManager {
         guard charRange.location != NSNotFound,
               charRange.location < textStorage.length,
               textStorage.attribute(kKnowledgePointAttribute, at: charRange.location, effectiveRange: nil) != nil
-        else { return }
+        else {
+            // 非知识点：走系统默认绘制
+            super.drawUnderline(forGlyphRange: glyphRange, underlineType: underlineType, baselineOffset: baselineOffset, lineFragmentRect: lineFragmentRect, lineFragmentGlyphRange: lineFragmentGlyphRange, containerOrigin: containerOrigin)
+            return
+        }
+        // 知识点：跳过系统细线下划线，由 drawGlyphs 统一绘制粗线
+    }
 
-        guard let container = textContainer(forGlyphAt: glyphRange.location, effectiveRange: nil) else { return }
-        let rect = boundingRect(forGlyphRange: glyphRange, in: container)
+    /// 在系统绘制完字形后，统一绘制知识点粗实线下划线
+    override func drawGlyphs(forGlyphRange glyphsToShow: NSRange, at containerOrigin: CGPoint) {
+        super.drawGlyphs(forGlyphRange: glyphsToShow, at: containerOrigin)
+        drawKnowledgeUnderlines(forGlyphRange: glyphsToShow, containerOrigin: containerOrigin)
+    }
 
-        // 文字不动：下划线画在文字字形底部下方 offset 处
-        let lineRect = CGRect(
-            x: rect.minX + containerOrigin.x,
-            y: rect.maxY + underlineOffset + containerOrigin.y,
-            width: rect.width,
-            height: underlineHeight
-        )
-        guard lineRect.width > 0 else { return }
-        let path = UIBezierPath(roundedRect: lineRect, cornerRadius: underlineHeight / 2)
-        underlineColor.setFill()
-        path.fill()
+    private func drawKnowledgeUnderlines(forGlyphRange glyphsToShow: NSRange, containerOrigin: CGPoint) {
+        guard let textStorage, let textContainer = textContainer(forGlyphAt: glyphsToShow.location, effectiveRange: nil) else { return }
+
+        var effectiveRange = NSRange()
+        var searchLocation = glyphsToShow.location
+
+        while searchLocation < NSMaxRange(glyphsToShow) {
+            let attrValue = textStorage.attribute(kKnowledgePointAttribute, at: searchLocation, effectiveRange: &effectiveRange)
+            if attrValue != nil {
+                let intersection = NSIntersectionRange(glyphsToShow, effectiveRange)
+                if intersection.length > 0 {
+                    let boundingRect = self.boundingRect(forGlyphRange: intersection, in: textContainer)
+                    guard boundingRect.width > 0 else { continue }
+
+                    let lineRect = CGRect(
+                        x: boundingRect.minX + containerOrigin.x,
+                        y: boundingRect.maxY + underlineOffset + containerOrigin.y,
+                        width: boundingRect.width,
+                        height: underlineHeight
+                    )
+                    let path = UIBezierPath(roundedRect: lineRect, cornerRadius: underlineHeight / 2)
+                    underlineColor.setFill()
+                    path.fill()
+                }
+            }
+            searchLocation = NSMaxRange(effectiveRange)
+        }
     }
 }
 
