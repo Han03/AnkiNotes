@@ -11,28 +11,67 @@ import Foundation
 /// 打字机实现：网络/AsyncStream 的 chunk 到达节奏不可控（可能一次性积压全部行），
 /// 因此 appendChunk 只做缓冲，由 50ms 定时器统一 flush 到 displayedText，
 /// 保证 UI 以固定节奏逐批刷新，形成稳定的打字机效果。
+/// 知识点详解打字机状态机（与网络完全解耦）
+/// - appendChunk：网络 chunk 只入缓冲，不直接显示
+/// - 50ms 固定节拍从缓冲刷出（40字/tick），无论网络快慢都形成稳定打字机效果
+/// - complete：网络流结束，剩余缓冲继续按节拍刷完后再结束加载（不一次性刷空）
+/// - fail：出错时保留已生成内容，刷完剩余后显示错误提示
 final class KnowledgeExplanationStore: ObservableObject {
-    @Published var displayedText = ""
-    @Published var fullText = ""
-    @Published var isLoading = true
-    
+    @Published private(set) var displayedText = ""
+    @Published private(set) var isLoading = true
+    @Published private(set) var errorMessage: String?
+
     private var pendingBuffer = ""      // 待刷出的累积内容
-    private var flushTimer: Timer?      // 节流刷新定时器
-    private var totalChunks = 0         // 累计收到的 chunk 数（日志用）
-    /// 每个 tick（50ms）显示的字符数（约 800 字/秒）
-    /// 关键：LLM 输出可能瞬间全部到达（网络缓冲），若一次性刷出全部 buffer 则打字机失效，
-    /// 因此限速刷出，剩余内容留到下一 tick，保证稳定的打字机视觉效果。
-    private let charsPerTick = 40
-    
+    private var flushTimer: Timer?      // 50ms 节流定时器
+    private var didFinish = false       // 网络流是否已结束（正常 complete 或失败）
+    private let charsPerTick = 40       // 每 tick 显示的字符数（约 800 字/秒）
+
+    /// 追加一段网络内容到缓冲（不直接显示，由节拍刷出）
     func appendChunk(_ chunk: String) {
-        totalChunks += 1
-        SyncLogger.shared.info("📝 appendChunk: #\(totalChunks), 长度=\(chunk.count), 内容前20=\(String(chunk.prefix(20)))")
         pendingBuffer += chunk
-        // 启动/复用节流定时器（50ms 一次）
         ensureFlushTimer()
     }
-    
-    /// 启动节流刷新定时器（只启动一次，由 complete/reset 停止）
+
+    /// 网络流正常结束：剩余缓冲继续按节拍刷出，刷完自动结束加载
+    func complete() {
+        didFinish = true
+        if pendingBuffer.isEmpty {
+            finish()
+        } else {
+            ensureFlushTimer()  // 保险：Timer 意外未运行则补启动
+        }
+    }
+
+    /// 网络流失败：保留已生成内容，刷完剩余后进入错误态
+    func fail(_ message: String) {
+        didFinish = true
+        errorMessage = message
+        // 已到达的内容不丢失：剩余缓冲直接刷出（错误场景不再追求打字机节奏）
+        if !pendingBuffer.isEmpty {
+            displayedText += pendingBuffer
+            pendingBuffer = ""
+        }
+        finish()
+    }
+
+    /// 直接展示缓存内容（无打字机）
+    func setCached(_ text: String) {
+        displayedText = text
+        pendingBuffer = ""
+        didFinish = true
+        finish()
+    }
+
+    func reset() {
+        displayedText = ""
+        pendingBuffer = ""
+        errorMessage = nil
+        didFinish = false
+        isLoading = true
+        flushTimer?.invalidate()
+        flushTimer = nil
+    }
+
     private func ensureFlushTimer() {
         guard flushTimer == nil else { return }
         let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
@@ -40,51 +79,25 @@ final class KnowledgeExplanationStore: ObservableObject {
         }
         RunLoop.main.add(timer, forMode: .common)
         flushTimer = timer
-        SyncLogger.shared.info("📝 启动打字机节流定时器 (50ms, 每tick显示\(charsPerTick)字)")
     }
-    
-    /// 按限速节奏把部分累积内容刷到 displayedText（主线程调用）
+
     private func flushPending() {
-        guard !pendingBuffer.isEmpty else { return }
-        let takeCount = min(pendingBuffer.count, charsPerTick)
-        let toDisplay = String(pendingBuffer.prefix(takeCount))
-        displayedText += toDisplay
-        pendingBuffer.removeFirst(takeCount)
-        SyncLogger.shared.info("📝 打字机刷新: 本次显示\(takeCount)字, 剩余buffer=\(pendingBuffer.count), 总长=\(displayedText.count), 累计chunk=\(totalChunks)")
-    }
-    
-    func complete(with text: String) {
-        // 结束时把剩余内容一次性刷出（避免尾部滞留）
-        if !pendingBuffer.isEmpty {
-            displayedText += pendingBuffer
-            pendingBuffer = ""
+        guard !pendingBuffer.isEmpty else {
+            if didFinish { finish() }
+            return
         }
-        fullText = text
+        let take = min(pendingBuffer.count, charsPerTick)
+        displayedText += pendingBuffer.prefix(take)
+        pendingBuffer.removeFirst(take)
+        if didFinish && pendingBuffer.isEmpty { finish() }
+    }
+
+    private func finish() {
+        flushTimer?.invalidate()
+        flushTimer = nil
         isLoading = false
-        flushTimer?.invalidate()
-        flushTimer = nil
-        SyncLogger.shared.info("📝 完成: fullText长度=\(fullText.count), displayedText长度=\(displayedText.count), 累计chunk=\(totalChunks)")
     }
-    
-    func setCached(_ text: String) {
-        displayedText = text
-        fullText = text
-        isLoading = false
-        pendingBuffer = ""
-        flushTimer?.invalidate()
-        flushTimer = nil
-    }
-    
-    func reset() {
-        displayedText = ""
-        fullText = ""
-        isLoading = true
-        pendingBuffer = ""
-        totalChunks = 0
-        flushTimer?.invalidate()
-        flushTimer = nil
-    }
-    
+
     deinit {
         flushTimer?.invalidate()
     }
@@ -431,23 +444,34 @@ final class KnowledgeService: ObservableObject {
     ///   - note: 所属笔记（用于计算缓存路径）
     ///   - noteContent: 笔记原文（用于上下文）
     ///   - config: 百炼配置
-    ///   - onChunk: 每收到一段文本时回调（打字机效果）
-    ///   - completion: 完成回调
+    ///   - onChunk: 每收到一段文本时回调（主线程）
+    ///   - onError: 网络/解析失败时回调（主线程）
+    ///   - completion: 完成回调（主线程），无论成功失败都会调用
+    /// - Returns: Task 句柄（调用方可通过 cancel() 取消），缓存命中时返回 nil
+    /// 
+    /// 技术要点（针对历史多轮"非流式"问题）：
+    /// 1. TTFT：URLSession.shared 共享连接池跨请求复用 TCP/TLS（原实现每次新建
+    ///    URLSession(delegate:) 导致每次全新握手——日志实证第一次 TTFT 0.7s、第二次 26.3s）
+    /// 2. 消费端：Task.detached 后台逐行消费（主 actor for-await 会一次性批量消费全部缓冲，
+    ///    打字机失效；bytes 流本身不缓冲）
+    /// 3. 打字机节奏：由 KnowledgeExplanationStore 的 50ms 节拍刷出，与网络 chunk 到达节奏
+    ///    解耦（网络快时内容整体到达也不影响打字机效果）
     func explainKeyword(
         point: KnowledgePoint,
         note: Note,
         noteContent: String,
         config: BailianConfig,
         onChunk: @escaping (String) -> Void,
+        onError: @escaping (String) -> Void,
         completion: @escaping (String) -> Void
-    ) {
-        // 先检查缓存
+    ) -> Task<Void, Never>? {
+        // 缓存优先：直接回放
         if let cached = loadExplanation(for: point, note: note) {
             DispatchQueue.main.async {
                 onChunk(cached)
                 completion(cached)
             }
-            return
+            return nil
         }
         
         isExplaining = true
@@ -476,25 +500,13 @@ final class KnowledgeService: ObservableObject {
         
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         
-        // 使用 URLSession.shared.bytes(for:) 流式读取 SSE：
-        // 1) URLSession.shared 共享连接池，跨请求复用 TCP/TLS 连接（keep-alive）。
-        //    原实现每次请求新建 URLSession(delegate:) 实例，连接池不跨请求复用，
-        //    每次都是全新握手——日志实证：第一次详解 TTFT 0.7s，第二次 26.3s。
-        // 2) AsyncBytes.lines 逐行 yield（iOS 16+），SSE 逐行解析天然适配，不会缓冲整个响应。
-        //    （历史注释称 bytes(for:) 会缓冲导致打字机失效，实为主 actor for-await 一次性消费
-        //     全部缓冲的错误归因；用 Task.detached 后台消费即可保持流式。）
-        
-        // 关键：必须用 Task.detached 在后台线程消费流。
-        // 若用 Task{}（继承主 actor），bytes 的多个值会被主 actor job
-        // 一次性连续消费，所有 onChunk 排队到流结束后批量执行，打字机效果失效。
         let task = Task.detached(priority: .userInitiated) { [weak self] in
             var fullText = ""
             do {
-                // 发起请求并等待响应（bytes(for:) 返回 (AsyncBytes, URLResponse)，AsyncBytes 在前）
+                // bytes(for:) 返回 (AsyncBytes, URLResponse)，AsyncBytes 在前
                 let (asyncBytes, _) = try await URLSession.shared.bytes(for: request)
                 SyncLogger.shared.info("📡 SSE 首字节到达: \(Date())")
                 
-                // 逐行消费 SSE 流（后台线程，逐行 yield，不缓冲整个响应）
                 var chunkCount = 0
                 for try await line in asyncBytes.lines {
                     // SSE 行格式：data: {content}，忽略空行/注释/事件行
@@ -505,33 +517,31 @@ final class KnowledgeService: ObservableObject {
                     
                     fullText += content
                     chunkCount += 1
-                    let n = chunkCount
-                    let len = content.count
+                    let chunk = content
                     DispatchQueue.main.async {
-                        SyncLogger.shared.info("📡 派发UI: chunk#\(n), 长度=\(len)")
-                        onChunk(content)
+                        onChunk(chunk)
                     }
                 }
                 SyncLogger.shared.info("📡 流结束: 共消费 \(chunkCount) 个 chunk, fullText长度=\(fullText.count), 总耗时=\(String(format: "%.2f", Date().timeIntervalSince(requestStartTime)))秒（含TTFT）")
+                
+                let finalText = fullText
+                DispatchQueue.main.async {
+                    self?.saveExplanation(for: point, note: note, explanation: finalText)
+                    self?.isExplaining = false
+                    completion(finalText)
+                }
             } catch {
-                print("⚠️ 知识点详解生成失败: \(error.localizedDescription)")
+                SyncLogger.shared.error("❌ 知识点详解生成失败: \(error.localizedDescription)")
+                let finalText = fullText
                 DispatchQueue.main.async {
                     self?.isExplaining = false
-                    completion(fullText)
+                    onError(error.localizedDescription)
+                    completion(finalText)
                 }
-                return
-            }
-            
-            // 保存缓存 + 状态回写统一回主线程（避免跨线程触碰单例状态）
-            let finalText = fullText
-            DispatchQueue.main.async {
-                self?.saveExplanation(for: point, note: note, explanation: finalText)
-                self?.isExplaining = false
-                completion(finalText)
             }
         }
         
-        _ = task
+        return task
     }
     
     // MARK: - Prompt 构建
