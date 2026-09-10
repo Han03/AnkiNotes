@@ -786,7 +786,7 @@ private final class KnowledgeUnderlineLayoutManager: NSLayoutManager {
                     if currentLineRect == nil || lineRect.minY != currentLineRect!.minY {
                         // 绘制上一行的下划线（如果存在）
                         if let rect = currentLineRect {
-                            drawSingleLineUnderline(from: lineStartIndex, to: glyphIndex, in: rect, containerOrigin: containerOrigin)
+                            drawSingleLineUnderline(from: lineStartIndex, to: glyphIndex, in: rect, containerOrigin: containerOrigin, textContainer: textContainer)
                         }
                         // 开启新行记录
                         currentLineRect = lineRect
@@ -796,7 +796,7 @@ private final class KnowledgeUnderlineLayoutManager: NSLayoutManager {
 
                 // 绘制最后一行的下划线
                 if let rect = currentLineRect {
-                    drawSingleLineUnderline(from: lineStartIndex, to: NSMaxRange(intersection), in: rect, containerOrigin: containerOrigin)
+                    drawSingleLineUnderline(from: lineStartIndex, to: NSMaxRange(intersection), in: rect, containerOrigin: containerOrigin, textContainer: textContainer)
                 }
             }
             searchLocation = NSMaxRange(effectiveRange)
@@ -804,10 +804,10 @@ private final class KnowledgeUnderlineLayoutManager: NSLayoutManager {
     }
 
     /// 绘制单行内的知识点下划线
-    private func drawSingleLineUnderline(from startGlyph: Int, to endGlyph: Int, in lineRect: CGRect, containerOrigin: CGPoint) {
+    private func drawSingleLineUnderline(from startGlyph: Int, to endGlyph: Int, in lineRect: CGRect, containerOrigin: CGPoint, textContainer: NSTextContainer) {
         // 获取该行内指定字形范围的精确边界
         let range = NSRange(location: startGlyph, length: endGlyph - startGlyph)
-        let boundingRect = self.boundingRect(forGlyphRange: range, in: textContainer!)
+        let boundingRect = self.boundingRect(forGlyphRange: range, in: textContainer)
         
         // 确保 Y 坐标基于当前行的基线位置
         let y = lineRect.maxY + underlineOffset

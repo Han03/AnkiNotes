@@ -391,20 +391,19 @@ final class AppState: ObservableObject {
 
         let fs = CloudProviderFactory.makeFileSystem(for: .webDAV, webDAVConfig: cfg)
         let root = fs.rootDirectory
-        do {
-            let exists: Bool = try fs.fileExists(at: root)
-            if exists {
-                return (true, "✅ 连接成功，根目录可访问：\(fs.displayLocation)")
-            } else {
-                do {
-                    try fs.createDirectoryIfNeeded(at: root)
-                    return (true, "✅ 连接成功，根目录不存在已自动创建：\(fs.displayLocation)")
-                } catch {
-                    return (false, "❌ 连接成功但根目录创建失败：\(error.localizedDescription)。请检查路径是否有写入权限，或手动在坚果云创建对应目录")
-                }
+        
+        // 检查根目录是否存在
+        let exists: Bool = fs.fileExists(at: root)
+        if exists {
+            return (true, "✅ 连接成功，根目录可访问：\(fs.displayLocation)")
+        } else {
+            // 目录不存在，尝试创建
+            do {
+                try fs.createDirectoryIfNeeded(at: root)
+                return (true, "✅ 连接成功，根目录不存在已自动创建：\(fs.displayLocation)")
+            } catch {
+                return (false, "❌ 连接成功但根目录创建失败：\(error.localizedDescription)。请检查路径是否有写入权限，或手动在坚果云创建对应目录")
             }
-        } catch {
-            return (false, "❌ 连接失败：\(error.localizedDescription)")
         }
     }
 
