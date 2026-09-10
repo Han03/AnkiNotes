@@ -502,42 +502,26 @@ final class KnowledgeService: ObservableObject {
         
         let task = Task.detached(priority: .userInitiated) { [weak self] in
             var fullText = ""
-            do {
-                // bytes(for:) 返回 (AsyncBytes, URLResponse)，AsyncBytes 在前
-                let (asyncBytes, _) = try await URLSession.shared.bytes(for: request)
-                SyncLogger.shared.info("📡 SSE 首字节到达: \(Date())")
-                
-                var chunkCount = 0
-                for try await line in asyncBytes.lines {
-                    // SSE 行格式：data: {content}，忽略空行/注释/事件行
-                    guard line.hasPrefix("data:") else { continue }
-                    let content = line.dropFirst(5)
-                        .trimmingCharacters(in: .whitespaces)
-                    guard !content.isEmpty, content != "[DONE]" else { continue }
-                    
-                    fullText += content
-                    chunkCount += 1
-                    let chunk = content
-                    DispatchQueue.main.async {
-                        onChunk(chunk)
-                    }
-                }
-                SyncLogger.shared.info("📡 流结束: 共消费 \(chunkCount) 个 chunk, fullText长度=\(fullText.count), 总耗时=\(String(format: "%.2f", Date().timeIntervalSince(requestStartTime)))秒（含TTFT）")
-                
-                let finalText = fullText
+            // SSEStreamManager：共享 URLSession（连接复用保 TTFT）+ delegate 逐段接收（真流式）。
+            // 不用 URLSession.shared.bytes(for:)：AsyncBytes 在 iOS 上缓冲整个响应，
+            // 首字节后几十毫秒全量到达（日志实证），打字机失去真实流式基础。
+            var chunkCount = 0
+            let stream = SSEStreamManager.shared.stream(for: request)
+            for await chunk in stream {
+                fullText += chunk
+                chunkCount += 1
+                let c = chunk
                 DispatchQueue.main.async {
-                    self?.saveExplanation(for: point, note: note, explanation: finalText)
-                    self?.isExplaining = false
-                    completion(finalText)
+                    onChunk(c)
                 }
-            } catch {
-                SyncLogger.shared.error("❌ 知识点详解生成失败: \(error.localizedDescription)")
-                let finalText = fullText
-                DispatchQueue.main.async {
-                    self?.isExplaining = false
-                    onError(error.localizedDescription)
-                    completion(finalText)
-                }
+            }
+            SyncLogger.shared.info("📡 流结束: 共消费 \(chunkCount) 个 chunk, fullText长度=\(fullText.count), 总耗时=\(String(format: "%.2f", Date().timeIntervalSince(requestStartTime)))秒（含TTFT）")
+            
+            let finalText = fullText
+            DispatchQueue.main.async {
+                self?.saveExplanation(for: point, note: note, explanation: finalText)
+                self?.isExplaining = false
+                completion(finalText)
             }
         }
         
@@ -565,17 +549,25 @@ final class KnowledgeService: ObservableObject {
     }
     
     private func buildExplanationPrompt(keyword: String, noteContent: String) -> String {
+        // 围绕知识点截取上下文（而非全文前缀 2000 字）：
+        // 知识点必为原文精确出现的片段，定位后截取前后各 400 字，prompt 从 2000+ 降到约 900，
+        // 显著降低服务端输入处理耗时（TTFT）
+        let context = contextAround(keyword: keyword, in: noteContent, radius: 400)
         return """
-        请解释以下知识点：\(keyword)
+        请用通俗易懂的语言解释笔记中的知识点"\(keyword)"，让初学者也能理解，可以适当举例，300字以内。
         
-        笔记上下文（供参考）：
-        \(noteContent.prefix(2000))
-        
-        要求：
-        1. 用通俗易懂的语言解释，让初学者也能理解
-        2. 说明这个知识点是什么、为什么重要
-        3. 可以适当举例说明
-        4. 不要过于冗长，300字以内
+        笔记内容（节选）：
+        \(context)
         """
+    }
+    
+    /// 在笔记原文中定位知识点并截取上下文（找不到时回退前缀）
+    private func contextAround(keyword: String, in content: String, radius: Int) -> String {
+        guard !keyword.isEmpty, let range = content.range(of: keyword) else {
+            return String(content.prefix(radius))
+        }
+        let lower = content.index(range.lowerBound, offsetBy: -radius, limitedBy: content.startIndex) ?? content.startIndex
+        let upper = content.index(range.upperBound, offsetBy: radius, limitedBy: content.endIndex) ?? content.endIndex
+        return String(content[lower..<upper])
     }
 }

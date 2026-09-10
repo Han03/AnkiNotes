@@ -28,6 +28,7 @@
 		ANReviewQuiz /* ReviewQuizView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANReviewQuizRef /* ReviewQuizView.swift */; };
 		ANCloudLockService /* CloudLockService.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANCloudLockServiceRef /* CloudLockService.swift */; };
 		ANSyncSnapshotService /* SyncSnapshotService.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANSyncSnapshotServiceRef /* SyncSnapshotService.swift */; };
+		ANSSEStreamManager /* SSEStreamManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANSSEStreamManagerRef /* SSEStreamManager.swift */; };
 		392470F8DA3B93785B7405F8 /* SyncLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 621D2B4E554ED1479A5AE2DD /* SyncLogger.swift */; };
 		8F7E9719C666424FAAEB1E1B /* AppLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A0BB2AA2AE84C65AAA36F23 /* AppLogger.swift */; };
 		ANMetadataSyncService /* MetadataSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANMetadataSyncServiceRef /* MetadataSyncService.swift */; };
@@ -67,6 +68,7 @@
 		ANReviewQuizRef /* ReviewQuizView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewQuizView.swift; sourceTree = "<group>"; };
 		ANCloudLockServiceRef /* CloudLockService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudLockService.swift; sourceTree = "<group>"; };
 		ANSyncSnapshotServiceRef /* SyncSnapshotService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncSnapshotService.swift; sourceTree = "<group>"; };
+		ANSSEStreamManagerRef /* SSEStreamManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSEStreamManager.swift; sourceTree = "<group>"; };
 		621D2B4E554ED1479A5AE2DD /* SyncLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncLogger.swift; sourceTree = "<group>"; };
 		5A0BB2AA2AE84C65AAA36F23 /* AppLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLogger.swift; sourceTree = "<group>"; };
 		ANMetadataSyncServiceRef /* MetadataSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetadataSyncService.swift; sourceTree = "<group>"; };
@@ -138,6 +140,7 @@
 			ANQuizServiceRef /* QuizService.swift */,
 				ANCloudLockServiceRef /* CloudLockService.swift */,
 				ANSyncSnapshotServiceRef /* SyncSnapshotService.swift */,
+				ANSSEStreamManagerRef /* SSEStreamManager.swift */,
 				621D2B4E554ED1479A5AE2DD /* SyncLogger.swift */,
 				5A0BB2AA2AE84C65AAA36F23 /* AppLogger.swift */,
 				ANMetadataSyncServiceRef /* MetadataSyncService.swift */,
@@ -284,6 +287,7 @@
 			ANKnowledgePoint /* KnowledgePoint.swift in Sources */,
 			ANCloudLockService /* CloudLockService.swift in Sources */,
 			ANSyncSnapshotService /* SyncSnapshotService.swift in Sources */,
+			ANSSEStreamManager /* SSEStreamManager.swift in Sources */,
 			392470F8DA3B93785B7405F8 /* SyncLogger.swift in Sources */,
 			8F7E9719C666424FAAEB1E1B /* AppLogger.swift in Sources */,
 			ANMetadataSyncService /* MetadataSyncService.swift in Sources */,
