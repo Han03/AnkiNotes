@@ -277,7 +277,6 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
             guard let self = self else { return }
             // 再次检查暂停状态
             guard !self.isPaused else {
-                SyncLogger.shared.info("🔊 playAudioData: 已暂停，不播放")
                 self.pendingPlayIndex = self.currentSentenceIndex
                 return
             }
@@ -296,7 +295,6 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
                 self.isLoading = false
                 // 更新锁屏/控制中心的现在播放信息
                 self.updateNowPlayingInfo()
-                SyncLogger.shared.info("🔊 playAudioData: 开始播放，index=\(self.currentSentenceIndex)，语速=\(self.config.rate)x")
             } catch {
                 SyncLogger.shared.warning("🔊 playAudioData: 播放失败 - \(error.localizedDescription)，跳过当前句子")
                 self.isLoading = false
@@ -339,9 +337,6 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
             preloadSentence(at: targetIndex)
         }
         
-        if startedCount > 0 || skippedCacheCount > 0 {
-            SyncLogger.shared.info("🔊 preloadNextSentence: 启动 \(startedCount) 个预下载，跳过磁盘缓存 \(skippedCacheCount) 个（当前句=\(currentSentenceIndex)，预下载接下来\(preloadCount)句）")
-        }
     }
     
     /// 预下载指定索引的句子音频
@@ -406,7 +401,6 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
                 pitch: Int(self.config.pitch)
             )
             
-            SyncLogger.shared.info("🔊 preloadSentence: 预下载成功，index=\(index)，大小=\(audioData.count)字节")
         }
         
         preloadTasks[index] = task
@@ -420,7 +414,6 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
         pendingPlayIndex = nil
         // 更新锁屏/控制中心的播放状态（暂停）
         updateNowPlayingInfo()
-        SyncLogger.shared.info("🔊 TTSService.pause: provider=\(config.provider.displayName)")
         switch config.provider {
         case .edgeTTSService:
             audioPlayer?.pause()
@@ -435,11 +428,9 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
         isPaused = false
         // 更新锁屏/控制中心的播放状态（播放中）
         updateNowPlayingInfo()
-        SyncLogger.shared.info("🔊 TTSService.resume: provider=\(config.provider.displayName)")
         
         // 如果有待播放的句子（暂停时下载完成的），直接播放
         if let pendingIndex = pendingPlayIndex {
-            SyncLogger.shared.info("🔊 TTSService.resume: 播放待播放句子，index=\(pendingIndex)")
             pendingPlayIndex = nil
             currentSentenceIndex = pendingIndex
             currentText = sentences[pendingIndex]
@@ -514,7 +505,6 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
             try audioSession.setCategory(.playback, mode: .spokenAudio, options: [])
             try audioSession.setActive(true)
             isAudioSessionActive = true
-            SyncLogger.shared.info("🔊 音频会话已激活（后台播放模式）")
         } catch {
             SyncLogger.shared.warning("🔊 音频会话激活失败: \(error.localizedDescription)")
         }
@@ -528,7 +518,6 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
         do {
             try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
             isAudioSessionActive = false
-            SyncLogger.shared.info("🔊 音频会话已取消激活")
         } catch {
             SyncLogger.shared.warning("🔊 音频会话取消激活失败: \(error.localizedDescription)")
         }
@@ -543,7 +532,6 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
         ) { [weak self] notification in
             self?.handleAudioInterruption(notification)
         }
-        SyncLogger.shared.info("🔊 音频中断监听已注册")
     }
     
     /// 处理音频中断
@@ -557,7 +545,6 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
         switch type {
         case .began:
             // 中断开始（来电、闹钟等），自动暂停播放
-            SyncLogger.shared.info("🔊 音频中断开始，自动暂停播放")
             if isSpeaking && !isPaused {
                 pause()
             }
@@ -566,13 +553,10 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
             guard let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt else { return }
             let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
             if options.contains(.shouldResume) {
-                SyncLogger.shared.info("🔊 音频中断结束，系统建议恢复播放")
                 // 自动恢复播放（如果之前是播放状态被中断的）
                 if isSpeaking && isPaused {
                     resume()
                 }
-            } else {
-                SyncLogger.shared.info("🔊 音频中断结束，系统不建议恢复播放，保持暂停状态")
             }
         @unknown default:
             break
@@ -661,7 +645,6 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
             return .commandFailed
         }
         
-        SyncLogger.shared.info("🔊 远程控制命令已注册（锁屏/控制中心播放控制）")
     }
     
     /// 开始播放前的保活准备（激活音频会话、注册远程控制）
@@ -725,7 +708,6 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
     private func sentenceFinished() {
         // 检查是否已暂停：如果已暂停，不自动播放下一句
         guard !isPaused else {
-            SyncLogger.shared.info("🔊 sentenceFinished: 已暂停，不自动播放下一句，currentIndex=\(currentSentenceIndex)")
             pendingPlayIndex = currentSentenceIndex + 1
             return
         }
@@ -766,14 +748,10 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
     private func speakEdgeTTSService(_ text: String) {
         let serviceURL = config.serviceURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !serviceURL.isEmpty, let url = URL(string: "\(serviceURL)/v1/audio/speech") else {
-            SyncLogger.shared.warning("🔊 Edge-TTS 服务: URL 无效，跳过当前句子")
             isLoading = false
             sentenceFinished()
             return
         }
-        
-        SyncLogger.shared.info("🔊 Edge-TTS 服务: 开始合成，URL=\(url.absoluteString)")
-        SyncLogger.shared.info("🔊 Edge-TTS 服务: 文本前50字=\(String(text.prefix(50)))")
         
         // 构建请求体
         let body: [String: Any] = [
@@ -808,7 +786,6 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
             if let error = error {
                 // 如果是取消错误，忽略
                 if (error as NSError).code == NSURLErrorCancelled {
-                    SyncLogger.shared.info("🔊 Edge-TTS 服务: 任务被取消")
                     return
                 }
                 SyncLogger.shared.warning("🔊 Edge-TTS 服务: 请求失败 - \(error.localizedDescription)，跳过当前句子")
@@ -839,7 +816,6 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
                 return
             }
             
-            SyncLogger.shared.info("🔊 Edge-TTS 服务: 合成成功，音频大小=\(audioData.count) 字节")
             
             // 缓存音频数据到内存
             self.audioCache[self.currentSentenceIndex] = audioData
@@ -859,7 +835,6 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
             
             // 检查暂停状态：如果已暂停，只缓存不播放
             guard !self.isPaused else {
-                SyncLogger.shared.info("🔊 Edge-TTS 服务: 已暂停，缓存音频但不播放，index=\(self.currentSentenceIndex)")
                 self.isLoading = false
                 self.pendingPlayIndex = self.currentSentenceIndex
                 return
@@ -886,7 +861,6 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
     // MARK: - AVAudioPlayerDelegate
     
     func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
-        SyncLogger.shared.info("🔊 Edge-TTS: audioPlayerDidFinishPlaying, flag=\(flag)")
         guard isSpeaking, !isPaused else { return }
         if flag {
             sentenceFinished()

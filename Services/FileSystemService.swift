@@ -229,12 +229,13 @@ final class FileSystemService {
     private func syncToCloud(data: Data, to url: URL) {
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self = self else { return }
+            let cloudURL = self.cloudURL(forLocalURL: url)
+            SyncLogger.shared.stepStart("☁️ 上传笔记: \(url.lastPathComponent)")
             do {
-                // 计算云端路径：把本地 Documents 路径替换为云端根路径
-                let cloudURL = self.cloudURL(forLocalURL: url)
                 try self.cloudFS.writeData(data, to: cloudURL)
+                SyncLogger.shared.stepDone("☁️ 上传笔记")
             } catch {
-                print("⚠️ 云端同步失败 \(url.lastPathComponent): \(error.localizedDescription)")
+                SyncLogger.shared.stepFail("☁️ 上传笔记", error: error)
             }
         }
     }

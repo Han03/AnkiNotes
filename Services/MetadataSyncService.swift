@@ -26,12 +26,10 @@ final class MetadataSyncService {
     }
     
     /// 需要同步的元数据文件名
-    /// 注意：quiz_questions.json 已废弃，题库现在按笔记文件夹结构存储在 Questions/ 目录
     private let metadataFiles: [String] = [
         "folders.json",
         "notes_index.json",
-        "review_logs.json",
-        "quiz_generated_notes.json"
+        "review_logs.json"
     ]
     
     private init() {}
@@ -225,9 +223,11 @@ final class MetadataSyncService {
                 }
                 
                 // 写入云端
+                SyncLogger.shared.stepStart("☁️ 推送元数据: \(fileName)")
                 try cloudFS.writeData(localData, to: cloudURL)
                 pushedCount += 1
                 lastPushTimestamps[fileName] = Date()
+                SyncLogger.shared.stepDone("☁️ 推送元数据")
                 
                 // 【更新快照】记录文件的修改时间
                 if let snap = syncSnapshotService,
@@ -236,10 +236,8 @@ final class MetadataSyncService {
                     snap.updateFile(relativePath: relativePath, lastModified: localModDate)
                 }
                 
-                print("📤 元数据同步: 推送 \(fileName) (\(localData.count) bytes)")
-                
             } catch {
-                print("⚠️ 元数据推送失败 \(fileName): \(error.localizedDescription)")
+                SyncLogger.shared.stepFail("☁️ 推送元数据: \(fileName)", error: error)
             }
         }
         

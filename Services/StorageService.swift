@@ -1017,6 +1017,7 @@ final class StorageService: ObservableObject {
         for comp in relative {
             cloudURL = cloudURL.appendingPathComponent(comp)
         }
+        SyncLogger.shared.debug("☁️ 路径映射: \(localURL.lastPathComponent) -> \(cloudURL.path)")
         return cloudURL
     }
     
