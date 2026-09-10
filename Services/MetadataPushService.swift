@@ -19,8 +19,8 @@ public final class MetadataPushService {
     /// 持久化 Key
     private static let keyDirtyFiles = "AnkiNotes.MetadataPush.DirtyFiles"
     
-    weak var cloudFS: CloudFileSystem?
-    weak var syncSnapshotService: SyncSnapshotService?
+    public weak var cloudFS: CloudFileSystem?
+    public weak var syncSnapshotService: SyncSnapshotService?
     
     private init() {
         // 启动时恢复待推送文件
@@ -37,7 +37,7 @@ public final class MetadataPushService {
     }
     
     /// 立即执行待推送任务（App 进入后台时调用）
-    func flush() {
+    public func flush() {
         pushTimer?.invalidate()
         executePush()
     }
