@@ -19,8 +19,8 @@ public final class MetadataPushService {
     /// 持久化 Key
     private static let keyDirtyFiles = "AnkiNotes.MetadataPush.DirtyFiles"
     
-    public weak var cloudFS: CloudFileSystem?
-    public weak var syncSnapshotService: SyncSnapshotService?
+    weak var cloudFS: CloudFileSystem?
+    weak var syncSnapshotService: SyncSnapshotService?
     
     private init() {
         // 启动时恢复待推送文件
