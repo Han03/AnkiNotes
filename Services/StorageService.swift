@@ -85,6 +85,9 @@ final class StorageService: ObservableObject {
         folderPathCache[folder.id] = path.isEmpty ? "根目录" : path
         // 创建物理目录
         _ = try? fileSystem.createPhysicalFolder(named: name, parentFolderId: parentId, folders: folders)
+        
+        // 【新增】标记为脏，触发延迟推送
+        MetadataPushService.shared.markDirty("folders.json")
         return folder
     }
     
@@ -97,6 +100,9 @@ final class StorageService: ObservableObject {
         // 更新缓存
         let path = computeFolderPath(folderId: folder.id, folders: folders)
         folderPathCache[folder.id] = path.isEmpty ? "根目录" : path
+        
+        // 【新增】标记为脏，触发延迟推送
+        MetadataPushService.shared.markDirty("folders.json")
     }
     
     /// 重命名文件夹（同时重命名物理目录并更新云端）
@@ -141,6 +147,9 @@ final class StorageService: ObservableObject {
         
         // 同步到云端
         syncFolderChangesToCloud()
+        
+        // 【新增】标记为脏，触发延迟推送
+        MetadataPushService.shared.markDirty("folders.json")
     }
     
     /// 将文件夹变更同步到云端（简化版：触发全量同步）
@@ -220,6 +229,9 @@ final class StorageService: ObservableObject {
         if !deletedNoteIds.isEmpty {
             quizService?.deleteQuestions(for: deletedNoteIds)
         }
+        
+        // 【新增】标记为脏，触发延迟推送
+        MetadataPushService.shared.markDirty("folders.json")
     }
     
     private func collectDescendantFolderIds(from rootId: UUID) -> Set<UUID> {
@@ -451,6 +463,9 @@ final class StorageService: ObservableObject {
         meta.updatedAt = Date()
         noteMetas[idx] = meta
         persistNoteIndex()
+        
+        // 【新增】标记为脏，触发延迟推送
+        MetadataPushService.shared.markDirty("notes_index.json")
     }
     
     func deleteNote(id: UUID) {
@@ -477,6 +492,9 @@ final class StorageService: ObservableObject {
     func addReviewLog(_ log: ReviewLog) {
         reviewLogs.append(log)
         persistReviewLogs()
+        
+        // 【新增】标记为脏，触发延迟推送
+        MetadataPushService.shared.markDirty("review_logs.json")
     }
     
     func getReviewLogs(for noteId: UUID) -> [ReviewLog] {
@@ -541,19 +559,9 @@ final class StorageService: ObservableObject {
     }
 
     // MARK: - 云端同步
-
-    /// 从云端同步笔记到本地（下拉刷新调用）
-    func importFromCloud(rootScanChildren: [(url: URL, isDirectory: Bool, lastModified: Date?)]? = nil) -> ImportReport {
-        var report = ImportReport()
-        guard let cloud = cloudSyncFS else {
-            report.warningMessages.append("未配置云端同步")
-            return report
-        }
-        
-        // 加载从云端拉取的元数据（用于恢复 SRS 记忆数据）
-        // pullFromCloud 已将云端 .metadata 同步到本地，这里读取本地文件
-        let cloudCachedFolders = fileSystem.loadFolders()
-        let cloudCachedNoteMetas = fileSystem.loadNoteIndex()
+    
+    /// 从云端拉取笔记到本地（供 importFromCloud 调用）
+    private func pullNotesFromCloud(cloud: CloudFileSystem, report: inout ImportReport, snapshot: SyncSnapshotService? = nil, rootScanChildren: [(url: URL, isDirectory: Bool, lastModified: Date?)]? = nil, cloudCachedNoteMetas: [NoteMeta], cloudCachedFolders: [Folder]) {
         // 建立 folderId -> 文件夹完整路径 的映射
         var cloudFolderPathMap: [UUID: String] = [:]
         for folder in cloudCachedFolders {
@@ -570,7 +578,7 @@ final class StorageService: ObservableObject {
         if !cloudNoteMetaMap.isEmpty {
             print("📥 从云端元数据恢复记忆数据，共 \(cloudNoteMetaMap.count) 篇笔记的记忆记录")
         }
-        
+            
         let cloudRoot = cloud.rootDirectory.appendingPathComponent("Notes", isDirectory: true)
         let skipNames: Set<String> = [".metadata"]
         var cloudFiles: [URL] = []
@@ -579,10 +587,12 @@ final class StorageService: ObservableObject {
         // 收集文件的云端修改时间（跳过分支用于更新快照，使快照收敛）
         var fileTimes: [String: Date] = [:]
         // 传入快照和根目录，支持目录级和文件级跳过
-        collectMarkdownFilesFromFS(cloud, at: cloudRoot, skipNames: skipNames, into: &cloudFiles, rootURL: cloudRoot, snapshot: syncSnapshotService, directoryTimes: &directoryTimes, fileTimes: &fileTimes, rootScanChildren: rootScanChildren)
+        // 【修复】从根目录扫描结果中提取 Notes 子项，避免将根目录扫描结果误用于 Notes 目录扫描
+        let notesChildren = rootScanChildren?.first(where: { $0.url.lastPathComponent == "Notes" }).flatMap { [$0] }
+        collectMarkdownFilesFromFS(cloud, at: cloudRoot, skipNames: skipNames, into: &cloudFiles, rootURL: cloudRoot, snapshot: snapshot, directoryTimes: &directoryTimes, fileTimes: &fileTimes, rootScanChildren: notesChildren)
         report.scannedMarkdownFiles = cloudFiles.count
         syncProgressCallback?("扫描云端文件", 5, "发现 \(cloudFiles.count) 篇需要更新的笔记")
-        // 云端 Notes 目录没有 .md 文件是正常状态（可能只同步讲稿/题目），不阻断后续同步
+        // 云端 Notes 目录没有 .md 文件是正常状态（可能只拉取讲稿/题目），不阻断后续同步
         for (idx, srcURL) in cloudFiles.enumerated() {
             // 更新同步进度（笔记导入占 5%-50%）
             let noteProgress = 5.0 + Double(idx) / Double(cloudFiles.count) * 45.0
@@ -615,7 +625,7 @@ final class StorageService: ObservableObject {
                     // 【修复】跳过分支也更新快照（用扫描时已知的云端修改时间，不额外请求）
                     // 使快照收敛：本地已存在的文件下次同步不再判定"有更新"，
                     // 避免"判定有更新但本地已存在"的文件每次同步都重新下载全文，永不收敛
-                    if let snap = syncSnapshotService {
+                    if let snap = snapshot {
                         updateSnapshotForSkippedFile(snap: snap, rootURL: cloudRoot, fileURL: srcURL, fileTimes: fileTimes, directoryTimes: directoryTimes)
                     }
                     continue
@@ -642,7 +652,7 @@ final class StorageService: ObservableObject {
                     report.messages.append("✅ \(prefix)\(title)")
                 }
                 // 更新快照中的文件修改时间（下载成功后才更新，失败文件下次同步可重试）
-                if let snap = syncSnapshotService {
+                if let snap = snapshot {
                     updateSnapshotAfterFileSync(cloud: cloud, snap: snap, rootURL: cloudRoot, fileURL: srcURL, directoryTimes: directoryTimes, fileTimes: fileTimes)
                 }
             } catch {
@@ -662,13 +672,30 @@ final class StorageService: ObservableObject {
             persistFolders()
             persistNoteIndex()
         }
+    }
+        
+    /// 从云端导入笔记到本地（下拉刷新调用)
+    func importFromCloud(rootScanChildren: [(url: URL, isDirectory: Bool, lastModified: Date?)]? = nil) -> ImportReport {
+        var report = ImportReport()
+        guard let cloud = cloudSyncFS else {
+            report.warningMessages.append("未配置云端同步")
+            return report
+        }
+        
+        // 加载从云端拉取的元数据（用于恢复 SRS 记忆数据）
+        // pullFromCloud 已将云端 .metadata 同步到本地，这里读取本地文件
+        let cloudCachedFolders = fileSystem.loadFolders()
+        let cloudCachedNoteMetas = fileSystem.loadNoteIndex()
+        
+        // 从云端拉取笔记（调用专门的拉取方法）
+        pullNotesFromCloud(cloud: cloud, report: &report, snapshot: syncSnapshotService, rootScanChildren: rootScanChildren, cloudCachedNoteMetas: cloudCachedNoteMetas, cloudCachedFolders: cloudCachedFolders)
         
         // 同步课堂讲稿（Lecture 目录下的 .txt 文件）
-        syncProgressCallback?("同步讲稿", 55, "正在扫描云端讲稿...")
-        syncLecturesFromCloud(cloud: cloud, report: &report, snapshot: syncSnapshotService, rootScanChildren: rootScanChildren)
-        syncProgressCallback?("同步题库", 75, "正在扫描云端题库...")
-        syncQuestionsFromCloud(cloud: cloud, report: &report, snapshot: syncSnapshotService, rootScanChildren: rootScanChildren)
-        syncProgressCallback?("同步完成", 100, "笔记 \(report.importedCount) 篇，讲稿 \(report.lectureImportedCount) 个，题库已同步")
+        syncProgressCallback?("拉取讲稿", 55, "正在扫描云端讲稿...")
+        pullLecturesFromCloud(cloud: cloud, report: &report, snapshot: syncSnapshotService, rootScanChildren: rootScanChildren)
+        syncProgressCallback?("拉取题库", 75, "正在扫描云端题库...")
+        pullQuestionsFromCloud(cloud: cloud, report: &report, snapshot: syncSnapshotService, rootScanChildren: rootScanChildren)
+        syncProgressCallback?("拉取完成", 100, "笔记 \(report.importedCount) 篇，讲稿 \(report.lectureImportedCount) 个，题库已同步")
         
         return report
     }
@@ -708,8 +735,8 @@ final class StorageService: ObservableObject {
         return result
     }
 
-    /// 从云端同步课堂讲稿
-    private func syncLecturesFromCloud(cloud: CloudFileSystem, report: inout ImportReport, snapshot: SyncSnapshotService? = nil, rootScanChildren: [(url: URL, isDirectory: Bool, lastModified: Date?)]? = nil) {
+    /// 从云端拉取课堂讲稿
+    private func pullLecturesFromCloud(cloud: CloudFileSystem, report: inout ImportReport, snapshot: SyncSnapshotService? = nil, rootScanChildren: [(url: URL, isDirectory: Bool, lastModified: Date?)]? = nil) {
         let lectureRoot = cloud.rootDirectory.appendingPathComponent("Lecture", isDirectory: true)
         var lectureFiles: [URL] = []
         // 收集目录的云端修改时间（下载成功后用于更新快照目录记录）
@@ -719,7 +746,7 @@ final class StorageService: ObservableObject {
         let lectureChildren = rootScanChildren?.first(where: { $0.url.lastPathComponent == "Lecture" }).flatMap { [$0] }
         collectFilesFromFS(cloud, at: lectureRoot, extensions: ["txt"], skipNames: [], into: &lectureFiles, rootURL: lectureRoot, snapshot: snapshot, directoryTimes: &directoryTimes, fileTimes: &fileTimes, rootScanChildren: lectureChildren)
         report.scannedLectureFiles = lectureFiles.count
-        print("📖 讲稿同步: 扫描到 \(lectureFiles.count) 个需要更新的讲稿文件")
+        print("📖 讲稿拉取: 扫描到 \(lectureFiles.count) 个需要更新的讲稿文件")
         for srcURL in lectureFiles {
             do {
                 let relativeComponents = relativePathComponents(of: srcURL, from: lectureRoot)
@@ -730,7 +757,7 @@ final class StorageService: ObservableObject {
                 // 找到对应的文件夹
                 let folderId = getFolderId(for: folderComponents)
                 if folderId == nil && !folderComponents.isEmpty {
-                    print("⚠️ 讲稿同步: 文件夹未找到 \(folderComponents.joined(separator: "/"))，讲稿 \(title) 将写到根目录")
+                    print("⚠️ 讲稿拉取: 文件夹未找到 \(folderComponents.joined(separator: "/"))，讲稿 \(title) 将写到根目录")
                 }
                 // 保存讲稿到本地
                 let rawBody = try cloud.readData(at: srcURL)
@@ -739,24 +766,24 @@ final class StorageService: ObservableObject {
                 do {
                     try fileSystem.writeLecture(bodyStr, folderId: folderId, title: title, folders: folders, skipCloudSync: true)
                     report.lectureImportedCount += 1
-                    print("✅ 讲稿同步: 导入 \(title) (\(bodyStr.count) 字符)")
+                    print("✅ 讲稿拉取: 导入 \(title) (\(bodyStr.count) 字符)")
                     // 更新快照中的文件修改时间（下载成功后才更新，失败文件下次同步可重试）
                     if let snap = snapshot {
                         updateSnapshotAfterFileSync(cloud: cloud, snap: snap, rootURL: lectureRoot, fileURL: srcURL, directoryTimes: directoryTimes, fileTimes: fileTimes)
                     }
                 } catch {
-                    print("❌ 讲稿同步: 写入失败 \(title): \(error.localizedDescription)")
+                    print("❌ 讲稿拉取: 写入失败 \(title): \(error.localizedDescription)")
                     report.lectureFailedCount += 1
                 }
             } catch {
-                print("❌ 讲稿同步: 读取失败 \(srcURL.lastPathComponent): \(error.localizedDescription)")
+                print("❌ 讲稿拉取: 读取失败 \(srcURL.lastPathComponent): \(error.localizedDescription)")
                 report.lectureFailedCount += 1
             }
         }
     }
     
-    /// 从云端同步题库（Questions 目录，按笔记文件夹结构存储）
-    private func syncQuestionsFromCloud(cloud: CloudFileSystem, report: inout ImportReport, snapshot: SyncSnapshotService? = nil, rootScanChildren: [(url: URL, isDirectory: Bool, lastModified: Date?)]? = nil) {
+    /// 从云端拉取题库（Questions 目录，按笔记文件夹结构存储）
+    private func pullQuestionsFromCloud(cloud: CloudFileSystem, report: inout ImportReport, snapshot: SyncSnapshotService? = nil, rootScanChildren: [(url: URL, isDirectory: Bool, lastModified: Date?)]? = nil) {
         let questionsRoot = cloud.rootDirectory.appendingPathComponent("Questions", isDirectory: true)
         var questionFiles: [URL] = []
         // 收集目录的云端修改时间（下载成功后用于更新快照目录记录）
@@ -766,7 +793,7 @@ final class StorageService: ObservableObject {
         let questionsChildren = rootScanChildren?.first(where: { $0.url.lastPathComponent == "Questions" }).flatMap { [$0] }
         collectFilesFromFS(cloud, at: questionsRoot, extensions: ["json"], skipNames: [], into: &questionFiles, rootURL: questionsRoot, snapshot: snapshot, directoryTimes: &directoryTimes, fileTimes: &fileTimes, rootScanChildren: questionsChildren)
         report.scannedQuestionFiles = questionFiles.count
-        print("📚 题库同步: 扫描到 \(questionFiles.count) 个题目文件")
+        print("📚 题库拉取: 扫描到 \(questionFiles.count) 个题目文件")
         for srcURL in questionFiles {
             do {
                 let relativeComponents = relativePathComponents(of: srcURL, from: questionsRoot)
@@ -777,7 +804,7 @@ final class StorageService: ObservableObject {
                 // 找到对应的文件夹
                 let folderId = getFolderId(for: folderComponents)
                 if folderId == nil && !folderComponents.isEmpty {
-                    print("⚠️ 题库同步: 文件夹未找到 \(folderComponents.joined(separator: "/"))，题目 \(title) 将写到根目录")
+                    print("⚠️ 题库拉取: 文件夹未找到 \(folderComponents.joined(separator: "/"))，题目 \(title) 将写到根目录")
                 }
                 // 读取云端题目文件
                 let rawBody = try cloud.readData(at: srcURL)
@@ -786,7 +813,7 @@ final class StorageService: ObservableObject {
                 do {
                     cloudQuestions = try JSONDecoder().decode([Question].self, from: rawBody)
                 } catch {
-                    print("❌ 题库同步: 解码失败 \(fileName): \(error.localizedDescription)")
+                    print("❌ 题库拉取: 解码失败 \(fileName): \(error.localizedDescription)")
                     report.questionFailedCount += 1
                     continue
                 }
@@ -798,17 +825,17 @@ final class StorageService: ObservableObject {
                 do {
                     try fileSystem.writeQuestions(mergedQuestions, folderId: folderId, title: title, folders: folders, skipCloudSync: true)
                     report.questionImportedCount += 1
-                    print("✅ 题库同步: 导入 \(title) (\(mergedQuestions.count)题)")
+                    print("✅ 题库拉取: 导入 \(title) (\(mergedQuestions.count)题)")
                     // 更新快照中的文件修改时间（下载成功后才更新，失败文件下次同步可重试）
                     if let snap = snapshot {
                         updateSnapshotAfterFileSync(cloud: cloud, snap: snap, rootURL: questionsRoot, fileURL: srcURL, directoryTimes: directoryTimes, fileTimes: fileTimes)
                     }
                 } catch {
-                    print("❌ 题库同步: 写入失败 \(title): \(error.localizedDescription)")
+                    print("❌ 题库拉取: 写入失败 \(title): \(error.localizedDescription)")
                     report.questionFailedCount += 1
                 }
             } catch {
-                print("❌ 题库同步: 读取失败 \(srcURL.lastPathComponent): \(error.localizedDescription)")
+                print("❌ 题库拉取: 读取失败 \(srcURL.lastPathComponent): \(error.localizedDescription)")
                 report.questionFailedCount += 1
             }
         }
@@ -1235,7 +1262,6 @@ final class StorageService: ObservableObject {
         }
     }
 
-    /// 计算 URL 相对于 root 的路径组件（兼容 WebDAV https:// URL 和本地 file:// URL）
     /// 计算 URL 相对于 root 的路径组件（兼容 WebDAV https:// URL 和本地 file:// URL）
     private func relativePathComponents(of url: URL, from root: URL) -> [String] {
         let rootParts = root.pathComponents

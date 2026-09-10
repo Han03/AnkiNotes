@@ -175,6 +175,8 @@ final class MetadataSyncService {
                    localData == cloudData {
                     // 内容相同，跳过写入，但更新快照（复用已获取的 cloudModDate，不再重复 PROPFIND）
                     syncSnapshotService?.updateFile(relativePath: relativePath, lastModified: cloudModDate)
+                    // 【修复】同步本地文件 mtime 到云端时间，使 push 检测一致（local mtime == snapshot cloud time）
+                    syncLocalMtime(to: cloudModDate, at: localURL)
                     continue
                 }
                 
@@ -182,8 +184,9 @@ final class MetadataSyncService {
                 try cloudData.write(to: localURL, options: .atomic)
                 pulledCount += 1
                 
-                // 【更新快照】复用已获取的 cloudModDate，不再重复 PROPFIND
+                // 【优化】快照始终记录云端时间，同步本地 mtime 到云端时间，确保 push 检测一致
                 syncSnapshotService?.updateFile(relativePath: relativePath, lastModified: cloudModDate)
+                syncLocalMtime(to: cloudModDate, at: localURL)
                 
                 print("📥 元数据同步: 拉取 \(fileName) (\(cloudData.count) bytes)")
                 
@@ -240,8 +243,11 @@ final class MetadataSyncService {
                 lastPushTimestamps[fileName] = Date()
                 SyncLogger.shared.stepDone("☁️ 推送元数据")
                 
-                // 【更新快照】复用已获取的 localModDate
-                syncSnapshotService?.updateFile(relativePath: relativePath, lastModified: localModDate)
+                // 【优化】获取云端实际修改时间，快照始终记录云端时间
+                let cloudModDate = (try? cloudFS.getItemMetadata(at: cloudURL))?.lastModified ?? Date()
+                syncSnapshotService?.updateFile(relativePath: relativePath, lastModified: cloudModDate)
+                // 同步本地 mtime 到云端时间，确保下次 push 检测 local mtime == snapshot → 跳过
+                syncLocalMtime(to: cloudModDate, at: localURL)
                 
             } catch {
                 SyncLogger.shared.stepFail("☁️ 推送元数据: \(fileName)", error: error)
@@ -283,7 +289,7 @@ final class MetadataSyncService {
         fileManager.fileExists(atPath: localCacheURL(for: fileName).path)
     }
     
-    // MARK: - 知识点缓存同步（.knowledge_cache）
+    // MARK: - 知识点缓存拉取（.knowledge_cache）
     
     /// 本地知识点缓存目录（Documents/.knowledge_cache）
     private var localKnowledgeCacheDir: URL {
@@ -312,7 +318,7 @@ final class MetadataSyncService {
         }
         if let snap = syncSnapshotService, let date = knowledgeCacheModDate {
             if !snap.isDirectoryUpdated(relativePath: ".knowledge_cache", lastModified: date) {
-                print("📥 知识点缓存同步: 根目录无更新，跳过整个同步（快照跳过）")
+                print("📥 知识点缓存拉取: 根目录无更新，跳过整个拉取（快照跳过）")
                 return 0
             }
             snap.updateDirectory(relativePath: ".knowledge_cache", lastModified: date)
@@ -352,13 +358,21 @@ final class MetadataSyncService {
                         directoryTimes: directoryTimes, fileTimes: fileTimes
                     )
                 }
-                print("📥 知识点缓存同步: 拉取 \(fileURL.lastPathComponent)")
+                print("📥 知识点缓存拉取: 拉取 \(fileURL.lastPathComponent)")
             } catch {
                 print("⚠️ 知识点缓存拉取失败 \(fileURL.lastPathComponent): \(error.localizedDescription)")
             }
         }
         
         return pulledCount
+    }
+    
+    // MARK: - 本地 mtime 同步
+    
+    /// 将本地文件的修改时间同步为云端时间
+    /// 确保 push 检测一致：local mtime == snapshot cloud time → 跳过
+    private func syncLocalMtime(to cloudTime: Date, at localURL: URL) {
+        try? fileManager.setAttributes([.modificationDate: cloudTime], ofItemAtPath: localURL.path)
     }
     
     // MARK: - 递归扫描文件工具

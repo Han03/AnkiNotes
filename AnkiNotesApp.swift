@@ -26,6 +26,8 @@ struct AnkiNotesApp: App {
                         if let fs = appState.activeFS {
                             CloudLockService.shared.applicationDidEnterBackground(cloudFS: fs)
                         }
+                        // 【新增】立即执行待推送的元数据
+                        MetadataPushService.shared.flush()
                     }
                 }
         }
@@ -463,28 +465,41 @@ final class AppState: ObservableObject {
             if self.syncSnapshotService.hasSnapshot {
                 do {
                     rootScanChildren = try fs.contentsOfDirectoryWithMetadata(at: fs.rootDirectory)
-                    // 逐一检查各子目录的快照，全部未更新则跳过整个同步
-                    let allDirsSkipped = rootScanChildren.allSatisfy { child in
-                        guard child.isDirectory else { return true }  // 文件不影响判断
-                        let name = child.url.lastPathComponent
-                        guard let modDate = child.lastModified else { return false }  // 无修改时间，保守认为有更新
-                        return !self.syncSnapshotService.isDirectoryUpdated(relativePath: name, lastModified: modDate)
-                    }
-                    if allDirsSkipped {
-                        SyncLogger.shared.info("所有子目录均无更新，跳过整个同步（获取锁前检查）")
-                        DispatchQueue.main.async {
-                            self.providerStatus = "✅ 云端无更新，跳过同步"
-                            self.syncStep = "同步完成"
-                            self.syncProgress = 100
-                            self.syncDetail = "根目录无更新，无需同步"
-                            self.recordCloudOperation(operation: "云端同步", outcome: .success,
-                                                      summary: "云端无更新，跳过同步", steps: opSteps)
+                    
+                    // 检查云端目录变化：
+                    // 1. 云端新增目录：rootScanChildren 中存在但快照中不存在
+                    // 2. 云端删除目录：快照中存在但 rootScanChildren 中不存在
+                    // 3. 云端修改目录：rootScanChildren 中存在且快照中存在但修改时间不同
+                    let cloudDirNames = Set(rootScanChildren.compactMap { $0.isDirectory ? $0.url.lastPathComponent : nil })
+                    let snapshotDirNames = Set(self.syncSnapshotService.getAllDirectoryPaths().map { URL(fileURLWithPath: $0).lastPathComponent })
+                    
+                    // 如果云端目录结构发生变化（新增/删除/修改），则继续同步
+                    if cloudDirNames != snapshotDirNames {
+                        SyncLogger.shared.info("云端目录结构有变化（云端:\(cloudDirNames.sorted()), 快照:\(snapshotDirNames.sorted())），继续同步")
+                    } else {
+                        // 目录结构一致，检查各子目录是否有更新
+                        let allDirsSkipped = rootScanChildren.allSatisfy { child in
+                            guard child.isDirectory else { return true }  // 文件不影响判断
+                            let name = child.url.lastPathComponent
+                            guard let modDate = child.lastModified else { return false }  // 无修改时间，保守认为有更新
+                            return !self.syncSnapshotService.isDirectoryUpdated(relativePath: name, lastModified: modDate)
                         }
-                        SyncLogger.shared.stepDone("检查根目录更新状态（获取锁前）")
-                        completion?(StorageService.ImportReport())
-                        return
+                        if allDirsSkipped {
+                            SyncLogger.shared.info("所有子目录均无更新，跳过整个同步（获取锁前检查）")
+                            DispatchQueue.main.async {
+                                self.providerStatus = "✅ 云端无更新，跳过同步"
+                                self.syncStep = "同步完成"
+                                self.syncProgress = 100
+                                self.syncDetail = "根目录无更新，无需同步"
+                                self.recordCloudOperation(operation: "云端同步", outcome: .success,
+                                                          summary: "云端无更新，跳过同步", steps: opSteps)
+                            }
+                            SyncLogger.shared.stepDone("检查根目录更新状态（获取锁前）")
+                            completion?(StorageService.ImportReport())
+                            return
+                        }
                     }
-                    SyncLogger.shared.info("检测到子目录有更新，开始同步")
+                    SyncLogger.shared.info("检测到子目录有更新或目录结构变化，开始同步")
                 } catch {
                     SyncLogger.shared.error("无法获取根目录子项，执行全量同步：\(error.localizedDescription)")
                 }
@@ -607,10 +622,7 @@ final class AppState: ObservableObject {
                 }
             }
             
-            // 同步前：先备份本地 noteMetas（包含未同步的 SRS 复习记录）
-            let localNoteMetasBackup = MetadataSyncService.shared.readLocalNoteMetas()
-            SyncLogger.shared.info("备份本地 noteMetas: \(localNoteMetasBackup.count) 条")
-            // 同步前：从云端拉取元数据和知识点缓存到本地缓存（不加载到内存）
+            // 从云端拉取元数据和知识点缓存到本地缓存（不加载到内存）
             // 注意：不调用 reloadFromCache，避免云端索引提前加载导致 importFromCloud 全部判定为重复跳过
             DispatchQueue.main.async {
                 self.syncStep = "拉取云端元数据"
@@ -624,27 +636,6 @@ final class AppState: ObservableObject {
             SyncLogger.shared.stepDone("拉取云端元数据", duration: metaPullDuration)
             SyncLogger.shared.info("拉取云端元数据: \(pulled) 个文件，耗时 \(String(format: "%.2f", metaPullDuration))秒")
             opSteps.append("拉取云端元数据(\(pulled)个)")
-            // 智能合并 SRS 数据：基于 updatedAt 合并本地备份和云端数据，避免多端复习时覆盖
-            if !localNoteMetasBackup.isEmpty {
-                SyncLogger.shared.stepStart("智能合并 SRS 数据")
-                let cloudNoteMetas = MetadataSyncService.shared.readLocalNoteMetas()
-                SyncLogger.shared.debug("云端 noteMetas: \(cloudNoteMetas.count) 条")
-                let mergedNoteMetas = MetadataSyncService.shared.mergeNoteMetas(local: localNoteMetasBackup, cloud: cloudNoteMetas)
-                // 【优化】只有合并后的数据与云端数据真的有变化时才写入，避免无数据变更时也更新文件修改时间触发不必要的推送
-                // 注意：mergeNoteMetas 返回的数组顺序不确定（字典values转换），需要按id排序后再比较
-                let sortedMerged = mergedNoteMetas.sorted { $0.id.uuidString < $1.id.uuidString }
-                let sortedCloud = cloudNoteMetas.sorted { $0.id.uuidString < $1.id.uuidString }
-                if sortedMerged != sortedCloud {
-                    MetadataSyncService.shared.writeLocalNoteMetas(mergedNoteMetas)
-                    SyncLogger.shared.info("SRS 数据合并后有变化，已写入 notes_index.json")
-                } else {
-                    SyncLogger.shared.info("SRS 数据合并后无变化，跳过写入 notes_index.json")
-                }
-                SyncLogger.shared.stepDone("智能合并 SRS 数据")
-                SyncLogger.shared.info("SRS 数据合并完成: 本地 \(localNoteMetasBackup.count) 条，云端 \(cloudNoteMetas.count) 条，合并后 \(mergedNoteMetas.count) 条")
-            } else {
-                SyncLogger.shared.info("本地无 SRS 数据备份，跳过合并")
-            }
             // 拉取知识点缓存
             DispatchQueue.main.async {
                 self.syncStep = "拉取知识点缓存"
@@ -666,129 +657,22 @@ final class AppState: ObservableObject {
             SyncLogger.shared.stepDone("从云端导入数据", duration: importDuration)
             SyncLogger.shared.info("导入完成: 扫描 \(report.scannedMarkdownFiles) 个笔记文件，新增 \(report.importedCount)，跳过 \(report.skippedCount)，失败 \(report.failedCount)，讲稿 \(report.lectureImportedCount) 个，耗时 \(String(format: "%.2f", importDuration))秒")
             opSteps.append("导入(新增\(report.importedCount)/跳过\(report.skippedCount))")
-            // 【优化】不释放锁，本地处理完成后直接推送数据，全程只持有一次锁
-            // 原因：锁有自动续期机制（18秒续期一次，20秒过期），本地处理不会导致锁过期
-            // 好处：避免第二次获取锁时的等待和限流，简化同步流程
-            SyncLogger.shared.info("继续持有云端锁，开始本地处理（全程只持有一次锁）")
-            DispatchQueue.main.async {
-                self.syncStep = "本地处理"
-                self.syncProgress = 90
-                self.syncDetail = "正在更新本地索引..."
-            }
-            SyncLogger.shared.stepStart("本地处理 - 重新加载存储索引")
-            let localProcessStartTime = Date()
-            // 导入完成后，再从本地缓存加载元数据（合并本地和云端的索引）
-            let reloadStart = Date()
+            // 同步流程只拉取数据，不推送；本地变更由用户操作实时触发独立 PUT
+            CloudLockService.shared.releaseLock(cloudFS: fs)
+            SyncLogger.shared.info("拉取完成，释放云端锁")
+            
+            // 拉取完成后，从本地缓存加载元数据到内存
             self.storage.reloadFromCache()
-            SyncLogger.shared.debug("storage.reloadFromCache 完成，耗时 \(String(format: "%.2f", Date().timeIntervalSince(reloadStart)))秒")
-            // 先更新 quizService 的笔记和文件夹列表，否则 reloadFromCache 时遍历空数组读不到题目
+            // 更新 quizService 的笔记和文件夹列表
             let notes = self.storage.getAllNotes()
             let folders = self.storage.getAllFolders()
-            SyncLogger.shared.debug("获取到 \(notes.count) 篇笔记，\(folders.count) 个文件夹")
             self.quizService.updateNotes(notes, folders: folders)
-            // 重新加载题库缓存（这一步可能很耗时，记录详细日志）
-            SyncLogger.shared.stepStart("本地处理 - 重新加载题库缓存（可能耗时较长）")
-            let quizReloadStart = Date()
+            // 重新加载题库缓存
             self.quizService.reloadFromCache()
-            let quizReloadDuration = Date().timeIntervalSince(quizReloadStart)
-            SyncLogger.shared.stepDone("本地处理 - 重新加载题库缓存", duration: quizReloadDuration)
-            SyncLogger.shared.info("题库缓存重新加载完成，耗时 \(String(format: "%.2f", quizReloadDuration))秒，题目总数: \(self.quizService.questions.count)")
-            let localProcessDuration = Date().timeIntervalSince(localProcessStartTime)
-            SyncLogger.shared.stepDone("本地处理", duration: localProcessDuration)
-            SyncLogger.shared.info("本地处理完成，总耗时 \(String(format: "%.2f", localProcessDuration))秒")
-            
-            // 立即保存同步快照（即使推送失败，快照也已保存，下次同步可增量跳过）
-            SyncLogger.shared.stepStart("保存同步快照")
+            // 保存同步快照
             self.syncSnapshotService.flush()
-            SyncLogger.shared.stepDone("保存同步快照")
-            SyncLogger.shared.info("同步快照已保存，下次同步可增量跳过已同步内容")
-            
-            // 【优化】检查是否有需要推送的本地更改，如果没有则跳过推送数据（避免不必要的锁获取和限流）
-            // 检查本地元数据目录和知识点缓存目录是否有变化
-            let fileManager = FileManager.default
-            let documentsDir = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
-            let metadataDir = documentsDir.appendingPathComponent(".metadata", isDirectory: true)
-            let knowledgeCacheDir = documentsDir.appendingPathComponent(".knowledge_cache", isDirectory: true)
-            
-            var hasLocalChanges = false
-            var metadataChanged = false
-            var knowledgeChanged = false
-            
-            // 检查元数据目录是否有变化（通过 notes_index.json 的修改时间判断）
-            let notesIndexURL = metadataDir.appendingPathComponent("notes_index.json")
-            if let indexAttributes = try? fileManager.attributesOfItem(atPath: notesIndexURL.path),
-               let indexModDate = indexAttributes[.modificationDate] as? Date {
-                // 如果 notes_index.json 的修改时间在同步开始后，说明有本地更改（SRS 数据合并等）
-                if indexModDate.timeIntervalSince(syncStartTime) > 0 {
-                    hasLocalChanges = true
-                    metadataChanged = true
-                }
-            }
-            
-            // 检查知识点缓存目录是否有变化
-            if let cacheAttributes = try? fileManager.attributesOfItem(atPath: knowledgeCacheDir.path),
-               let cacheModDate = cacheAttributes[.modificationDate] as? Date {
-                if cacheModDate.timeIntervalSince(syncStartTime) > 0 {
-                    hasLocalChanges = true
-                    knowledgeChanged = true
-                }
-            }
-            
-            if !hasLocalChanges {
-                SyncLogger.shared.info("本地无更改（元数据变化=\(metadataChanged)，知识点缓存变化=\(knowledgeChanged)），跳过推送数据")
-                // 本地无更改，释放锁（全程只释放一次）
-                CloudLockService.shared.releaseLock(cloudFS: fs)
-                SyncLogger.shared.info("本地无更改，释放云端锁（全程只持有一次锁）")
-                DispatchQueue.main.async {
-                    var status = "✅ 同步完成：新增 \(report.importedCount)，跳过 \(report.skippedCount)，失败 \(report.failedCount)"
-                    if report.scannedMarkdownFiles > 0 {
-                        status += "，扫描到 \(report.scannedMarkdownFiles) 个 .md 文件"
-                    }
-                    if report.scannedLectureFiles > 0 {
-                        status += "，讲稿 \(report.lectureImportedCount) 个"
-                    }
-                    if report.scannedQuestionFiles > 0 {
-                        status += "，题目 \(report.questionImportedCount) 组"
-                    }
-                    status += "（本地无更改，跳过云端推送）"
-                    self.providerStatus = status
-                    self.syncStep = "同步完成"
-                    self.syncProgress = 100
-                    self.syncDetail = "同步已完成"
-                    self.recordCloudOperation(operation: "云端同步", outcome: .success,
-                                              summary: "同步完成：新增 \(report.importedCount)，跳过 \(report.skippedCount)，失败 \(report.failedCount)（本地无更改，跳过云端推送）",
-                                              steps: opSteps)
-                    self.refreshStats()
-                    completion?(report)
-                }
-                SyncLogger.shared.info("同步流程全部完成（跳过推送）")
-                return
-            }
-            
-            SyncLogger.shared.info("检测到本地更改（元数据变化=\(metadataChanged)，知识点缓存变化=\(knowledgeChanged)），需要推送数据到云端")
-            
-            // 【优化】全程只持有一次锁，不需要重新获取锁，直接推送数据
-            SyncLogger.shared.info("继续持有云端锁，直接推送数据到云端（全程只持有一次锁）")
-            // 同步后：推送本地元数据和知识点缓存到云端
-            DispatchQueue.main.async {
-                self.syncStep = "推送元数据到云端"
-                self.syncProgress = 96
-                self.syncDetail = "正在上传 .metadata 到云端..."
-            }
-            SyncLogger.shared.stepStart("推送元数据到云端")
-            let metaPushStartTime = Date()
-            let pushed = MetadataSyncService.shared.pushToCloud(cloudFS: fs)
-            let metaPushDuration = Date().timeIntervalSince(metaPushStartTime)
-            SyncLogger.shared.stepDone("推送元数据到云端", duration: metaPushDuration)
-            SyncLogger.shared.info("推送元数据到云端: \(pushed) 个文件，耗时 \(String(format: "%.2f", metaPushDuration))秒")
-            opSteps.append("推送元数据(\(pushed)个)")
-            
-            // 推送完成，释放锁（全程只释放一次）
-            CloudLockService.shared.releaseLock(cloudFS: fs)
-            SyncLogger.shared.info("推送完成，释放云端锁（全程只持有一次锁）")
             
             DispatchQueue.main.async {
-                // 静默同步也显示完成状态（云端 Notes 无 .md 文件是正常状态，不显示警告）
                 var status = "✅ 同步完成：新增 \(report.importedCount)，跳过 \(report.skippedCount)，失败 \(report.failedCount)"
                 if report.scannedMarkdownFiles > 0 {
                     status += "，扫描到 \(report.scannedMarkdownFiles) 个 .md 文件"
@@ -799,6 +683,7 @@ final class AppState: ObservableObject {
                 if report.scannedQuestionFiles > 0 {
                     status += "，题目 \(report.questionImportedCount) 组"
                 }
+                status += "（仅拉取，本地变更由用户操作实时推送）"
                 self.providerStatus = status
                 self.syncStep = "同步完成"
                 self.syncProgress = 100
@@ -809,7 +694,7 @@ final class AppState: ObservableObject {
                 self.refreshStats()
                 completion?(report)
             }
-            SyncLogger.shared.info("同步流程全部完成")
+            SyncLogger.shared.info("同步流程全部完成（仅拉取）")
         }
     }
 
@@ -966,6 +851,11 @@ final class AppState: ObservableObject {
         localFileSvc.syncSnapshotService = syncSnapshotService
         // 更新 quizService 的笔记和文件夹列表（用于按文件夹结构存储题目）
         quizService.updateNotes(storage.getAllNotes(), folders: storage.getAllFolders())
+        
+        // 【新增】配置元数据推送服务
+        MetadataPushService.shared.cloudFS = webDAVFS ?? localFS
+        MetadataPushService.shared.syncSnapshotService = syncSnapshotService
+        
         refreshStats()
     }
 

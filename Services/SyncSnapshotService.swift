@@ -104,6 +104,14 @@ final class SyncSnapshotService {
         return snapshot != nil
     }
     
+    /// 获取所有目录路径
+    func getAllDirectoryPaths() -> [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let snapshot = snapshot else { return [] }
+        return Array(snapshot.directories.keys)
+    }
+    
     // MARK: - 目录修改时间检查
     
     /// 检查目录是否有更新（第2级：子目录级跳过）
