@@ -243,6 +243,11 @@ final class AppState: ObservableObject {
             if knowledgePulled > 0 {
                 print("📥 启动时知识点缓存同步: 拉取 \(knowledgePulled) 个文件")
             }
+            // 恢复上次未推送完成的知识点缓存文件（App 被杀重启兜底），并触发精准推送
+            MetadataSyncService.shared.restorePendingKnowledgeFiles()
+            if MetadataSyncService.shared.hasPendingKnowledgeFiles() {
+                self.pushMetadataAndKnowledgeCacheSilently()
+            }
         }
         isBootstrapped = true
         // 6) 监听元数据/知识点缓存变更通知，自动推送到云端（防抖）
@@ -256,12 +261,15 @@ final class AppState: ObservableObject {
     }
     
     /// 静默推送元数据和知识点缓存到云端（防抖，不显示同步UI）
+    /// 知识点缓存采用精准推送：只推送本地新写入/变更的文件，不做全量 GET 比对，
+    /// 避免大量云端 GET 请求触发坚果云限流（原逻辑每次生成一条详解都会全量比对整个 .knowledge_cache）
     private func pushMetadataAndKnowledgeCacheSilently() {
         guard !isSyncing, let fs = activeFS else { return }
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self = self else { return }
             let metaPushed = MetadataSyncService.shared.pushToCloud(cloudFS: fs)
-            let knowledgePushed = MetadataSyncService.shared.pushKnowledgeCache(cloudFS: fs)
+            let pending = MetadataSyncService.shared.takePendingKnowledgeFiles()
+            let knowledgePushed = MetadataSyncService.shared.pushKnowledgeCache(cloudFS: fs, onlyPaths: pending)
             if metaPushed > 0 || knowledgePushed > 0 {
                 print("📤 静默推送: 元数据 \(metaPushed) 个，知识点缓存 \(knowledgePushed) 个")
             }

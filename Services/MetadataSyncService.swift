@@ -299,6 +299,53 @@ final class MetadataSyncService {
         NotificationCenter.default.post(name: .metadataSyncNeeded, object: nil)
     }
     
+    // MARK: - 知识点缓存精准推送（pending 机制）
+    
+    /// 待推送的知识点缓存文件相对路径（形如 .knowledge_cache/xxx/yyy.md）
+    /// 仅在本地缓存写入时登记（saveExtraction/saveExplanation），推送时只处理这些文件，
+    /// 避免每次生成一条详解都全量扫描比对整个 .knowledge_cache（大量 GET 触发坚果云限流）。
+    private var pendingKnowledgeFiles: Set<String> = []
+    private let pendingKnowledgeQueue = DispatchQueue(label: "com.ankinotes.knowledge.pending")
+    private let pendingKnowledgeKey = "pendingKnowledgeFiles"
+    
+    /// 标记知识点缓存文件已变更（写入本地缓存后调用），触发防抖推送
+    func markKnowledgeFileDirty(relativePath: String) {
+        pendingKnowledgeQueue.sync {
+            pendingKnowledgeFiles.insert(relativePath)
+        }
+        // 持久化到 UserDefaults：App 被杀重启后仍能恢复推送，避免本地变更丢失
+        var saved = UserDefaults.standard.stringArray(forKey: pendingKnowledgeKey) ?? []
+        if !saved.contains(relativePath) {
+            saved.append(relativePath)
+            UserDefaults.standard.set(saved, forKey: pendingKnowledgeKey)
+        }
+        markDirty()
+    }
+    
+    /// 取走待推送文件列表并清空（推送完成后调用）
+    func takePendingKnowledgeFiles() -> [String] {
+        let files = pendingKnowledgeQueue.sync {
+            let f = Array(pendingKnowledgeFiles)
+            pendingKnowledgeFiles.removeAll()
+            return f
+        }
+        UserDefaults.standard.removeObject(forKey: pendingKnowledgeKey)
+        return files
+    }
+    
+    /// 是否有待推送的知识点文件
+    func hasPendingKnowledgeFiles() -> Bool {
+        pendingKnowledgeQueue.sync { !pendingKnowledgeFiles.isEmpty }
+    }
+    
+    /// 启动时恢复未推送的知识点文件（App 被杀重启后兜底）
+    func restorePendingKnowledgeFiles() {
+        let saved = UserDefaults.standard.stringArray(forKey: pendingKnowledgeKey) ?? []
+        pendingKnowledgeQueue.sync {
+            pendingKnowledgeFiles = Set(saved)
+        }
+    }
+    
     // MARK: - 知识点缓存同步（.knowledge_cache）
     
     /// 本地知识点缓存目录（Documents/.knowledge_cache）
@@ -434,11 +481,42 @@ final class MetadataSyncService {
     }
     
     /// 将本地知识点缓存推送到云端（支持递归扫描子目录和快照跳过）
-    func pushKnowledgeCache(cloudFS: CloudFileSystem) -> Int {
+    /// - Parameter onlyPaths: 精准推送模式——只推送指定的相对路径文件（本地刚生成的最新版本，
+    ///   直接 PUT 不做云端比对），传 nil 走原有全量逻辑；传空数组直接返回 0。
+    func pushKnowledgeCache(cloudFS: CloudFileSystem, onlyPaths: [String]? = nil) -> Int {
         let cloudDir = cloudFS.rootDirectory.appendingPathComponent(".knowledge_cache", isDirectory: true)
         try? cloudFS.createDirectoryIfNeeded(at: cloudDir)
         var pushedCount = 0
         var skippedBySnapshot = 0
+        
+        // 精准模式：只推送指定文件（本地刚写入的最新版本），不做 GET 比对，避免全量扫描触发限流
+        if let onlyPaths = onlyPaths {
+            guard !onlyPaths.isEmpty else { return 0 }
+            let set = Set(onlyPaths)
+            let allLocalFiles = scanLocalDirectoryRecursive(at: localKnowledgeCacheDir, baseRelativePath: ".knowledge_cache")
+            let filesToPush = allLocalFiles.filter { set.contains($0.relativePath) }
+            if filesToPush.isEmpty {
+                return 0
+            }
+            print("📤 知识点缓存同步: 精准推送 \(filesToPush.count) 个变更文件")
+            for file in filesToPush {
+                let localURL = file.url
+                let fileRelativePath = file.relativePath
+                guard fileManager.fileExists(atPath: localURL.path) else { continue }
+                do {
+                    let localData = try Data(contentsOf: localURL)
+                    let cloudRelativePath = fileRelativePath.replacingOccurrences(of: ".knowledge_cache/", with: "")
+                    let cloudURL = cloudDir.appendingPathComponent(cloudRelativePath)
+                    try? cloudFS.createDirectoryIfNeeded(at: cloudURL.deletingLastPathComponent())
+                    try cloudFS.writeData(localData, to: cloudURL)
+                    pushedCount += 1
+                    print("📤 知识点缓存同步: 精准推送 \(fileRelativePath) (\(localData.count) bytes)")
+                } catch {
+                    print("⚠️ 知识点缓存推送失败 \(fileRelativePath): \(error.localizedDescription)")
+                }
+            }
+            return pushedCount
+        }
         
         // 根目录级跳过：检查本地 .knowledge_cache 目录的修改时间，如果没有更新，跳过整个推送
         if let snap = syncSnapshotService {

@@ -118,6 +118,7 @@ final class KnowledgePointsStore: ObservableObject {
 final class SSEStreamParser: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     private var continuation: AsyncStream<String>.Continuation
     private var pendingData = ""  // 跨 chunk 的不完整数据缓冲
+    private var didReceiveFirstByte = false  // 首字节标记（用于测 TTFT）
 
     init(continuation: AsyncStream<String>.Continuation) {
         self.continuation = continuation
@@ -125,6 +126,10 @@ final class SSEStreamParser: NSObject, URLSessionDataDelegate, @unchecked Sendab
 
     /// 每收到一段网络数据时立即调用（delegate 模式，不缓冲）
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        if !didReceiveFirstByte {
+            didReceiveFirstByte = true
+            SyncLogger.shared.info("📡 SSE 首字节到达: \(Date())")
+        }
         guard let text = String(data: data, encoding: .utf8) else { return }
         pendingData += text
 
@@ -244,6 +249,16 @@ final class KnowledgeService: ObservableObject {
         return name.components(separatedBy: invalidChars).joined(separator: "_")
     }
     
+    /// 计算缓存文件相对 .knowledge_cache 根目录的路径（形如 .knowledge_cache/笔记路径/文件.md），
+    /// 用于登记"待推送的知识点缓存文件"实现精准推送（避免全量 GET 比对触发云端限流）
+    private func knowledgeRelativePath(of url: URL) -> String {
+        let base = cacheDirectory.path
+        let full = url.path
+        guard full.hasPrefix(base) else { return url.lastPathComponent }
+        let rel = String(full.dropFirst(base.count))
+        return ".knowledge_cache" + rel
+    }
+    
     // MARK: - 知识点提取缓存
     
     /// 清洗关键字中的行内 Markdown 符号（**、*、`、链接语法），返回纯文本
@@ -282,9 +297,10 @@ final class KnowledgeService: ObservableObject {
     func saveExtraction(for note: Note, points: [KnowledgePoint]) {
         let result = KnowledgeExtractionResult(noteId: note.id, noteTitle: note.title, points: points)
         if let data = try? JSONEncoder().encode(result) {
-            try? data.write(to: extractionCacheURL(for: note), options: .atomic)
-            // 标记知识点缓存已变更，触发防抖推送到云端
-            MetadataSyncService.shared.markDirty()
+            let url = extractionCacheURL(for: note)
+            try? data.write(to: url, options: .atomic)
+            // 标记知识点缓存已变更：精准推送该文件到云端（不做全量 GET 比对，避免限流）
+            MetadataSyncService.shared.markKnowledgeFileDirty(relativePath: knowledgeRelativePath(of: url))
         }
     }
     
@@ -305,9 +321,10 @@ final class KnowledgeService: ObservableObject {
     func saveExplanation(for point: KnowledgePoint, note: Note, explanation: String) {
         guard !explanation.isEmpty else { return }
         if let data = explanation.data(using: .utf8) {
-            try? data.write(to: explanationCacheURL(for: point, note: note), options: .atomic)
-            // 标记知识点缓存已变更，触发防抖推送到云端
-            MetadataSyncService.shared.markDirty()
+            let url = explanationCacheURL(for: point, note: note)
+            try? data.write(to: url, options: .atomic)
+            // 标记知识点缓存已变更：精准推送该文件到云端（不做全量 GET 比对，避免限流）
+            MetadataSyncService.shared.markKnowledgeFileDirty(relativePath: knowledgeRelativePath(of: url))
         }
     }
     
@@ -503,6 +520,8 @@ final class KnowledgeService: ObservableObject {
         isExplaining = true
         
         let prompt = buildExplanationPrompt(keyword: point.keyword, noteContent: noteContent)
+        let requestStartTime = Date()
+        SyncLogger.shared.info("📡 详解请求准备: model=\(config.modelCode), prompt长度=\(prompt.count), 笔记内容长度=\(noteContent.count), 发起时间=\(requestStartTime)")
         
         let url = URL(string: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions")!
         var request = URLRequest(url: url)
@@ -554,6 +573,7 @@ final class KnowledgeService: ObservableObject {
 
                 // 启动网络请求（同步返回，delegate 回调在后台队列异步执行）
                 dataTask.resume()
+                SyncLogger.shared.info("📡 详解请求已发出（dataTask.resume），等待首字节...")
 
                 // 消费流：后台线程逐 chunk 消费，每个 chunk 独立回主线程刷新 UI
                 var chunkCount = 0
@@ -567,7 +587,7 @@ final class KnowledgeService: ObservableObject {
                         onChunk(chunk)
                     }
                 }
-                SyncLogger.shared.info("📡 流结束: 共消费 \(chunkCount) 个 chunk, fullText长度=\(fullText.count)")
+                SyncLogger.shared.info("📡 流结束: 共消费 \(chunkCount) 个 chunk, fullText长度=\(fullText.count), 总耗时=\(String(format: "%.2f", Date().timeIntervalSince(requestStartTime)))秒（含TTFT）")
 
                 streamSession.invalidateAndCancel()
             } catch {
