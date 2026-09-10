@@ -192,7 +192,7 @@ public final class MetadataPushService {
         
         for localLog in local {
             if let cloudLog = merged[localLog.id] {
-                if localLog.updatedAt >= cloudLog.updatedAt {
+                if localLog.reviewDate >= cloudLog.reviewDate {
                     merged[localLog.id] = localLog
                 }
             } else {
