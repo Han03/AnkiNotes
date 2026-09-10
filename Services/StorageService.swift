@@ -604,13 +604,17 @@ final class StorageService: ObservableObject {
                     report.warningMessages.append("❌ 导入失败 \(srcURL.lastPathComponent): \(error.localizedDescription)")
                 }
             }
-            if idx % 50 == 0 {
+            // 每 50 条且确有导入/建文件夹时才持久化（避免无变化时刷新索引文件修改时间触发重复推送）
+            if idx % 50 == 0 && (report.importedCount > 0 || report.folderCreatedCount > 0) {
                 persistFolders()
                 persistNoteIndex()
             }
         }
-        persistFolders()
-        persistNoteIndex()
+        // 只在确有变化时持久化；无变化时重写会刷新修改时间，导致 pushToCloud 误判有更新
+        if report.importedCount > 0 || report.folderCreatedCount > 0 {
+            persistFolders()
+            persistNoteIndex()
+        }
         
         // 同步课堂讲稿（Lecture 目录下的 .txt 文件）
         syncProgressCallback?("同步讲稿", 55, "正在扫描云端讲稿...")
@@ -1088,15 +1092,18 @@ final class StorageService: ObservableObject {
                 }
             }
 
-            // 每 50 条持久化一次，避免丢数据
-            if idx % 50 == 0 {
+            // 每 50 条且确有导入/建文件夹时才持久化（避免无变化时刷新索引文件修改时间触发重复推送）
+            if idx % 50 == 0 && (report.importedCount > 0 || report.folderCreatedCount > 0) {
                 persistFolders()
                 persistNoteIndex()
             }
         }
 
-        persistFolders()
-        persistNoteIndex()
+        // 只在确有变化时持久化；无变化时重写会刷新修改时间，导致 pushToCloud 误判有更新
+        if report.importedCount > 0 || report.folderCreatedCount > 0 {
+            persistFolders()
+            persistNoteIndex()
+        }
 
         return report
     }

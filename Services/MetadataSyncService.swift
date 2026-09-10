@@ -70,7 +70,8 @@ final class MetadataSyncService {
         for localNote in local {
             if let cloudNote = merged[localNote.id] {
                 // 两端都有，比较 updatedAt，保留较新的
-                if localNote.updatedAt >= cloudNote.updatedAt {
+                // 用 > 而非 >=：时间相等时保留云端，避免无谓的本地覆盖导致合并结果与云端字节差异
+                if localNote.updatedAt > cloudNote.updatedAt {
                     merged[localNote.id] = localNote
                 }
                 // 否则保留云端的
