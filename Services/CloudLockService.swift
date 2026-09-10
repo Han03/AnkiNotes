@@ -159,18 +159,12 @@ final class CloudLockService {
                 return false
             }
             
-            // 先设置 currentFencingToken（必须在 verifyLockOwnership 之前）
+            // 先设置 currentFencingToken
             currentFencingToken = token
             isHoldingLock = true
             
-            // 3. 二次确认：读取锁文件，确认是自己的
-            Thread.sleep(forTimeInterval: 0.1)  // 短暂等待，确保写入完成
-            if !verifyLockOwnership(cloudFS: cloudFS) {
-                print("⚠️ 二次确认失败，锁可能被抢占")
-                isHoldingLock = false
-                currentFencingToken = 0
-                return false
-            }
+            // 【优化】writeDataIfNotExists 返回 true 已通过 If-None-Match: * 保证原子创建成功，
+            // 省去二次确认 GET（HTTP PUT 201 语义已保证写入成功）
             
             startRenewTimer(cloudFS: cloudFS)
             print("✅ 获取云端锁成功 (token: \(token), device: \(deviceId.prefix(8))...)")
@@ -204,15 +198,8 @@ final class CloudLockService {
                 if lockData.deviceId == deviceId {
                     // 确认是自己的锁，删除
                     try cloudFS.removeItem(at: lockURL)
-                    
-                    // 二次确认：尝试读取，如果读取失败说明删除成功
-                    Thread.sleep(forTimeInterval: 0.1)
-                    do {
-                        _ = try cloudFS.readData(at: lockURL)
-                        print("⚠️ 锁文件删除后仍然存在，可能有并发问题")
-                    } catch {
-                        print("🔓 释放云端锁成功 (token: \(currentFencingToken))")
-                    }
+                    // 【优化】DELETE 返回 200/204 已表示成功，省去确认 GET
+                    print("🔓 释放云端锁成功 (token: \(currentFencingToken))")
                 } else {
                     print("⚠️ 锁不是当前设备持有（deviceId 不匹配），不释放")
                 }

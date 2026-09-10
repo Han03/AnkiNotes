@@ -18,8 +18,7 @@ struct AnkiNotesApp: App {
                 .environmentObject(appState)
                 .onAppear {
                     appState.bootstrap()
-                    // 应用启动时后台静默同步
-                    appState.performSilentSyncOnLaunch()
+                    // 静默同步已移至 bootstrap 后台任务完成后串行触发，避免并发竞争导致重复云端调用
                 }
                 .onChange(of: scenePhase) { newPhase in
                     // App 进入后台时释放云端锁，防止死锁
@@ -247,6 +246,12 @@ final class AppState: ObservableObject {
             MetadataSyncService.shared.restorePendingKnowledgeFiles()
             if MetadataSyncService.shared.hasPendingKnowledgeFiles() {
                 self.pushMetadataAndKnowledgeCacheSilently()
+            }
+            // 【优化】bootstrap 拉取完成后再触发静默同步（串行执行），
+            // 此时快照已更新，silentSync 的根目录检查大概率发现无变更直接跳过，
+            // 避免与 bootstrap 并发执行导致双重 PROPFIND + 双重锁获取
+            DispatchQueue.main.async {
+                self.performSilentSyncOnLaunch()
             }
         }
         isBootstrapped = true

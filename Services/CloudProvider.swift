@@ -482,14 +482,30 @@ final class WebDAVFS: CloudFileSystem {
     }
 
     func createDirectoryIfNeeded(at url: URL) throws {
-        guard !fileExists(at: url) else { return }
-        // 递归向上建：先建父，再建自己
-        let parent = url.deletingLastPathComponent()
-        if parent.pathComponents.count > 2, !fileExists(at: parent) {
-            try createDirectoryIfNeeded(at: parent)
-        }
+        // 【优化】直接发 MKCOL，用状态码判断结果，省去 PROPFIND 检查
+        // 201=创建成功, 405=已存在(Method Not Allowed), 301=已存在(重定向)
+        // 409=父目录不存在，需要先创建父目录再重试
         let req = request(url: url, method: "MKCOL")
-        try sendBlockingRequest(req, allowedStatus: [201, 301, 405])
+        do {
+            try sendBlockingRequest(req, allowedStatus: [201, 301, 405])
+        } catch let error as WebDAVError {
+            if case .httpError(409, _) = error {
+                // 父目录不存在，递归创建父目录后再重试
+                let parent = url.deletingLastPathComponent()
+                if parent.pathComponents.count > 2 {
+                    try createDirectoryIfNeeded(at: parent)
+                }
+                // 重试创建当前目录（并发场景下可能已被其他设备创建，405 也视为成功）
+                let retryReq = request(url: url, method: "MKCOL")
+                do {
+                    try sendBlockingRequest(retryReq, allowedStatus: [201, 301, 405])
+                } catch {
+                    // 重试失败忽略（目录可能已在并发创建中出现）
+                }
+            } else {
+                throw error
+            }
+        }
     }
 
     func contentsOfDirectory(at url: URL) throws -> [URL] {

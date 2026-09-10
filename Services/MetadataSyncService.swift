@@ -118,19 +118,33 @@ final class MetadataSyncService {
         var pulledCount = 0
         var skippedBySnapshot = 0
         
+        // 【优化】一次 PROPFIND Depth:1 列举 .metadata/ 目录，替代对每个文件单独 getItemMetadata（3 次 PROPFIND → 1 次）
+        let dirChildren: [(url: URL, isDirectory: Bool, lastModified: Date?)]
+        do {
+            dirChildren = try cloudFS.contentsOfDirectoryWithMetadata(at: metadataDir)
+        } catch {
+            // .metadata 目录不存在或读取失败，无需拉取
+            return 0
+        }
+        // 构建文件名 → 修改时间的查找表
+        var fileModDates: [String: Date] = [:]
+        for child in dirChildren where !child.isDirectory {
+            if let modDate = child.lastModified {
+                fileModDates[child.url.lastPathComponent] = modDate
+            }
+        }
+        
         for fileName in metadataFiles {
             let cloudURL = metadataDir.appendingPathComponent(fileName)
             let localURL = localCacheURL(for: fileName)
             let relativePath = ".metadata/\(fileName)"
             
             do {
-                // 检查云端文件是否存在
-                guard cloudFS.fileExists(at: cloudURL) else { continue }
+                // 从已获取的目录列表中查找修改时间（无额外网络请求）
+                guard let cloudModDate = fileModDates[fileName] else { continue }
                 
-                // 【快照跳过】获取云端文件的修改时间，检查是否需要拉取
+                // 【快照跳过】利用已获取的修改时间检查是否需要拉取
                 if let snap = syncSnapshotService,
-                   let cloudMeta = try? cloudFS.getItemMetadata(at: cloudURL),
-                   let cloudModDate = cloudMeta.lastModified,
                    !snap.isFileUpdated(relativePath: relativePath, lastModified: cloudModDate) {
                     skippedBySnapshot += 1
                     continue
@@ -142,12 +156,8 @@ final class MetadataSyncService {
                 // 比较本地缓存内容（如果存在）
                 if let localData = try? Data(contentsOf: localURL),
                    localData == cloudData {
-                    // 内容相同，跳过写入，但更新快照
-                    if let snap = syncSnapshotService,
-                       let cloudMeta = try? cloudFS.getItemMetadata(at: cloudURL),
-                       let cloudModDate = cloudMeta.lastModified {
-                        snap.updateFile(relativePath: relativePath, lastModified: cloudModDate)
-                    }
+                    // 内容相同，跳过写入，但更新快照（复用已获取的 cloudModDate，不再重复 PROPFIND）
+                    syncSnapshotService?.updateFile(relativePath: relativePath, lastModified: cloudModDate)
                     continue
                 }
                 
@@ -155,12 +165,8 @@ final class MetadataSyncService {
                 try cloudData.write(to: localURL, options: .atomic)
                 pulledCount += 1
                 
-                // 【更新快照】记录文件的修改时间
-                if let snap = syncSnapshotService,
-                   let cloudMeta = try? cloudFS.getItemMetadata(at: cloudURL),
-                   let cloudModDate = cloudMeta.lastModified {
-                    snap.updateFile(relativePath: relativePath, lastModified: cloudModDate)
-                }
+                // 【更新快照】复用已获取的 cloudModDate，不再重复 PROPFIND
+                syncSnapshotService?.updateFile(relativePath: relativePath, lastModified: cloudModDate)
                 
                 print("📥 元数据同步: 拉取 \(fileName) (\(cloudData.count) bytes)")
                 
@@ -195,13 +201,12 @@ final class MetadataSyncService {
             let relativePath = ".metadata/\(fileName)"
             
             do {
-                // 检查本地缓存是否存在
-                guard fileManager.fileExists(atPath: localURL.path) else { continue }
+                // 检查本地缓存是否存在，同时获取修改时间（只读一次 attributes，复用三处）
+                guard let localAttributes = try? fileManager.attributesOfItem(atPath: localURL.path),
+                      let localModDate = localAttributes[.modificationDate] as? Date else { continue }
                 
-                // 【快照跳过】获取本地文件的修改时间，检查是否需要推送
+                // 【快照跳过】利用已获取的修改时间检查是否需要推送
                 if let snap = syncSnapshotService,
-                   let localAttributes = try? fileManager.attributesOfItem(atPath: localURL.path),
-                   let localModDate = localAttributes[.modificationDate] as? Date,
                    !snap.isFileUpdated(relativePath: relativePath, lastModified: localModDate) {
                     skippedBySnapshot += 1
                     continue
@@ -210,31 +215,16 @@ final class MetadataSyncService {
                 // 读取本地数据
                 let localData = try Data(contentsOf: localURL)
                 
-                // 比较云端内容（如果存在）
-                if let cloudData = try? cloudFS.readData(at: cloudURL),
-                   cloudData == localData {
-                    // 内容相同，跳过写入，但更新快照
-                    if let snap = syncSnapshotService,
-                       let localAttributes = try? fileManager.attributesOfItem(atPath: localURL.path),
-                       let localModDate = localAttributes[.modificationDate] as? Date {
-                        snap.updateFile(relativePath: relativePath, lastModified: localModDate)
-                    }
-                    continue
-                }
-                
-                // 写入云端
+                // 【优化】快照已确认本地有变更，直接 PUT 覆盖，省去 GET 内容比对
+                // 元数据文件通常 < 100KB，幂等写入代价极低；即使内容与云端相同也只是多一次小 PUT
                 SyncLogger.shared.stepStart("☁️ 推送元数据: \(fileName)")
                 try cloudFS.writeData(localData, to: cloudURL)
                 pushedCount += 1
                 lastPushTimestamps[fileName] = Date()
                 SyncLogger.shared.stepDone("☁️ 推送元数据")
                 
-                // 【更新快照】记录文件的修改时间
-                if let snap = syncSnapshotService,
-                   let localAttributes = try? fileManager.attributesOfItem(atPath: localURL.path),
-                   let localModDate = localAttributes[.modificationDate] as? Date {
-                    snap.updateFile(relativePath: relativePath, lastModified: localModDate)
-                }
+                // 【更新快照】复用已获取的 localModDate
+                syncSnapshotService?.updateFile(relativePath: relativePath, lastModified: localModDate)
                 
             } catch {
                 SyncLogger.shared.stepFail("☁️ 推送元数据: \(fileName)", error: error)
@@ -360,19 +350,17 @@ final class MetadataSyncService {
         var pulledCount = 0
         var skippedBySnapshot = 0
         
-        // 根目录级跳过：检查 .knowledge_cache 目录的修改时间，如果没有更新，跳过整个同步
-        if let snap = syncSnapshotService {
-            let dirRelativePath = ".knowledge_cache"
-            if let dirMeta = try? cloudFS.getItemMetadata(at: cloudDir),
-               let dirModDate = dirMeta.lastModified,
-               !snap.isDirectoryUpdated(relativePath: dirRelativePath, lastModified: dirModDate) {
+        // 【优化】根目录级跳过：一次 getItemMetadata 同时用于检查和更新快照，
+        // 替代原来两次 getItemMetadata 调用（检查一次 + 更新一次）
+        if let snap = syncSnapshotService,
+           let meta = try? cloudFS.getItemMetadata(at: cloudDir),
+           let date = meta.lastModified {
+            if !snap.isDirectoryUpdated(relativePath: ".knowledge_cache", lastModified: date) {
                 print("📥 知识点缓存同步: 根目录无更新，跳过整个同步（快照跳过）")
                 return 0
             }
-            if let dirMeta = try? cloudFS.getItemMetadata(at: cloudDir),
-               let dirModDate = dirMeta.lastModified {
-                snap.updateDirectory(relativePath: dirRelativePath, lastModified: dirModDate)
-            }
+            // 复用已获取的 date 更新快照，不再第二次调用 getItemMetadata
+            snap.updateDirectory(relativePath: ".knowledge_cache", lastModified: date)
         }
         
         // 递归扫描云端目录，获取所有文件（包含子目录）

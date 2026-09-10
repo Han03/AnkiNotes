@@ -643,7 +643,7 @@ final class StorageService: ObservableObject {
                 }
                 // 更新快照中的文件修改时间（下载成功后才更新，失败文件下次同步可重试）
                 if let snap = syncSnapshotService {
-                    updateSnapshotAfterFileSync(cloud: cloud, snap: snap, rootURL: cloudRoot, fileURL: srcURL, directoryTimes: directoryTimes)
+                    updateSnapshotAfterFileSync(cloud: cloud, snap: snap, rootURL: cloudRoot, fileURL: srcURL, directoryTimes: directoryTimes, fileTimes: fileTimes)
                 }
             } catch {
                 report.failedCount += 1
@@ -741,7 +741,7 @@ final class StorageService: ObservableObject {
                     print("✅ 讲稿同步: 导入 \(title) (\(bodyStr.count) 字符)")
                     // 更新快照中的文件修改时间（下载成功后才更新，失败文件下次同步可重试）
                     if let snap = snapshot {
-                        updateSnapshotAfterFileSync(cloud: cloud, snap: snap, rootURL: lectureRoot, fileURL: srcURL, directoryTimes: directoryTimes)
+                        updateSnapshotAfterFileSync(cloud: cloud, snap: snap, rootURL: lectureRoot, fileURL: srcURL, directoryTimes: directoryTimes, fileTimes: fileTimes)
                     }
                 } catch {
                     print("❌ 讲稿同步: 写入失败 \(title): \(error.localizedDescription)")
@@ -799,7 +799,7 @@ final class StorageService: ObservableObject {
                     print("✅ 题库同步: 导入 \(title) (\(mergedQuestions.count)题)")
                     // 更新快照中的文件修改时间（下载成功后才更新，失败文件下次同步可重试）
                     if let snap = snapshot {
-                        updateSnapshotAfterFileSync(cloud: cloud, snap: snap, rootURL: questionsRoot, fileURL: srcURL, directoryTimes: directoryTimes)
+                        updateSnapshotAfterFileSync(cloud: cloud, snap: snap, rootURL: questionsRoot, fileURL: srcURL, directoryTimes: directoryTimes, fileTimes: fileTimes)
                     }
                 } catch {
                     print("❌ 题库同步: 写入失败 \(title): \(error.localizedDescription)")
@@ -956,13 +956,17 @@ final class StorageService: ObservableObject {
     /// 文件下载成功后更新快照（文件级 + 父目录级）
     /// - 快照 key 带根目录前缀（Notes/Lecture/Questions），避免同名子目录互相覆盖
     /// - 只有下载成功才更新，失败文件下次同步可重试
-    private func updateSnapshotAfterFileSync(cloud: CloudFileSystem, snap: SyncSnapshotService, rootURL: URL, fileURL: URL, directoryTimes: [String: Date]) {
+    /// - 【优化】使用扫描阶段已收集的 fileTimes 代替额外的 getItemMetadata PROPFIND
+    private func updateSnapshotAfterFileSync(cloud: CloudFileSystem, snap: SyncSnapshotService, rootURL: URL, fileURL: URL, directoryTimes: [String: Date], fileTimes: [String: Date]) {
         let rootName = rootURL.lastPathComponent
         let relativePath = snap.relativePath(for: fileURL, rootURL: rootURL)
         let prefixedPath = rootName + "/" + relativePath
         
-        // 文件记录（用云端元数据的修改时间）
-        if let meta = try? cloud.getItemMetadata(at: fileURL), let time = meta.lastModified {
+        // 【优化】文件记录：使用扫描阶段已收集的修改时间，不再额外发起 PROPFIND
+        if let modified = fileTimes[prefixedPath] {
+            snap.updateFile(relativePath: prefixedPath, lastModified: modified)
+        } else if let meta = try? cloud.getItemMetadata(at: fileURL), let time = meta.lastModified {
+            // 兆底：如果 fileTimes 中没有记录（理论上不应发生），回退到 getItemMetadata
             snap.updateFile(relativePath: prefixedPath, lastModified: time)
         }
         
