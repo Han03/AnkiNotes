@@ -593,78 +593,81 @@ struct KnowledgeInlineText: View {
     }
     
     private func buildAttributedString() -> AttributedString {
-        var attr = AttributedString(text)
-        
-        // 应用基础样式
+        // 1. 移除行内 Markdown 符号（**、*、`），同时记录样式区间（基于无符号文本）
+        let (cleanText, spans) = stripInlineMarkdown(from: text)
+
+        var attr = AttributedString(cleanText)
         attr.font = font
         attr.foregroundColor = color
-        
-        // 处理粗体 **text**
-        applyMarkdownStyle(&attr, pattern: #"\*\*(.+?)\*\*"#, style: .bold)
-        // 处理斜体 *text*
-        applyMarkdownStyle(&attr, pattern: #"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)"#, style: .italic)
-        // 处理行内代码 `code`
-        applyInlineCode(&attr)
-        
-        // 标记知识点（虚线下划线 + 可点击链接）
-        for point in knowledgePoints {
-            markKnowledgePoint(&attr, point: point)
-        }
-        
-        return attr
-    }
-    
-    private enum MarkdownStyle {
-        case bold, italic
-    }
-    
-    private func applyMarkdownStyle(_ attr: inout AttributedString, pattern: String, style: MarkdownStyle) {
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return }
-        let nsRange = NSRange(text.startIndex..., in: text)
-        let matches = regex.matches(in: text, range: nsRange).reversed()
-        
-        for match in matches {
-            guard let fullRange = Range(match.range, in: text),
-                  let contentRange = Range(match.range(at: 1), in: text) else { continue }
-            
-            let content = String(text[contentRange])
-            if let attrContentRange = Range(fullRange, in: attr) {
-                attr[attrContentRange].setAttributes(AttributeContainer())
-                // 替换标记符号
-                // 由于 AttributedString 不支持直接替换文本，这里只设置样式，保留标记符号
-                // 简化处理：只对内容部分设置样式
-                if let attrInnerRange = Range(contentRange, in: attr) {
-                    switch style {
-                    case .bold:
-                        attr[attrInnerRange].inlinePresentationIntent = .stronglyEmphasized
-                    case .italic:
-                        attr[attrInnerRange].inlinePresentationIntent = .emphasized
-                    }
-                }
+
+        // 2. 应用粗体 / 斜体 / 行内代码样式
+        for span in spans {
+            guard let r = Range(span.range, in: attr) else { continue }
+            if span.isCode {
+                attr[r].font = .system(.callout, design: .monospaced)
+            } else if let intent = span.intent {
+                attr[r].inlinePresentationIntent = intent
             }
         }
-    }
-    
-    private func applyInlineCode(_ attr: inout AttributedString) {
-        guard let regex = try? NSRegularExpression(pattern: "`([^`]+)`") else { return }
-        let nsRange = NSRange(text.startIndex..., in: text)
-        let matches = regex.matches(in: text, range: nsRange).reversed()
-        
-        for match in matches {
-            guard let contentRange = Range(match.range(at: 1), in: text),
-                  let attrRange = Range(contentRange, in: attr) else { continue }
-            attr[attrRange].font = .system(.callout, design: .monospaced)
-            // 行内代码不使用颜色，只保留等宽字体
+
+        // 3. 标记知识点（在无符号文本上匹配，keyword 为纯文本）
+        for point in knowledgePoints {
+            markKnowledgePoint(&attr, cleanText: cleanText, point: point)
         }
+
+        return attr
     }
-    
-    private func markKnowledgePoint(_ attr: inout AttributedString, point: KnowledgePoint) {
+
+    /// 行内样式区间（范围基于无符号文本）
+    private struct InlineSpan {
+        let range: Range<String.Index>
+        let intent: InlinePresentationIntent?
+        let isCode: Bool
+    }
+
+    /// 移除行内 Markdown 符号，返回无符号文本与样式区间
+    private func stripInlineMarkdown(from input: String) -> (String, [InlineSpan]) {
+        let patterns: [(String, InlinePresentationIntent?, Bool)] = [
+            (#"\*\*(.+?)\*\*"#, .stronglyEmphasized, false),                    // **粗体**
+            (#"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)"#, .emphasized, false),      // *斜体*
+            ("`([^`]+)`", nil, true),                                           // `行内代码`
+        ]
+        var matches: [(Range<String.Index>, String, InlinePresentationIntent?, Bool)] = []
+        for (pattern, intent, isCode) in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            let nsRange = NSRange(input.startIndex..., in: input)
+            for m in regex.matches(in: input, range: nsRange) {
+                guard let contentRange = Range(m.range(at: 1), in: input) else { continue }
+                matches.append((contentRange, String(input[contentRange]), intent, isCode))
+            }
+        }
+        // 按内容起点排序，重叠时跳过（如 ***加粗斜体*** 的边界）
+        matches.sort { $0.0.lowerBound < $1.0.lowerBound }
+
+        var clean = ""
+        var spans: [InlineSpan] = []
+        var cursor = input.startIndex
+        var lastEnd: String.Index? = nil
+        for (contentRange, content, intent, isCode) in matches {
+            if let le = lastEnd, contentRange.lowerBound < le { continue }
+            clean += String(input[cursor..<contentRange.lowerBound])
+            let start = clean.endIndex
+            clean += content
+            spans.append(InlineSpan(range: start..<clean.endIndex, intent: intent, isCode: isCode))
+            cursor = contentRange.upperBound
+            lastEnd = contentRange.upperBound
+        }
+        clean += String(input[cursor...])
+        return (clean, spans)
+    }
+
+    /// 标记知识点：虚线下划线 + 可点击链接（在无符号文本上匹配）
+    private func markKnowledgePoint(_ attr: inout AttributedString, cleanText: String, point: KnowledgePoint) {
         let keyword = point.keyword
         guard !keyword.isEmpty else { return }
-        
-        // 在文本中查找关键字（不区分大小写）
-        var searchRange = text.startIndex..<text.endIndex
-        while let range = text.range(of: keyword, options: .caseInsensitive, range: searchRange) {
+
+        var searchRange = cleanText.startIndex..<cleanText.endIndex
+        while let range = cleanText.range(of: keyword, options: .caseInsensitive, range: searchRange) {
             if let attrRange = Range(range, in: attr) {
                 // 只设置虚线下划线，不改变文字颜色，避免大片橙色干扰阅读
                 attr[attrRange].underlineStyle = .patternDash
@@ -672,7 +675,7 @@ struct KnowledgeInlineText: View {
                 // 设置自定义 URL scheme，用于点击拦截
                 attr[attrRange].link = URL(string: "knowledge://\(point.id.uuidString)")
             }
-            searchRange = range.upperBound..<text.endIndex
+            searchRange = range.upperBound..<cleanText.endIndex
         }
     }
 }

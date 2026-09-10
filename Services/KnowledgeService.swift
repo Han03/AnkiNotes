@@ -129,14 +129,36 @@ final class KnowledgeService: ObservableObject {
     
     // MARK: - 知识点提取缓存
     
-    /// 读取笔记的知识点提取缓存
+    /// 清洗关键字中的行内 Markdown 符号（**、*、`、链接语法），返回纯文本
+    private func sanitizeKeyword(_ raw: String) -> String {
+        var s = raw
+        s = s.replacingOccurrences(of: #"\*\*(.+?)\*\*"#, with: "$1", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)"#, with: "$1", options: .regularExpression)
+        s = s.replacingOccurrences(of: "`", with: "")
+        s = s.replacingOccurrences(of: #"\[([^\]]+)\]\([^)]+\)"#, with: "$1", options: .regularExpression)
+        return s.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    
+    /// 读取笔记的知识点提取缓存（历史脏数据含 markdown 符号时统一清洗）
     func loadExtraction(for note: Note) -> [KnowledgePoint]? {
         let url = extractionCacheURL(for: note)
         guard let data = try? Data(contentsOf: url),
               let result = try? JSONDecoder().decode(KnowledgeExtractionResult.self, from: data) else {
             return nil
         }
-        return result.points
+        // 清洗历史脏数据（带 ** 等符号的旧缓存）
+        var changed = false
+        let cleaned = result.points.map { p -> KnowledgePoint in
+            let keyword = sanitizeKeyword(p.keyword)
+            if keyword.isEmpty || keyword == p.keyword { return p }
+            changed = true
+            return KnowledgePoint(id: p.id, noteId: p.noteId, keyword: keyword,
+                                  explanation: p.explanation, createdAt: p.createdAt)
+        }
+        if changed {
+            saveExtraction(for: note, points: cleaned)
+        }
+        return cleaned
     }
     
     /// 保存知识点提取缓存
@@ -277,14 +299,17 @@ final class KnowledgeService: ObservableObject {
                             .replacingOccurrences(of: "^[-*•]\\s*", with: "", options: .regularExpression)
                             .trimmingCharacters(in: .whitespacesAndNewlines)
                         
-                        guard !cleaned.isEmpty, cleaned.count >= 2 else { continue }
+                        guard !cleaned.isEmpty else { continue }
+                        // 清洗行内 markdown 符号（**、*、`），避免符号进入知识点
+                        let sanitized = sanitizeKeyword(cleaned)
+                        guard !sanitized.isEmpty, sanitized.count >= 2 else { continue }
                         
                         // 验证关键字是否在原文中出现
-                        guard note.markdownContent.localizedCaseInsensitiveContains(cleaned) else {
+                        guard note.markdownContent.localizedCaseInsensitiveContains(sanitized) else {
                             continue
                         }
                         
-                        let point = KnowledgePoint(noteId: note.id, keyword: cleaned)
+                        let point = KnowledgePoint(noteId: note.id, keyword: sanitized)
                         allPoints.append(point)
                         DispatchQueue.main.async {
                             onPoint(point)
@@ -294,13 +319,15 @@ final class KnowledgeService: ObservableObject {
                 
                 // 处理最后一行
                 let lastLine = currentLine.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !lastLine.isEmpty, lastLine.count >= 2 {
+                if !lastLine.isEmpty {
                     let cleaned = lastLine
                         .replacingOccurrences(of: #"^\d+[\.\、]\s*"#, with: "", options: .regularExpression)
                         .replacingOccurrences(of: "^[-*•]\\s*", with: "", options: .regularExpression)
                         .trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !cleaned.isEmpty, note.markdownContent.localizedCaseInsensitiveContains(cleaned) {
-                        let point = KnowledgePoint(noteId: note.id, keyword: cleaned)
+                    let sanitized = sanitizeKeyword(cleaned)
+                    if !sanitized.isEmpty, sanitized.count >= 2,
+                       note.markdownContent.localizedCaseInsensitiveContains(sanitized) {
+                        let point = KnowledgePoint(noteId: note.id, keyword: sanitized)
                         allPoints.append(point)
                         DispatchQueue.main.async {
                             onPoint(point)
