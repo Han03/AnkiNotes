@@ -56,6 +56,64 @@ final class KnowledgePointsStore: ObservableObject {
     }
 }
 
+// MARK: - SSE 流式解析器
+
+/// SSE 流式解析器：通过 URLSession delegate 模式实现真正的逐 chunk 流式接收
+/// 解决 URLSession.shared.bytes(for:) 缓冲整个响应导致流式效果失效的问题
+final class SSEStreamParser: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+    private var continuation: AsyncStream<String>.Continuation
+    private var pendingData = ""  // 跨 chunk 的不完整数据缓冲
+
+    init(continuation: AsyncStream<String>.Continuation) {
+        self.continuation = continuation
+    }
+
+    /// 每收到一段网络数据时立即调用（delegate 模式，不缓冲）
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        guard let text = String(data: data, encoding: .utf8) else { return }
+        pendingData += text
+
+        // 按行切分，最后一个不完整行保留到下次
+        while let newlineRange = pendingData.range(of: "\n") {
+            let line = String(pendingData[..<newlineRange.lowerBound])
+            pendingData = String(pendingData[newlineRange.upperBound...])
+            processSSELine(line)
+        }
+    }
+
+    /// 请求结束时调用（成功或失败）
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        // 处理最后残留的不完整行
+        if !pendingData.isEmpty {
+            let remaining = pendingData.trimmingCharacters(in: .whitespacesAndNewlines)
+            pendingData = ""
+            if !remaining.isEmpty {
+                processSSELine(remaining)
+            }
+        }
+        continuation.finish()
+    }
+
+    /// 解析单行 SSE 事件，提取 delta content 并 yield 到 AsyncStream
+    private func processSSELine(_ line: String) {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("data: ") else { return }
+        let jsonStr = String(trimmed.dropFirst(6))
+        if jsonStr == "[DONE]" { return }
+
+        guard let data = jsonStr.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let choices = json["choices"] as? [[String: Any]],
+              let first = choices.first,
+              let delta = first["delta"] as? [String: Any],
+              let content = delta["content"] as? String else {
+            return
+        }
+
+        continuation.yield(content)
+    }
+}
+
 /// 知识点服务：提取知识点关键字、生成详解、缓存管理
 final class KnowledgeService: ObservableObject {
     static let shared = KnowledgeService()
@@ -407,54 +465,58 @@ final class KnowledgeService: ObservableObject {
         
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         
+        // 使用自定义 URLSession + delegate 实现真正的 SSE 流式接收
+        // URLSession.shared.bytes(for:) 会缓冲整个响应，导致打字机效果失效
         var fullText = ""
         
-        let task = Task.detached(priority: .userInitiated) { [weak self] in
-            guard let self else { return }
+        let task = Task { [weak self] in
+            let byteStream: AsyncStream<String>
+            let sessionDelegate: SSEStreamParser
+            let streamSession: URLSession
             do {
-                let (bytes, response) = try await URLSession.shared.bytes(for: request)
-                
-                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode != 200 {
+                var continuation: AsyncStream<String>.Continuation!
+                let stream = AsyncStream<String> { continuation = $0 }
+                let parser = SSEStreamParser(continuation: continuation)
+                sessionDelegate = parser
+                byteStream = stream
+
+                let session = URLSession(
+                    configuration: .default,
+                    delegate: sessionDelegate,
+                    delegateQueue: nil  // 系统创建串行 OperationQueue，保证 SSE 行按序处理
+                )
+                streamSession = session
+
+                // 创建但不启动任务
+                let dataTask = session.dataTask(with: request, delegate: sessionDelegate)
+
+                // 启动网络请求（同步返回，delegate 回调在后台队列异步执行）
+                dataTask.resume()
+
+                // 消费流：delegate 每收到网络数据就 yield，实时传递到 UI
+                for try await chunk in byteStream {
+                    fullText += chunk
                     DispatchQueue.main.async {
-                        self.isExplaining = false
-                        completion("")
-                    }
-                    return
-                }
-                
-                for try await line in bytes.lines {
-                    guard line.hasPrefix("data: ") else { continue }
-                    let jsonStr = String(line.dropFirst(6))
-                    if jsonStr == "[DONE]" { break }
-                    
-                    guard let data = jsonStr.data(using: .utf8),
-                          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                          let choices = json["choices"] as? [[String: Any]],
-                          let first = choices.first,
-                          let delta = first["delta"] as? [String: Any],
-                          let content = delta["content"] as? String else {
-                        continue
-                    }
-                    
-                    fullText += content
-                    DispatchQueue.main.async {
-                        onChunk(content)
+                        onChunk(chunk)
                     }
                 }
-                
-                // 保存缓存 + 状态回写统一回主线程（避免跨线程触碰单例状态）
-                let finalText = fullText
-                DispatchQueue.main.async {
-                    self.saveExplanation(for: point, note: note, explanation: finalText)
-                    self.isExplaining = false
-                    completion(finalText)
-                }
+
+                streamSession.invalidateAndCancel()
             } catch {
                 print("⚠️ 知识点详解生成失败: \(error.localizedDescription)")
                 DispatchQueue.main.async {
-                    self.isExplaining = false
+                    self?.isExplaining = false
                     completion(fullText)
                 }
+                return
+            }
+
+            // 保存缓存 + 状态回写统一回主线程（避免跨线程触碰单例状态）
+            let finalText = fullText
+            DispatchQueue.main.async {
+                self?.saveExplanation(for: point, note: note, explanation: finalText)
+                self?.isExplaining = false
+                completion(finalText)
             }
         }
         
