@@ -197,6 +197,19 @@ struct ReviewSessionView: View {
         .onReceive(TTSService.shared.$isPaused) { paused in
             isPausedLecture = paused
         }
+        // 【修复】讲稿播放进度改用 TTSService 全局 @Published 驱动，不再依赖 speak 的 onSentenceComplete 回调
+        // 原因：复习页播放后若打开讲稿页再播放（讲稿页 speak 覆盖了回调），关闭讲稿页（不停止播放）后
+        // 回调仍指向已销毁的讲稿页视图，复习页收不到句子推进，lecturePlayProgress 永远为 0。
+        .onReceive(TTSService.shared.$currentSentenceIndex) { idx in
+            guard TTSService.shared.isSpeaking else { return }
+            let total = TTSService.shared.totalSentences
+            if total > 0 {
+                let newProgress = Double(idx + 1) / Double(total)
+                if abs(newProgress - lecturePlayProgress) > 0.0001 {
+                    lecturePlayProgress = newProgress
+                }
+            }
+        }
         // 评级选择（就地展开面板，见 bottomOperationBar）
         // 测评界面
         .sheet(isPresented: $showReviewQuiz) {

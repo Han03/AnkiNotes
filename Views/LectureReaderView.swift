@@ -228,7 +228,11 @@ struct LectureReaderView: View {
                 if totalSentences > 1 {
                     Slider(
                         value: Binding(
-                            get: { Double(currentSentenceIndex) / Double(totalSentences - 1) },
+                            get: {
+                                // 防御：totalSentences<=1 时走 ProgressView 分支，这里避免 0 分母
+                                guard totalSentences > 1 else { return 0 }
+                                return Double(currentSentenceIndex) / Double(totalSentences - 1)
+                            },
                             set: { newValue in
                                 let newIndex = Int(newValue * Double(totalSentences - 1))
                                 if newIndex != currentSentenceIndex {
