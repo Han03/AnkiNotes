@@ -669,9 +669,11 @@ struct KnowledgeInlineText: View {
         var searchRange = cleanText.startIndex..<cleanText.endIndex
         while let range = cleanText.range(of: keyword, options: .caseInsensitive, range: searchRange) {
             if let attrRange = Range(range, in: attr) {
-                // 只设置虚线下划线，不改变文字颜色，避免大片橙色干扰阅读
-                attr[attrRange].underlineStyle = .patternDash
+                // 虚线下划线：必须同时包含 .single 位（NSUnderlineStyle 的 pattern 位单独设置不绘制）
+                attr[attrRange].underlineStyle = [.single, .patternDash]
                 attr[attrRange].underlineColor = UIColor(Color.brandPrimary.opacity(0.4))
+                // 保持正文颜色，覆盖 link 默认蓝色
+                attr[attrRange].foregroundColor = color
                 // 设置自定义 URL scheme，用于点击拦截
                 attr[attrRange].link = URL(string: "knowledge://\(point.id.uuidString)")
             }
