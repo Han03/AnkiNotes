@@ -78,7 +78,8 @@ struct QuizHomeView: View {
         }
         .fullScreenCover(isPresented: $showingQuiz) {
             NavigationStack {
-                QuizSessionView(questionCount: selectedCount, noteIdFilter: activeGroupNoteId)
+                QuizSessionView(questionCount: activeGroupNoteId == nil ? selectedCount : nil,
+                                noteIdFilter: activeGroupNoteId)
             }
         }
         // 生成题目报错提示
@@ -302,7 +303,7 @@ struct QuizHomeView: View {
                 }
                 .buttonStyle(.plain)
             } else {
-                // 未生成：显示生成按钮
+                // 未生成：显示生成按钮（无未生成题目的笔记时禁用）
                 Button {
                     appState.generateQuestionsForAllNotes { newCount, processedCount, wasCancelled in
                         refreshStats()
@@ -312,7 +313,7 @@ struct QuizHomeView: View {
                     HStack {
                         Spacer()
                         Image(systemName: "wand.and.stars")
-                        Text("生成题目")
+                        Text(hasPendingQuestionNotes ? "生成题目" : "全部笔记已生成题目")
                             .font(.appBody)
                             .fontWeight(.medium)
                         Spacer()
@@ -320,17 +321,23 @@ struct QuizHomeView: View {
                     .padding(.vertical, 12)
                     .background(
                         RoundedRectangle(cornerRadius: AppCornerRadius.standard)
-                            .fill(appState.bailianConfig.isConfigured ? Color.brandPrimary : Color.gray)
+                            .fill(appState.bailianConfig.isConfigured && hasPendingQuestionNotes ? Color.brandPrimary : Color.gray)
                     )
                     .foregroundColor(.white)
                 }
                 .buttonStyle(.plain)
-                .disabled(!appState.bailianConfig.isConfigured)
+                .disabled(!appState.bailianConfig.isConfigured || !hasPendingQuestionNotes)
             }
         }
         .padding(18)
         .background(RoundedRectangle(cornerRadius: AppCornerRadius.huge).fill(Color.bgCard))
         .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
+    }
+
+    /// 是否还有未生成题目的笔记（按 generatedNoteIds 判断，与题目生成逻辑保持一致）
+    private var hasPendingQuestionNotes: Bool {
+        guard let quiz = appState.quizService else { return false }
+        return quiz.notes.contains { !quiz.generatedNoteIds.contains($0.id) }
     }
 
     // MARK: - 全部题组（按题目文件）
@@ -442,9 +449,13 @@ struct QuizHomeView: View {
         var items: [QuestionGroupItem] = []
         for (noteId, qs) in grouped {
             let title = qs.first?.noteTitle ?? "未知笔记"
+            // 优先用笔记索引计算路径；笔记索引缺失（笔记已删/未加载）时回退到题目文件系统路径
             var folderPath = ""
             if let note = appState.storage?.getNote(id: noteId) {
                 folderPath = appState.storage?.getNoteFolderPath(for: note) ?? ""
+            }
+            if folderPath.isEmpty {
+                folderPath = quiz.notePaths[noteId] ?? ""
             }
             items.append(QuestionGroupItem(
                 noteId: noteId,

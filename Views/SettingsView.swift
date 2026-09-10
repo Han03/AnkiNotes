@@ -10,7 +10,6 @@ import SwiftUI
 /// 独立设置页：同步与存储 + AI功能 + 阅读与播放 + 关于
 struct SettingsView: View {
     @EnvironmentObject var appState: AppState
-    @State private var testResult: (success: Bool, message: String)? = nil
     @State private var isTesting = false
     /// 存储方式草稿：切换 Picker 只改草稿，点击"保存设置"才真正应用（避免误操作立即生效）
     @State private var pendingProvider: CloudProviderType = .local
@@ -244,23 +243,6 @@ struct SettingsView: View {
             .buttonStyle(.plain)
             .disabled(isTesting)
 
-            // 测试结果
-            if let r = testResult {
-                HStack(alignment: .top, spacing: AppSpacing.xs) {
-                    Image(systemName: r.success ? "checkmark.seal.fill" : "xmark.seal.fill")
-                        .foregroundStyle(r.success ? Color.green : Color.red)
-                    Text(r.message)
-                        .font(.appCaption)
-                        .foregroundStyle(r.success ? Color.green : Color.red)
-                        .textSelection(.enabled)
-                    Spacer()
-                }
-                .padding(AppSpacing.md)
-                .background(RoundedRectangle(cornerRadius: AppCornerRadius.standard).fill(
-                    (r.success ? Color.green : Color.red).opacity(0.08)
-                ))
-            }
-
             // 关键提示（只保留一条）
             HStack(alignment: .top, spacing: AppSpacing.xs) {
                 Image(systemName: "info.circle")
@@ -300,7 +282,6 @@ struct SettingsView: View {
         isTesting = true
         defer { isTesting = false }
         let r = await appState.testCurrentWebDAVConnection()
-        testResult = r
         appState.recordCloudOperation(operation: "测试连接",
                                       outcome: r.success ? .success : .failure,
                                       summary: r.message)
@@ -314,15 +295,11 @@ struct SettingsView: View {
         pendingProvider = appState.selectedProvider
         let summary: String
         if let msg = appState.providerStatus {
-            testResult = (ok, msg)
             summary = msg
         } else if ok {
-            let successMsg = "已成功切换为 WebDAV。请到笔记页下拉同步，从云端拉取笔记。"
-            testResult = (true, successMsg)
-            summary = successMsg
+            summary = "已成功切换为 WebDAV。请到笔记页下拉同步，从云端拉取笔记。"
         } else {
             summary = "切换失败，请查看状态提示。"
-            testResult = (false, summary)
         }
         appState.recordCloudOperation(operation: "保存配置",
                                       outcome: ok ? .success : .failure,
@@ -338,7 +315,6 @@ struct SettingsView: View {
             var statusMsg: String?
             if let msg = appState.providerStatus {
                 statusMsg = msg
-                testResult = (ok, msg)
             }
             appState.recordCloudOperation(operation: "保存配置",
                                           outcome: ok ? .success : .failure,

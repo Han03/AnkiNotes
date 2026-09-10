@@ -32,6 +32,8 @@ final class QuizService {
     private(set) var isGenerating = false  // 是否正在生成题目
     private(set) var isCancelled = false    // 是否被用户取消
     private(set) var failedNoteIds: Set<UUID> = []  // 生成失败的笔记ID（可重试）
+    /// noteId → 题目文件所在目录（相对 Questions 根目录），用于题组展示真实路径，不依赖笔记索引
+    private(set) var notePaths: [UUID: String] = [:]
     private var currentAPITask: URLSessionDataTask?  // 当前正在进行的 API 请求任务（保留兼容）
     private var currentStreamTask: Task<Void, Never>?  // 当前流式请求任务（用于取消）
     @Published var generatedCharCount: Int = 0  // 当前笔记已生成字数（实时进度）
@@ -76,6 +78,8 @@ final class QuizService {
         // 不依赖 notes/folders 数组，避免 folders 数组不完整导致路径计算错误
         // 这是最健壮的加载方式，确保所有文件夹的题目都能正确加载
         questions = fileSystem.loadAllQuestionsFromDisk()
+        // 记录 noteId → 题目文件目录映射（题组展示真实路径，不依赖笔记索引）
+        notePaths = fileSystem.loadQuestionNotePaths()
         
         // 加载已生成笔记 ID
         if let data = try? fileSystem.readNoteContent(from: generatedIdsURL).data(using: .utf8),
@@ -201,11 +205,13 @@ final class QuizService {
     /// 从题库中随机选取指定数量的题目
     /// 算法：加权随机，做对的题目权重低，答错/未做的题目权重高
     /// 保证不同题目被选中的实际概率相同（在相同状态下）
-    /// - Parameter noteId: 限定某个笔记的题目（nil = 全库）
-    func selectQuestions(count: Int, noteId: UUID? = nil) -> [Question] {
+    /// - Parameters:
+    ///   - count: 抽取数量（nil = 全部）
+    ///   - noteId: 限定某个笔记的题目（nil = 全库）
+    func selectQuestions(count: Int?, noteId: UUID? = nil) -> [Question] {
         let pool = noteId == nil ? questions : questions.filter { $0.noteId == noteId }
         guard !pool.isEmpty else { return [] }
-        let targetCount = min(count, pool.count)
+        let targetCount = min(count ?? pool.count, pool.count)
 
         // 计算每个题目的权重
         // 未作答: 权重 3.0

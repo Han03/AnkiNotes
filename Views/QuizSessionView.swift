@@ -12,7 +12,8 @@ struct QuizSessionView: View {
     @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) private var dismiss
 
-    let questionCount: Int
+    /// 抽取题目数量（nil = 该范围的全部题目）
+    let questionCount: Int?
     /// 限定某个笔记的题目（nil = 全库抽题）
     var noteIdFilter: UUID? = nil
 

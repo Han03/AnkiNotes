@@ -91,6 +91,37 @@ final class FileSystemService {
         return allQuestions
     }
 
+    /// 构建 noteId → 题目文件所在目录（相对 Questions 根目录）的映射
+    /// 不依赖 notes/folders 索引，用于题组列表展示真实路径（笔记索引缺失时也能正确显示）
+    func loadQuestionNotePaths() -> [UUID: String] {
+        var paths: [UUID: String] = [:]
+        let fileManager = FileManager.default
+        let rootURL = questionsRootDirectory
+
+        guard let enumerator = fileManager.enumerator(
+            at: rootURL,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else {
+            return [:]
+        }
+
+        for case let fileURL as URL in enumerator {
+            guard fileURL.pathExtension.lowercased() == "json" else { continue }
+            guard let data = try? Data(contentsOf: fileURL),
+                  let questions = try? JSONDecoder().decode([Question].self, from: data),
+                  let first = questions.first else { continue }
+            // 相对路径：去掉根目录前缀和文件名，得到目录部分
+            var relPath = fileURL.deletingLastPathComponent().path
+            if relPath.hasPrefix(rootURL.path) {
+                relPath = String(relPath.dropFirst(rootURL.path.count))
+            }
+            relPath = relPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            paths[first.noteId] = relPath
+        }
+        return paths
+    }
+
     /// JSON 索引目录（Documents/.metadata）
     var metadataDirectory: URL {
         let dir = localDocumentsDirectory.appendingPathComponent(".metadata", isDirectory: true)
