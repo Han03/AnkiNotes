@@ -65,9 +65,11 @@ struct QuizHomeView: View {
                 refreshGroups()
             }
         }
-        // 生成题目过程中实时刷新题组（每完成一篇笔记保存后）
-        .onChange(of: appState.generationProgress) { _ in
-            refreshGroups()
+        // 生成题目过程中实时刷新题组（每完成一篇笔记保存后可见）
+        .onReceive(Timer.publish(every: 2, on: .main, in: .common).autoconnect()) { _ in
+            if appState.isGeneratingQuestions {
+                refreshGroups()
+            }
         }
         .onChange(of: appState.isGeneratingQuestions) { _ in
             refreshStats()
