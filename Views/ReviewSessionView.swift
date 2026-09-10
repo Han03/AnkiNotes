@@ -284,65 +284,58 @@ struct ReviewSessionView: View {
         let hasLecture = appState.storage?.hasLecture(for: note) ?? false
         let isPlaying = isPlayingLecture && !isPausedLecture
         
-        GeometryReader { geo in
-            let safeAreaBottom = geo.safeAreaInsets.bottom
-            let extensionHeight = safeAreaBottom / 2.0
-            
-            VStack(spacing: 0) {
-                // 播放进度条（仅播放/暂停时显示，2pt细条）
-                if isPlayingLecture {
-                    GeometryReader { geometry in
-                        ZStack(alignment: .leading) {
-                            Color.gray.opacity(0.1)
-                            Color.brandPrimary
-                                .frame(width: geometry.size.width * CGFloat(lecturePlayProgress))
-                        }
-                    }
-                    .frame(height: 2)
-                }
-                
-                // 顶部分割线
-                Divider()
-                    .opacity(0.2)
-                
-                HStack(spacing: AppSpacing.sm) {
-                    // 评级主按钮（始终显示，占主要空间）
-                    ratingButton(note: note, scheduler: scheduler)
-                        .frame(maxWidth: .infinity)
-                    
-                    // 测评按钮（有题目时显示）
-                    if hasQuiz {
-                        quizButton()
-                            .frame(width: 52)
-                    }
-                    
-                    // 讲稿按钮（有讲稿时显示）
-                    if hasLecture {
-                        lectureButton(note: note)
-                            .frame(width: 52)
-                    }
-                    
-                    // 播放/暂停按钮（有讲稿时显示）
-                    if hasLecture {
-                        playPauseButton(note: note, isPlaying: isPlaying)
-                            .frame(width: 52)
+        VStack(spacing: 0) {
+            // 播放进度条（仅播放/暂停时显示，2pt细条）
+            if isPlayingLecture {
+                GeometryReader { geometry in
+                    ZStack(alignment: .leading) {
+                        Color.gray.opacity(0.1)
+                        Color.brandPrimary
+                            .frame(width: geometry.size.width * CGFloat(lecturePlayProgress))
                     }
                 }
-                .padding(.horizontal, 16)  // 与笔记内容宽度一致
-                .padding(.vertical, 10)
-                .padding(.bottom, max(14 - extensionHeight, 0))  // 调整底部间距，让背景侵入安全区一半
+                .frame(height: 2)
             }
-            .background(
-                ZStack {
-                    Color.bgCard
-                    // 透明区域推到底部，让彩色背景延伸到安全区一半
-                    Color.clear
-                        .frame(height: extensionHeight)
+            
+            // 顶部分割线
+            Divider()
+                .opacity(0.2)
+            
+            HStack(spacing: AppSpacing.sm) {
+                // 评级主按钮（始终显示，占主要空间）
+                ratingButton(note: note, scheduler: scheduler)
+                    .frame(maxWidth: .infinity)
+                
+                // 测评按钮（有题目时显示）
+                if hasQuiz {
+                    quizButton()
+                        .frame(width: 52)
                 }
-                .ignoresSafeArea(edges: .bottom)
-            )
+                
+                // 讲稿按钮（有讲稿时显示）
+                if hasLecture {
+                    lectureButton(note: note)
+                        .frame(width: 52)
+                }
+                
+                // 播放/暂停按钮（有讲稿时显示）
+                if hasLecture {
+                    playPauseButton(note: note, isPlaying: isPlaying)
+                        .frame(width: 52)
+                }
+            }
+            .padding(.horizontal, 16)  // 与笔记内容宽度一致
+            .padding(.vertical, 10)
         }
-        .frame(maxHeight: .infinity, alignment: .bottom) // 强制推到底部
+        .background(
+            ZStack {
+                Color.bgCard
+                // 底部扩展区域，让背景延伸到安全区
+                Color.clear
+                    .frame(height: (UIApplication.shared.windows.first?.safeAreaInsets.bottom ?? 0) / 2)
+            }
+        )
+        .ignoresSafeArea(edges: .bottom)
     }
     
     // MARK: - 评级就地展开面板
