@@ -13,6 +13,8 @@ struct QuizSessionView: View {
     @Environment(\.dismiss) private var dismiss
 
     let questionCount: Int
+    /// 限定某个笔记的题目（nil = 全库抽题）
+    var noteIdFilter: UUID? = nil
 
     @State private var questions: [Question] = []
     @State private var currentIndex = 0
@@ -63,7 +65,7 @@ struct QuizSessionView: View {
 
     private func loadQuestions() {
         guard let quiz = appState.quizService else { return }
-        questions = quiz.selectQuestions(count: questionCount)
+        questions = quiz.selectQuestions(count: questionCount, noteId: noteIdFilter)
         if questions.isEmpty {
             finished = true
         }

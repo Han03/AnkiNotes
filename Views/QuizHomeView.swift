@@ -7,12 +7,19 @@
 
 import SwiftUI
 
-/// 刷题主页：题库统计、开始刷题、生成题目
+/// 刷题主页：题库统计、开始刷题、生成题目、题组列表
 struct QuizHomeView: View {
     @EnvironmentObject var appState: AppState
     @State private var showingQuiz = false
     @State private var selectedCount = 10
     @State private var stats = QuizStats()
+    /// 限定刷题范围：nil = 全库；非 nil = 该题组（笔记）的题目
+    @State private var activeGroupNoteId: UUID? = nil
+
+    // 题组列表（一个题目 json 文件 = 一个题组）
+    @State private var questionGroups: [QuestionGroupItem] = []
+    @State private var visibleGroupCount = 20  // 默认加载 20 条，滚动加载更多
+    private let groupPageSize = 20
 
     private let countOptions = [5, 10, 20, 30, 50]
 
@@ -39,6 +46,9 @@ struct QuizHomeView: View {
 
                 // 生成题目
                 generateCard
+
+                // 全部题组（按题目文件）
+                questionGroupsSection
             }
             .padding()
         }
@@ -46,16 +56,26 @@ struct QuizHomeView: View {
         .navigationTitle("刷题")
         .onAppear {
             refreshStats()
+            refreshGroups()
         }
-        // 刷题结束返回后刷新统计
+        // 刷题结束返回后刷新统计与题组
         .onChange(of: showingQuiz) { showing in
             if !showing {
                 refreshStats()
+                refreshGroups()
             }
+        }
+        // 生成题目过程中实时刷新题组（每完成一篇笔记保存后）
+        .onChange(of: appState.generationProgress) { _ in
+            refreshGroups()
+        }
+        .onChange(of: appState.isGeneratingQuestions) { _ in
+            refreshStats()
+            refreshGroups()
         }
         .fullScreenCover(isPresented: $showingQuiz) {
             NavigationStack {
-                QuizSessionView(questionCount: selectedCount)
+                QuizSessionView(questionCount: selectedCount, noteIdFilter: activeGroupNoteId)
             }
         }
         // 生成题目报错提示
@@ -205,6 +225,7 @@ struct QuizHomeView: View {
             }
 
             Button {
+                activeGroupNoteId = nil  // 全库抽题
                 showingQuiz = true
             } label: {
                 HStack(spacing: AppSpacing.md) {
@@ -282,6 +303,7 @@ struct QuizHomeView: View {
                 Button {
                     appState.generateQuestionsForAllNotes { newCount, processedCount, wasCancelled in
                         refreshStats()
+                        refreshGroups()
                     }
                 } label: {
                     HStack {
@@ -308,6 +330,135 @@ struct QuizHomeView: View {
         .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
     }
 
+    // MARK: - 全部题组（按题目文件）
+
+    private var questionGroupsSection: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.md) {
+            HStack {
+                Text("全部题组")
+                    .font(.headline)
+                Spacer()
+                Text("\(questionGroups.count) 组")
+                    .font(.appBody)
+                    .foregroundColor(.textSecondary)
+            }
+
+            if questionGroups.isEmpty {
+                Text("暂无题目文件，生成题目后按笔记展示")
+                    .font(.appCaption)
+                    .foregroundColor(.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, AppSpacing.md)
+            } else {
+                LazyVStack(spacing: AppSpacing.sm) {
+                    ForEach(questionGroups.prefix(visibleGroupCount)) { group in
+                        groupRow(group)
+                            .onAppear {
+                                // 滚动到当前已加载的最后一条时，自动加载更多
+                                if group.id == questionGroups[min(visibleGroupCount, questionGroups.count) - 1].id {
+                                    loadMoreGroups()
+                                }
+                            }
+                    }
+                    // 底部加载提示
+                    if visibleGroupCount < questionGroups.count {
+                        HStack(spacing: AppSpacing.xs) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("加载更多…")
+                                .font(.appCaption)
+                                .foregroundColor(.textSecondary)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, AppSpacing.md)
+                        .onAppear {
+                            loadMoreGroups()
+                        }
+                    }
+                }
+            }
+        }
+        .padding(18)
+        .background(RoundedRectangle(cornerRadius: AppCornerRadius.huge).fill(Color.bgCard))
+        .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
+    }
+
+    private func groupRow(_ group: QuestionGroupItem) -> some View {
+        Button {
+            activeGroupNoteId = group.noteId
+            showingQuiz = true
+        } label: {
+            HStack(spacing: AppSpacing.md) {
+                Image(systemName: "doc.text")
+                    .font(.appBody)
+                    .foregroundColor(.brandPrimary)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(group.title)
+                        .font(.appBody)
+                        .fontWeight(.medium)
+                        .foregroundColor(.primary)
+                        .lineLimit(1)
+                    Text(group.folderPath.isEmpty ? "根目录" : group.folderPath)
+                        .font(Font.system(size: 11, weight: .regular, design: .rounded))
+                        .foregroundColor(.textTertiary)
+                        .lineLimit(1)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 3) {
+                    Text("\(group.count) 题")
+                        .font(.appCaption)
+                        .foregroundColor(.textSecondary)
+                    Text("已答 \(group.answered) · 答对 \(group.correct)")
+                        .font(Font.system(size: 11, weight: .regular, design: .rounded))
+                        .foregroundColor(.green.opacity(0.8))
+                }
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundColor(.textTertiary)
+            }
+            .padding(AppSpacing.md)
+            .background(RoundedRectangle(cornerRadius: AppCornerRadius.standard).fill(Color.bgInput))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func loadMoreGroups() {
+        guard visibleGroupCount < questionGroups.count else { return }
+        visibleGroupCount = min(visibleGroupCount + groupPageSize, questionGroups.count)
+    }
+
+    private func refreshGroups() {
+        questionGroups = buildGroups()
+        // 列表变化后重置分页，回到默认 20 条
+        visibleGroupCount = min(groupPageSize, questionGroups.count)
+    }
+
+    private func buildGroups() -> [QuestionGroupItem] {
+        guard let quiz = appState.quizService, !quiz.questions.isEmpty else { return [] }
+        let grouped = Dictionary(grouping: quiz.questions) { $0.noteId }
+        var items: [QuestionGroupItem] = []
+        for (noteId, qs) in grouped {
+            let title = qs.first?.noteTitle ?? "未知笔记"
+            var folderPath = ""
+            if let note = appState.storage?.getNote(id: noteId) {
+                folderPath = appState.storage?.getNoteFolderPath(for: note) ?? ""
+            }
+            items.append(QuestionGroupItem(
+                noteId: noteId,
+                title: title,
+                folderPath: folderPath,
+                count: qs.count,
+                answered: qs.filter { $0.status != .unanswered }.count,
+                correct: qs.filter { $0.status == .correct }.count
+            ))
+        }
+        // 排序：文件夹路径升序 + 笔记标题升序
+        return items.sorted {
+            if $0.folderPath != $1.folderPath { return $0.folderPath < $1.folderPath }
+            return $0.title < $1.title
+        }
+    }
+
     // MARK: - 辅助
 
     private func refreshStats() {
@@ -315,6 +466,18 @@ struct QuizHomeView: View {
             stats = quiz.getStats()
         }
     }
+}
+
+// MARK: - 题组条目
+
+private struct QuestionGroupItem: Identifiable {
+    let noteId: UUID
+    let title: String
+    let folderPath: String
+    let count: Int
+    let answered: Int
+    let correct: Int
+    var id: UUID { noteId }
 }
 
 // MARK: - 统计小方块

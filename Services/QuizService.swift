@@ -201,9 +201,11 @@ final class QuizService {
     /// 从题库中随机选取指定数量的题目
     /// 算法：加权随机，做对的题目权重低，答错/未做的题目权重高
     /// 保证不同题目被选中的实际概率相同（在相同状态下）
-    func selectQuestions(count: Int) -> [Question] {
-        guard !questions.isEmpty else { return [] }
-        let targetCount = min(count, questions.count)
+    /// - Parameter noteId: 限定某个笔记的题目（nil = 全库）
+    func selectQuestions(count: Int, noteId: UUID? = nil) -> [Question] {
+        let pool = noteId == nil ? questions : questions.filter { $0.noteId == noteId }
+        guard !pool.isEmpty else { return [] }
+        let targetCount = min(count, pool.count)
 
         // 计算每个题目的权重
         // 未作答: 权重 3.0
@@ -211,7 +213,7 @@ final class QuizService {
         // 答对: 权重 1.0
         // 答对次数越多，权重越低（最低 0.5）
         var weighted: [(question: Question, weight: Double)] = []
-        for q in questions {
+        for q in pool {
             var weight: Double
             switch q.status {
             case .unanswered:
