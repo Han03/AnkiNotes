@@ -52,17 +52,8 @@ struct SettingsView: View {
             }
             .pickerStyle(.segmented)
 
-            // 当前状态简洁展示（展示实际生效的存储方式）
-            HStack(spacing: AppSpacing.sm) {
-                Image(systemName: statusIcon)
-                    .foregroundColor(statusColor)
-                Text(statusText)
-                    .font(.appCaption)
-                    .foregroundColor(.textSecondary)
-                Spacer()
-            }
-            .padding(AppSpacing.md)
-            .background(RoundedRectangle(cornerRadius: AppCornerRadius.standard).fill(Color.bgInput))
+            // 最近云端操作结果（粒度=逻辑操作，如"云端同步/测试连接/保存配置"，非单条接口调用）
+            cloudOperationStatusView
 
             // 未保存提示 + 保存按钮（草稿与生效值不一致时显示）
             if pendingProvider != appState.selectedProvider {
@@ -109,25 +100,89 @@ struct SettingsView: View {
         .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
     }
 
-    private var statusIcon: String {
-        if let msg = appState.providerStatus {
-            if msg.contains("失败") { return "xmark.circle.fill" }
-            if msg.contains("⚠️") { return "exclamationmark.triangle.fill" }
+    // MARK: - 最近云端操作结果展示
+
+    private var cloudOperationStatusView: some View {
+        Group {
+            if let op = appState.lastCloudOperation {
+                HStack(alignment: .top, spacing: AppSpacing.md) {
+                    operationBadge(op.outcome)
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: AppSpacing.xs) {
+                            Text(op.operation)
+                                .font(.appBody)
+                                .fontWeight(.semibold)
+                            Text(relativeTime(op.timestamp))
+                                .font(.appCaption)
+                                .foregroundColor(.textTertiary)
+                        }
+                        Text(op.outcome == .failure ? (op.detail ?? op.summary) : op.summary)
+                            .font(.appCaption)
+                            .foregroundColor(outcomeTextColor(op.outcome))
+                            .textSelection(.enabled)
+                        if !op.steps.isEmpty {
+                            Text(op.steps.joined(separator: " → "))
+                                .font(Font.system(size: 11, weight: .regular, design: .rounded))
+                                .foregroundColor(.textTertiary)
+                                .lineLimit(2)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                }
+            } else {
+                HStack(spacing: AppSpacing.sm) {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .foregroundStyle(Color.textTertiary)
+                    Text("暂无云端操作记录：完成同步、测试连接或保存配置后在此显示结果")
+                        .font(.appCaption)
+                        .foregroundColor(.textSecondary)
+                    Spacer(minLength: 0)
+                }
+            }
         }
-        return "checkmark.circle.fill"
+        .padding(AppSpacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: AppCornerRadius.standard).fill(Color.bgInput))
     }
 
-    private var statusColor: Color {
-        if let msg = appState.providerStatus {
-            if msg.contains("失败") { return .red }
-            if msg.contains("⚠️") { return .orange }
+    @ViewBuilder
+    private func operationBadge(_ outcome: CloudOperationResult.Outcome) -> some View {
+        switch outcome {
+        case .success:
+            Image(systemName: "checkmark.circle.fill")
+                .font(.appBody)
+                .foregroundStyle(Color.green)
+        case .failure:
+            Image(systemName: "xmark.circle.fill")
+                .font(.appBody)
+                .foregroundStyle(Color.red)
+        case .warning:
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.appBody)
+                .foregroundStyle(Color.orange)
+        case .inProgress:
+            ProgressView()
+                .controlSize(.small)
         }
-        return .green
     }
 
-    private var statusText: String {
-        let location = appState.activeFS?.displayLocation ?? "—"
-        return "\(appState.selectedProvider.displayName) · \(location)"
+    private func outcomeTextColor(_ outcome: CloudOperationResult.Outcome) -> Color {
+        switch outcome {
+        case .success: return Color.green
+        case .failure: return Color.red
+        case .warning: return Color.orange
+        case .inProgress: return Color.textSecondary
+        }
+    }
+
+    private func relativeTime(_ date: Date) -> String {
+        let interval = Date().timeIntervalSince(date)
+        if interval < 60 { return "刚刚" }
+        if interval < 3600 { return "\(Int(interval / 60)) 分钟前" }
+        if interval < 86400 { return "\(Int(interval / 3600)) 小时前" }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MM-dd HH:mm"
+        return formatter.string(from: date)
     }
 
     // MARK: WebDAV 配置表单
@@ -246,6 +301,9 @@ struct SettingsView: View {
         defer { isTesting = false }
         let r = await appState.testCurrentWebDAVConnection()
         testResult = r
+        appState.recordCloudOperation(operation: "测试连接",
+                                      outcome: r.success ? .success : .failure,
+                                      summary: r.message)
     }
 
     private func runSaveAndApplyWebDAV() {
@@ -254,13 +312,21 @@ struct SettingsView: View {
         let ok = appState.saveAndApplyWebDAV()
         // 保存成功后草稿与实际生效值同步（失败占位时 selectedProvider 仍为 .webDAV）
         pendingProvider = appState.selectedProvider
+        let summary: String
         if let msg = appState.providerStatus {
             testResult = (ok, msg)
+            summary = msg
         } else if ok {
-            testResult = (true, "已成功切换为 WebDAV。请到笔记页下拉同步，从云端拉取笔记。")
+            let successMsg = "已成功切换为 WebDAV。请到笔记页下拉同步，从云端拉取笔记。"
+            testResult = (true, successMsg)
+            summary = successMsg
         } else {
-            testResult = (false, "切换失败，请查看状态提示。")
+            summary = "切换失败，请查看状态提示。"
+            testResult = (false, summary)
         }
+        appState.recordCloudOperation(operation: "保存配置",
+                                      outcome: ok ? .success : .failure,
+                                      summary: summary)
     }
 
     /// 保存存储方式草稿：Local/iCloud 直接应用；WebDAV 走严格校验（配置齐全才真正切换）
@@ -269,12 +335,19 @@ struct SettingsView: View {
         if target == .webDAV {
             // 与表单"保存并应用"一致的严格流程（内部处理 selectedProvider 设置与 Keychain 密码写入）
             let ok = appState.saveAndApplyWebDAV()
+            var statusMsg: String?
             if let msg = appState.providerStatus {
+                statusMsg = msg
                 testResult = (ok, msg)
             }
+            appState.recordCloudOperation(operation: "保存配置",
+                                          outcome: ok ? .success : .failure,
+                                          summary: statusMsg ?? (ok ? "已成功切换为 WebDAV" : "切换失败"))
         } else {
             // Local/iCloud：赋值触发 didSet → applyFileSystem 立即生效
             appState.selectedProvider = target
+            appState.recordCloudOperation(operation: "保存配置", outcome: .success,
+                                          summary: "已切换为 \(target.displayName) 存储")
         }
         // 草稿同步为实际生效值（WebDAV 配置不完整时 selectedProvider 停留在 .webDAV 占位）
         pendingProvider = appState.selectedProvider

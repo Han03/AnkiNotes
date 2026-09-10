@@ -33,6 +33,37 @@ struct AnkiNotesApp: App {
     }
 }
 
+// MARK: - 云端操作结果（设置页"同步与存储"状态区展示）
+
+/// 一次云端逻辑操作的结果（粒度=操作：同步/测试连接/保存配置；不含单条接口调用）
+struct CloudOperationResult: Codable, Identifiable {
+    enum Outcome: String, Codable {
+        case success        // 绿勾
+        case failure        // 红叉
+        case warning        // 橙三角（已取消/部分成功）
+        case inProgress     // 转圈（仅同步进行中短暂存在，不持久化）
+    }
+
+    let id: UUID
+    var operation: String   // 操作名："云端同步" / "测试连接" / "保存配置"
+    var outcome: Outcome    // 最终结果
+    var summary: String     // 一行结果摘要（不带 emoji 前缀）
+    var steps: [String]     // 本次操作的关键步骤摘要（≤8 条）
+    var detail: String?     // 失败时的具体原因
+    var timestamp: Date     // 完成时间
+
+    init(operation: String, outcome: Outcome, summary: String,
+         steps: [String] = [], detail: String? = nil, timestamp: Date = Date()) {
+        self.id = UUID()
+        self.operation = operation
+        self.outcome = outcome
+        self.summary = summary
+        self.steps = steps
+        self.detail = detail
+        self.timestamp = timestamp
+    }
+}
+
 // MARK: - 全局应用状态
 @MainActor
 final class AppState: ObservableObject {
@@ -110,6 +141,28 @@ final class AppState: ObservableObject {
     @Published var quizError: String? = nil  // 生成题目报错信息
 
     @Published var providerStatus: String? = nil
+
+    // MARK: - 最近云端操作结果（设置页状态区展示）
+
+    /// 最近一次云端逻辑操作结果；inProgress 不持久化（避免 app 被杀后重启显示"正在进行"）
+    @Published var lastCloudOperation: CloudOperationResult? {
+        didSet {
+            guard let op = lastCloudOperation, op.outcome != .inProgress,
+                  let data = try? JSONEncoder().encode(op) else { return }
+            UserDefaults.standard.set(data, forKey: Self.keyLastCloudOperation)
+        }
+    }
+    private static let keyLastCloudOperation = "AnkiNotes.LastCloudOperation"
+
+    /// 记录一次云端操作结果（线程安全：内部切回主线程更新）
+    func recordCloudOperation(operation: String, outcome: CloudOperationResult.Outcome,
+                              summary: String, steps: [String] = [], detail: String? = nil) {
+        let op = CloudOperationResult(operation: operation, outcome: outcome,
+                                      summary: summary, steps: steps, detail: detail)
+        DispatchQueue.main.async {
+            self.lastCloudOperation = op
+        }
+    }
     @Published var iCloudContainerAvailable: Bool = false
     @Published var isSyncing: Bool = false  // ✅ 正在同步/导入中（UI 显示加载提示）
     @Published var isSilentSyncing: Bool = false  // 后台静默同步中（不显示 UI 提示）
@@ -162,6 +215,11 @@ final class AppState: ObservableObject {
             ttsConfig = cfg
         }
         TTSService.shared.updateConfig(ttsConfig)
+        // 加载最近云端操作结果
+        if let data = UserDefaults.standard.data(forKey: Self.keyLastCloudOperation),
+           let op = try? JSONDecoder().decode(CloudOperationResult.self, from: data) {
+            lastCloudOperation = op
+        }
         // 3) 创建当前 Provider 对应 CloudFileSystem，并组装 FileSystem + Storage + Scheduler
         applyFileSystem(type: selectedProvider, webDAVConfig: webDAVConfig)
         // 4) 状态初值
@@ -350,6 +408,8 @@ final class AppState: ObservableObject {
         guard webDAVFS != nil else {
             if !silent {
                 providerStatus = "⚠️ 未配置 WebDAV，无法同步。请到设置页配置 WebDAV。"
+                recordCloudOperation(operation: "云端同步", outcome: .warning,
+                                     summary: "未配置 WebDAV，无法同步。请到设置页配置 WebDAV。")
             }
             completion?(StorageService.ImportReport())
             return
@@ -373,6 +433,9 @@ final class AppState: ObservableObject {
         // 重置取消标志和错误信息
         resetCancelFlag()
         
+        // 记录最近云端操作：同步开始（清掉旧的失败残留，UI 显示进行中）
+        recordCloudOperation(operation: "云端同步", outcome: .inProgress, summary: "正在执行同步…")
+        
         // 启动同步日志会话
         SyncLogger.shared.startSession()
         SyncLogger.shared.info("同步开始，silent=\(silent)")
@@ -380,6 +443,7 @@ final class AppState: ObservableObject {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
             let syncStartTime = Date()
+            var opSteps: [String] = []  // 本次同步的关键步骤摘要（操作粒度）
             defer {
                 let syncDuration = Date().timeIntervalSince(syncStartTime)
                 SyncLogger.shared.info("同步结束，总耗时 \(String(format: "%.2f", syncDuration))秒")
@@ -421,6 +485,8 @@ final class AppState: ObservableObject {
                             self.syncStep = "同步完成"
                             self.syncProgress = 100
                             self.syncDetail = "根目录无更新，无需同步"
+                            self.recordCloudOperation(operation: "云端同步", outcome: .success,
+                                                      summary: "云端无更新，跳过同步", steps: opSteps)
                         }
                         SyncLogger.shared.stepDone("检查根目录更新状态（获取锁前）")
                         completion?(StorageService.ImportReport())
@@ -455,6 +521,8 @@ final class AppState: ObservableObject {
                     DispatchQueue.main.async {
                         self.syncErrorMessage = "同步已取消"
                         self.providerStatus = "⚠️ 同步已取消"
+                        self.recordCloudOperation(operation: "云端同步", outcome: .warning,
+                                                  summary: "同步已取消", steps: opSteps)
                     }
                     completion?(StorageService.ImportReport())
                     return
@@ -504,6 +572,8 @@ final class AppState: ObservableObject {
                             DispatchQueue.main.async {
                                 self.syncErrorMessage = "同步已取消"
                                 self.providerStatus = "⚠️ 同步已取消"
+                                self.recordCloudOperation(operation: "云端同步", outcome: .warning,
+                                                          summary: "同步已取消", steps: opSteps)
                             }
                             completion?(StorageService.ImportReport())
                             return
@@ -519,6 +589,9 @@ final class AppState: ObservableObject {
                 DispatchQueue.main.async {
                     self.syncErrorMessage = "获取云端锁失败，请稍后重试"
                     self.providerStatus = "❌ 获取云端锁失败，已重试 \(maxLockRetries) 次，请稍后重试"
+                    self.recordCloudOperation(operation: "云端同步", outcome: .failure,
+                                              summary: "获取云端锁失败",
+                                              detail: "已重试 \(maxLockRetries) 次后仍未获取到云端锁，请稍后重试。可能原因：其他设备正在同步、网络异常或云端限流。", steps: opSteps)
                 }
                 completion?(StorageService.ImportReport())
                 return
@@ -526,6 +599,7 @@ final class AppState: ObservableObject {
             let lockDuration = Date().timeIntervalSince(lockStartTime)
             SyncLogger.shared.stepDone("获取云端锁", duration: lockDuration)
             SyncLogger.shared.info("获取云端锁成功，重试 \(retryCount) 次，耗时 \(String(format: "%.2f", lockDuration))秒")
+            opSteps.append("获取云端锁")
             DispatchQueue.main.async {
                 self.providerStatus = "✅ 获取云端锁成功，开始同步..."
                 self.syncStep = "获取云端锁"
@@ -557,6 +631,7 @@ final class AppState: ObservableObject {
             let metaPullDuration = Date().timeIntervalSince(metaPullStartTime)
             SyncLogger.shared.stepDone("拉取云端元数据", duration: metaPullDuration)
             SyncLogger.shared.info("拉取云端元数据: \(pulled) 个文件，耗时 \(String(format: "%.2f", metaPullDuration))秒")
+            opSteps.append("拉取云端元数据(\(pulled)个)")
             // 智能合并 SRS 数据：基于 updatedAt 合并本地备份和云端数据，避免多端复习时覆盖
             if !localNoteMetasBackup.isEmpty {
                 SyncLogger.shared.stepStart("智能合并 SRS 数据")
@@ -590,6 +665,7 @@ final class AppState: ObservableObject {
             let knowledgePullDuration = Date().timeIntervalSince(knowledgePullStartTime)
             SyncLogger.shared.stepDone("拉取知识点缓存", duration: knowledgePullDuration)
             SyncLogger.shared.info("拉取知识点缓存: \(knowledgePulled) 个文件，耗时 \(String(format: "%.2f", knowledgePullDuration))秒")
+            opSteps.append("拉取知识点缓存(\(knowledgePulled)个)")
             // 从云端扫描并导入到本地（此时内存中的索引为空，会创建所有笔记）
             SyncLogger.shared.stepStart("从云端导入数据（笔记/讲稿/题目）")
             let importStartTime = Date()
@@ -597,6 +673,7 @@ final class AppState: ObservableObject {
             let importDuration = Date().timeIntervalSince(importStartTime)
             SyncLogger.shared.stepDone("从云端导入数据", duration: importDuration)
             SyncLogger.shared.info("导入完成: 扫描 \(report.scannedMarkdownFiles) 个笔记文件，新增 \(report.importedCount)，跳过 \(report.skippedCount)，失败 \(report.failedCount)，讲稿 \(report.lectureImportedCount) 个，耗时 \(String(format: "%.2f", importDuration))秒")
+            opSteps.append("导入(新增\(report.importedCount)/跳过\(report.skippedCount))")
             // 【优化】不释放锁，本地处理完成后直接推送数据，全程只持有一次锁
             // 原因：锁有自动续期机制（18秒续期一次，20秒过期），本地处理不会导致锁过期
             // 好处：避免第二次获取锁时的等待和限流，简化同步流程
@@ -686,6 +763,9 @@ final class AppState: ObservableObject {
                     self.syncStep = "同步完成"
                     self.syncProgress = 100
                     self.syncDetail = "同步已完成"
+                    self.recordCloudOperation(operation: "云端同步", outcome: .success,
+                                              summary: "同步完成：新增 \(report.importedCount)，跳过 \(report.skippedCount)，失败 \(report.failedCount)（本地无更改，跳过云端推送）",
+                                              steps: opSteps)
                     self.refreshStats()
                     completion?(report)
                 }
@@ -709,6 +789,7 @@ final class AppState: ObservableObject {
             let metaPushDuration = Date().timeIntervalSince(metaPushStartTime)
             SyncLogger.shared.stepDone("推送元数据到云端", duration: metaPushDuration)
             SyncLogger.shared.info("推送元数据到云端: \(pushed) 个文件，耗时 \(String(format: "%.2f", metaPushDuration))秒")
+            opSteps.append("推送元数据(\(pushed)个)")
             // 推送知识点缓存
             DispatchQueue.main.async {
                 self.syncStep = "推送知识点缓存"
@@ -721,6 +802,7 @@ final class AppState: ObservableObject {
             let knowledgePushDuration = Date().timeIntervalSince(knowledgePushStartTime)
             SyncLogger.shared.stepDone("推送知识点缓存到云端", duration: knowledgePushDuration)
             SyncLogger.shared.info("推送知识点缓存到云端: \(knowledgePushed) 个文件，耗时 \(String(format: "%.2f", knowledgePushDuration))秒")
+            opSteps.append("推送知识点(\(knowledgePushed)个)")
             
             // 推送完成，释放锁（全程只释放一次）
             CloudLockService.shared.releaseLock(cloudFS: fs)
@@ -742,6 +824,9 @@ final class AppState: ObservableObject {
                 self.syncStep = "同步完成"
                 self.syncProgress = 100
                 self.syncDetail = "同步已完成"
+                self.recordCloudOperation(operation: "云端同步", outcome: .success,
+                                          summary: "同步完成：新增 \(report.importedCount)，跳过 \(report.skippedCount)，失败 \(report.failedCount)",
+                                          steps: opSteps)
                 self.refreshStats()
                 completion?(report)
             }
