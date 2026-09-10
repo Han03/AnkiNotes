@@ -8,30 +8,79 @@
 import Foundation
 
 /// 知识点详解状态存储（用于流式打字机效果，解决异步闭包中修改 @State 不生效的问题）
+/// 打字机实现：网络/AsyncStream 的 chunk 到达节奏不可控（可能一次性积压全部行），
+/// 因此 appendChunk 只做缓冲，由 50ms 定时器统一 flush 到 displayedText，
+/// 保证 UI 以固定节奏逐批刷新，形成稳定的打字机效果。
 final class KnowledgeExplanationStore: ObservableObject {
     @Published var displayedText = ""
     @Published var fullText = ""
     @Published var isLoading = true
     
+    private var pendingBuffer = ""      // 待刷出的累积内容
+    private var flushTimer: Timer?      // 节流刷新定时器
+    private var totalChunks = 0         // 累计收到的 chunk 数（日志用）
+    
     func appendChunk(_ chunk: String) {
-        displayedText += chunk
+        totalChunks += 1
+        SyncLogger.shared.info("📝 appendChunk: #\(totalChunks), 长度=\(chunk.count), 内容前20=\(String(chunk.prefix(20)))")
+        pendingBuffer += chunk
+        // 启动/复用节流定时器（50ms 一次）
+        ensureFlushTimer()
+    }
+    
+    /// 启动节流刷新定时器（只启动一次，buffer 清空后由定时器自动停）
+    private func ensureFlushTimer() {
+        guard flushTimer == nil else { return }
+        let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
+            self?.flushPending()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        flushTimer = timer
+        SyncLogger.shared.info("📝 启动打字机节流定时器 (50ms)")
+    }
+    
+    /// 把累积内容刷到 displayedText（主线程调用）
+    private func flushPending() {
+        guard !pendingBuffer.isEmpty else {
+            // buffer 为空且已结束时不自动停（避免频繁启停），complete/reset 时统一停
+            return
+        }
+        displayedText += pendingBuffer
+        SyncLogger.shared.info("📝 打字机刷新: 追加\(pendingBuffer.count)字, 当前总长=\(displayedText.count), 累计chunk=\(totalChunks)")
+        pendingBuffer = ""
     }
     
     func complete(with text: String) {
+        // 先刷出剩余 buffer，再标记完成
+        flushPending()
         fullText = text
         isLoading = false
+        flushTimer?.invalidate()
+        flushTimer = nil
+        SyncLogger.shared.info("📝 完成: fullText长度=\(fullText.count), displayedText长度=\(displayedText.count), 累计chunk=\(totalChunks)")
     }
     
     func setCached(_ text: String) {
         displayedText = text
         fullText = text
         isLoading = false
+        pendingBuffer = ""
+        flushTimer?.invalidate()
+        flushTimer = nil
     }
     
     func reset() {
         displayedText = ""
         fullText = ""
         isLoading = true
+        pendingBuffer = ""
+        totalChunks = 0
+        flushTimer?.invalidate()
+        flushTimer = nil
+    }
+    
+    deinit {
+        flushTimer?.invalidate()
     }
 }
 
@@ -110,6 +159,7 @@ final class SSEStreamParser: NSObject, URLSessionDataDelegate, @unchecked Sendab
             return
         }
 
+        SyncLogger.shared.info("📡 SSE 收到行并 yield: 长度=\(content.count), 内容前20=\(String(content.prefix(20)))")
         continuation.yield(content)
     }
 }
@@ -497,12 +547,18 @@ final class KnowledgeService: ObservableObject {
                 dataTask.resume()
 
                 // 消费流：后台线程逐 chunk 消费，每个 chunk 独立回主线程刷新 UI
+                var chunkCount = 0
                 for try await chunk in byteStream {
                     fullText += chunk
+                    chunkCount += 1
+                    let n = chunkCount
+                    let len = chunk.count
                     DispatchQueue.main.async {
+                        SyncLogger.shared.info("📡 派发UI: chunk#\(n), 长度=\(len)")
                         onChunk(chunk)
                     }
                 }
+                SyncLogger.shared.info("📡 流结束: 共消费 \(chunkCount) 个 chunk, fullText长度=\(fullText.count)")
 
                 streamSession.invalidateAndCancel()
             } catch {

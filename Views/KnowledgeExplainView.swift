@@ -94,6 +94,7 @@ struct KnowledgeExplainView: View {
             config: config,
             onChunk: { chunk in
                 // 服务端（Task.detached）已保证每个 chunk 回主线程回调，直接追加实现打字机
+                SyncLogger.shared.info("📝 View.onChunk: 长度=\(chunk.count)")
                 explanationStore.appendChunk(chunk)
             },
             completion: { finalText in

@@ -732,7 +732,7 @@ private extension UIFont {
 private final class KnowledgeUnderlineLayoutManager: NSLayoutManager {
     private let underlineColor = UIColor(Color.brandPrimary)
     private let underlineHeight: CGFloat = 2.0   // 下划线粗细
-    private let underlineOffset: CGFloat = 1.5   // 下划线与文字底部的距离（避免与下一行文字重合）
+    private let underlineOffset: CGFloat = 0.5   // 下划线与文字底部的距离（避免与下一行文字重合）
 
     override func drawUnderline(
         forGlyphRange glyphRange: NSRange,
