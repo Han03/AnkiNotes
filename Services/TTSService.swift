@@ -109,7 +109,7 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
     @Published private(set) var totalSentences = 0
     @Published private(set) var currentText = ""
     
-    private var sentences: [String] = []
+    @Published public private(set) var sentences: [String] = []
     private var config: TTSConfig
     private var onSentenceComplete: ((Int) -> Void)?
     private var onComplete: (() -> Void)?
@@ -147,7 +147,8 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
     
     // MARK: - 文本分句
     
-    private func splitIntoSentences(_ text: String) -> [String] {
+    /// 将文本分句（公开静态方法，供视图层使用以确保分句一致）
+    public static func splitIntoSentences(_ text: String) -> [String] {
         var result: [String] = []
         let separators = CharacterSet(charactersIn: "。！？!?\n")
         var current = ""
@@ -174,11 +175,12 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
     /// 播放讲稿文本
     /// - Parameters:
     ///   - lecturePath: 讲稿相对路径（如 "JAVA高级/01-Java核心/IO与NIO"），用于TTS缓存按讲稿目录分层存储
-    func speak(text: String, lecturePath: String? = nil, onSentenceComplete: ((Int) -> Void)? = nil, onComplete: (() -> Void)? = nil) {
+    ///   - startSentenceIndex: 从指定句子索引开始播放（用于跳转播放，避免对子文本重新分句导致索引不一致）
+    func speak(text: String, lecturePath: String? = nil, startSentenceIndex: Int = 0, onSentenceComplete: ((Int) -> Void)? = nil, onComplete: (() -> Void)? = nil) {
         stop()
-        self.sentences = splitIntoSentences(text)
+        self.sentences = Self.splitIntoSentences(text)
         self.totalSentences = sentences.count
-        self.currentSentenceIndex = 0
+        self.currentSentenceIndex = min(max(startSentenceIndex, 0), max(sentences.count - 1, 0))
         self.onSentenceComplete = onSentenceComplete
         self.onComplete = onComplete
         self.audioCache = [:]
@@ -187,7 +189,7 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
         // 设置TTS缓存的讲稿路径上下文（按讲稿目录分层存储）
         TTSCacheManager.shared.setLecturePath(lecturePath)
         
-        SyncLogger.shared.info("🔊 speak: 开始播放，共\(sentences.count)句，provider=\(config.provider.displayName)，lecturePath=\(lecturePath ?? "nil")")
+        SyncLogger.shared.info("🔊 speak: 开始播放，共\(sentences.count)句，起始=\(currentSentenceIndex)，provider=\(config.provider.displayName)，lecturePath=\(lecturePath ?? "nil")")
         
         guard !sentences.isEmpty else {
             onComplete?()
@@ -666,6 +668,17 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDele
     private func prepareForBackgroundPlayback() {
         activateAudioSessionIfNeeded()
         setupRemoteCommandCenter()
+    }
+    
+    /// 跳转到指定句子索引并开始播放（用于视图层跳转，确保 TTSService 内部索引与视图一致）
+    func skipToSentence(at index: Int) {
+        guard index >= 0 && index < sentences.count else { return }
+        stopCurrentOnly()
+        currentSentenceIndex = index
+        currentText = sentences[index]
+        isSpeaking = true
+        isPaused = false
+        speakCurrentSentence()
     }
     
     func skipToNext() {
