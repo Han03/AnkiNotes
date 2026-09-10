@@ -148,6 +148,7 @@ struct ReviewSessionView: View {
                         )
                         }
                         .padding(20)
+                        .padding(.bottom, 112)  // 预留底部操作栏高度（按钮44 + 上下边距34 + 底部安全区约34），避免滚动到底部时内容被遮挡
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     // 切换笔记时重置滚动位置到顶部
