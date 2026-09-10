@@ -261,10 +261,10 @@ struct EmptyStateView: View {
     }
 }
 
-// MARK: - 全局 TextStyle 语义字号系统（比 iOS 默认大 1-2 档，配合 AppState.textScale 全局缩放）
+// MARK: - 全局 TextStyle 语义字号系统（比 iOS 默认大 1-2 档）
 
 /// 统一的语义化文字大小（避免直接写 .font(.caption/.caption2) 导致整体偏小不协调）
-/// 默认已比 iOS 同语义系统字号大 1-2pt；再通过 Environment(\.textScale) 实现 4 档全局放大缩小
+/// 默认已比 iOS 同语义系统字号大 1-2pt
 enum TextStyle {
     case screenTitle        // 30 pt semibold → 主页面大数字（连续打卡天数等）
     case sectionTitle       // 20 pt semibold → Section 标题（"近7天复习"/"卡片预览"）
@@ -297,14 +297,12 @@ enum TextStyle {
     }
 }
 
-/// 缩放修饰器：读取 Environment 的 textScale（从 AppState 注入），对 size 线性缩放
+/// 语义字号修饰器：按 TextStyle 定义渲染固定字号
 struct TextStyleModifier: ViewModifier {
     let style: TextStyle
-    @Environment(\.textScale) private var scale
 
     func body(content: Content) -> some View {
-        let size = style.baseSize * CGFloat(scale)
-        return content.font(.system(size: size, weight: style.weight, design: .rounded))
+        return content.font(.system(size: style.baseSize, weight: style.weight, design: .rounded))
     }
 }
 

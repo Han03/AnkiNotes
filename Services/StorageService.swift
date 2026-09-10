@@ -543,10 +543,7 @@ final class StorageService: ObservableObject {
         collectMarkdownFilesFromFS(cloud, at: cloudRoot, skipNames: skipNames, into: &cloudFiles, rootURL: cloudRoot, snapshot: syncSnapshotService, directoryTimes: &directoryTimes)
         report.scannedMarkdownFiles = cloudFiles.count
         syncProgressCallback?("扫描云端文件", 5, "发现 \(cloudFiles.count) 篇需要更新的笔记")
-        guard report.scannedMarkdownFiles > 0 else {
-            report.warningMessages.append("云端 Notes 目录没有发现 .md 文件")
-            return report
-        }
+        // 云端 Notes 目录没有 .md 文件是正常状态（可能只同步讲稿/题目），不阻断后续同步
         for (idx, srcURL) in cloudFiles.enumerated() {
             // 更新同步进度（笔记导入占 5%-50%）
             let noteProgress = 5.0 + Double(idx) / Double(cloudFiles.count) * 45.0
@@ -1029,8 +1026,8 @@ final class StorageService: ObservableObject {
 
         report.scannedMarkdownFiles = mdFiles.count
 
+        // Notes 目录没有 .md 文件是正常状态（没有可导入内容），直接返回空报告
         guard report.scannedMarkdownFiles > 0 else {
-            report.warningMessages.append("Notes 目录没有发现 .md/.markdown 文件（请确认笔记放在了远端的 Notes/ 目录下；本机模式：通过爱思助手把 Markdown 文件夹拖入 App 共享目录的 Notes/ 下）")
             return report
         }
 

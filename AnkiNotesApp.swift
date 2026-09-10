@@ -16,8 +16,6 @@ struct AnkiNotesApp: App {
         WindowGroup {
             MainTabView()
                 .environmentObject(appState)
-                // 注入全局文字缩放倍率 → 所有 .textStyle() modifier 自动生效
-                .environment(\.textScale, appState.textScale)
                 .onAppear {
                     appState.bootstrap()
                     // 应用启动时后台静默同步
@@ -32,17 +30,6 @@ struct AnkiNotesApp: App {
                     }
                 }
         }
-    }
-}
-
-// MARK: - 环境键：全局文字缩放（由 .textStyle() 读取）
-private struct TextScaleKey: EnvironmentKey {
-    static let defaultValue: Double = 1.0
-}
-extension EnvironmentValues {
-    var textScale: Double {
-        get { self[TextScaleKey.self] }
-        set { self[TextScaleKey.self] = newValue }
     }
 }
 
@@ -144,32 +131,10 @@ final class AppState: ObservableObject {
         syncErrorMessage = nil
     }
 
-    // MARK: - 全局文字缩放倍率
-
-    static let textScaleOptions: [Double] = [0.85, 1.0, 1.15, 1.3]
-    static let textScaleLabels: [String] = ["较小", "标准", "较大", "超大"]
-
-    @Published var textScale: Double = 1.0 {
-        didSet {
-            guard isBootstrapped else { return }
-            UserDefaults.standard.set(textScale, forKey: Self.keyTextScale)
-            // 写环境值虽然通过 StateObject 触发，但我们确保 Observable 发布
-            objectWillChange.send()
-        }
-    }
-
-    var textScaleLabel: String {
-        if let idx = Self.textScaleOptions.firstIndex(of: textScale) {
-            return Self.textScaleLabels[idx]
-        }
-        return String(format: "%.0f%%", textScale * 100)
-    }
-
     // MARK: - 持久化 Keys
 
     private static let keyProviderType = "AnkiNotes.ProviderType"
     private static let keyWebDAVConfig = "AnkiNotes.WebDAVConfig"
-    private static let keyTextScale     = "AnkiNotes.TextScale"
 
     // MARK: - 启动
     // 注意：bootstrap 是同步方法，确保 MainTabView Preview 与 App.init 里都能直接调用，
@@ -197,16 +162,13 @@ final class AppState: ObservableObject {
             ttsConfig = cfg
         }
         TTSService.shared.updateConfig(ttsConfig)
-        // 3) 恢复文字大小
-        let storedScale = UserDefaults.standard.double(forKey: Self.keyTextScale)
-        textScale = (storedScale > 0.1 && storedScale < 5) ? storedScale : 1.0
-        // 4) 创建当前 Provider 对应 CloudFileSystem，并组装 FileSystem + Storage + Scheduler
+        // 3) 创建当前 Provider 对应 CloudFileSystem，并组装 FileSystem + Storage + Scheduler
         applyFileSystem(type: selectedProvider, webDAVConfig: webDAVConfig)
-        // 5) 状态初值
+        // 4) 状态初值
         iCloudContainerAvailable = (activeFS as? ICloudFS)?.isAvailable ?? false
         providerStatus = summarizeStatus()
         refreshStats()
-        // 6) 后台异步从云端拉取元数据和知识点缓存到本地
+        // 5) 后台异步从云端拉取元数据和知识点缓存到本地
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self = self, let fs = self.activeFS else { return }
             let pulled = MetadataSyncService.shared.pullFromCloud(cloudFS: fs)
@@ -225,7 +187,7 @@ final class AppState: ObservableObject {
             }
         }
         isBootstrapped = true
-        // 7) 监听元数据/知识点缓存变更通知，自动推送到云端（防抖）
+        // 6) 监听元数据/知识点缓存变更通知，自动推送到云端（防抖）
         NotificationCenter.default.addObserver(
             forName: .metadataSyncNeeded,
             object: nil,
@@ -709,9 +671,15 @@ final class AppState: ObservableObject {
                 CloudLockService.shared.releaseLock(cloudFS: fs)
                 SyncLogger.shared.info("本地无更改，释放云端锁（全程只持有一次锁）")
                 DispatchQueue.main.async {
-                    var status = "✅ 同步完成：新增 \(report.importedCount)，跳过 \(report.skippedCount)，失败 \(report.failedCount)，扫描到 \(report.scannedMarkdownFiles) 个 .md 文件"
+                    var status = "✅ 同步完成：新增 \(report.importedCount)，跳过 \(report.skippedCount)，失败 \(report.failedCount)"
+                    if report.scannedMarkdownFiles > 0 {
+                        status += "，扫描到 \(report.scannedMarkdownFiles) 个 .md 文件"
+                    }
                     if report.scannedLectureFiles > 0 {
                         status += "，讲稿 \(report.lectureImportedCount) 个"
+                    }
+                    if report.scannedQuestionFiles > 0 {
+                        status += "，题目 \(report.questionImportedCount) 组"
                     }
                     status += "（本地无更改，跳过云端推送）"
                     self.providerStatus = status
@@ -759,16 +727,18 @@ final class AppState: ObservableObject {
             SyncLogger.shared.info("推送完成，释放云端锁（全程只持有一次锁）")
             
             DispatchQueue.main.async {
-                // 静默同步也显示完成状态
-                if report.scannedMarkdownFiles == 0 {
-                    self.providerStatus = "⚠️ 云端 Notes 目录没有发现 .md 文件。请确认笔记放在了坚果云的 Notes/ 目录下。"
-                } else {
-                    var status = "✅ 同步完成：新增 \(report.importedCount)，跳过 \(report.skippedCount)，失败 \(report.failedCount)，扫描到 \(report.scannedMarkdownFiles) 个 .md 文件"
-                    if report.scannedLectureFiles > 0 {
-                        status += "，讲稿 \(report.lectureImportedCount) 个"
-                    }
-                    self.providerStatus = status
+                // 静默同步也显示完成状态（云端 Notes 无 .md 文件是正常状态，不显示警告）
+                var status = "✅ 同步完成：新增 \(report.importedCount)，跳过 \(report.skippedCount)，失败 \(report.failedCount)"
+                if report.scannedMarkdownFiles > 0 {
+                    status += "，扫描到 \(report.scannedMarkdownFiles) 个 .md 文件"
                 }
+                if report.scannedLectureFiles > 0 {
+                    status += "，讲稿 \(report.lectureImportedCount) 个"
+                }
+                if report.scannedQuestionFiles > 0 {
+                    status += "，题目 \(report.questionImportedCount) 组"
+                }
+                self.providerStatus = status
                 self.syncStep = "同步完成"
                 self.syncProgress = 100
                 self.syncDetail = "同步已完成"
@@ -954,7 +924,7 @@ final class AppState: ObservableObject {
             return "⚠️ iCloud 容器不可用（需要 ¥688 开发者账号 + entitlements + Portal 配置 iCloud Container，已回退到本地 Documents）"
         }
         if fs is WebDAVFS {
-            return "🥇 WebDAV 已启用：\(fs.displayLocation)（后台按文件粒度同步，关闭前会自动完成写入）"
+            return "🌐 WebDAV 已启用：\(fs.displayLocation)（后台按文件粒度同步，关闭前会自动完成写入）"
         }
         return "📁 使用本机 Documents 存储（App 更新/覆盖安装不会丢失 Documents 中的数据，删除 App 会删除）"
     }

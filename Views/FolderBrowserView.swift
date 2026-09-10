@@ -319,7 +319,7 @@ private struct FolderRow: View {
     var body: some View {
         HStack(spacing: AppSpacing.md) {
             Image(systemName: "folder.fill")
-                .foregroundColor(.brandPrimary.opacity(0.35))  // 柔和橙，融入主题
+                .foregroundColor(.brandPrimary.opacity(0.8))  // 柔和橙但保持清晰，避免像禁用态
                 .textStyle(.subsectionTitle)
                 .frame(width: 32)
             VStack(alignment: .leading, spacing: 3) {

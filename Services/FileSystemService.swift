@@ -2,7 +2,7 @@
 //  FileSystemService.swift
 //  AnkiNotes
 //
-//  重构版：通过 CloudFileSystem 协议调度（📁本地 / ☁️iCloud / 🥇WebDAV）
+//  重构版：通过 CloudFileSystem 协议调度（📁本地 / ☁️iCloud / 🌐WebDAV）
 //  上层业务代码完全不感知底层 Provider 差异。
 //
 //  Created by AI Assistant on 2026/8/29.

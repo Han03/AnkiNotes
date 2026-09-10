@@ -18,8 +18,11 @@ struct SettingsView: View {
         ScrollView {
             VStack(spacing: AppSpacing.lg) {
                 syncStorageSection
+                Divider()
                 aiSection
+                Divider()
                 readingPlaybackSection
+                Divider()
                 aboutSection
             }
             .padding()
@@ -97,8 +100,6 @@ struct SettingsView: View {
 
     private var webDAVConfigForm: some View {
         VStack(alignment: .leading, spacing: AppSpacing.md) {
-            Divider()
-
             field(label: "服务器地址", placeholder: "https://dav.jianguoyun.com/dav/",
                   text: $appState.webDAVConfig.serverURL)
             field(label: "用户名", placeholder: "your@mail.com",
@@ -334,35 +335,6 @@ struct SettingsView: View {
                         .pickerStyle(.menu)
                     }
                 }
-            }
-
-            Divider()
-
-            // 全局文字大小
-            VStack(alignment: .leading, spacing: AppSpacing.md) {
-                HStack {
-                    Text("全局文字大小")
-                        .font(.appBody)
-                        .foregroundColor(.textPrimary)
-                    Spacer()
-                    Text(appState.textScaleLabel)
-                        .font(.appCaption)
-                        .foregroundColor(.textSecondary)
-                }
-                Picker("文字大小", selection: $appState.textScale) {
-                    ForEach(Array(zip(AppState.textScaleLabels, AppState.textScaleOptions)), id: \.1) { label, value in
-                        Text(label).tag(value)
-                    }
-                }
-                .pickerStyle(.segmented)
-
-                // 精简预览（一行示例）
-                Text("预览：调整后全 App 文字同步缩放")
-                    .font(.appCaption)
-                    .foregroundColor(.textSecondary)
-                    .padding(AppSpacing.md)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(RoundedRectangle(cornerRadius: AppCornerRadius.standard).fill(Color.bgInput))
             }
         }
         .padding(AppSpacing.xl)

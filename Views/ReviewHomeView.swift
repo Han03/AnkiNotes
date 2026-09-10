@@ -159,7 +159,7 @@ struct ReviewHomeView: View {
                         } label: {
                             HStack(spacing: AppSpacing.md) {
                                 Image(systemName: "folder.fill")
-                                    .foregroundColor(.brandPrimary.opacity(0.35))
+                                    .foregroundColor(.brandPrimary.opacity(0.8))
                                     .frame(width: 24)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(folder.name)

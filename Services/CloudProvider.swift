@@ -19,7 +19,7 @@ import Security
 enum CloudProviderType: String, Codable, CaseIterable, Identifiable, Hashable {
     case local      // 📁 本机 Documents（默认，离线无依赖）
     case iCloud     // ☁️ 苹果 iCloud Drive（系统级，需 ¥688 Dev + entitlements）
-    case webDAV     // 🥇 WebDAV 通用协议（兼容：坚果云 / 群晖 NAS / Nextcloud / Alist 桥接）
+    case webDAV     // 🌐 WebDAV 通用协议（兼容：坚果云 / 群晖 NAS / Nextcloud / Alist 桥接）
 
     var id: String { rawValue }
 
@@ -28,7 +28,7 @@ enum CloudProviderType: String, Codable, CaseIterable, Identifiable, Hashable {
         switch self {
         case .local:  return "本机存储"
         case .iCloud: return "iCloud Drive"
-        case .webDAV: return "WebDAV（坚果云 / NAS）"
+        case .webDAV: return "WebDAV"
         }
     }
 
@@ -460,9 +460,9 @@ final class WebDAVFS: CloudFileSystem {
 
     var displayLocation: String {
         guard let host = config.normalizedBaseURL?.host ?? URL(string: config.serverURL)?.host else {
-            return "🥇 WebDAV（未配置）"
+            return "🌐 WebDAV（未配置）"
         }
-        return "🥇 WebDAV ▸ \(host) \(config.rootPath)"
+        return "🌐 WebDAV ▸ \(host) \(config.rootPath)"
     }
 
     // MARK: - 协议方法
