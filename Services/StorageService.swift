@@ -910,9 +910,9 @@ final class StorageService: ObservableObject {
         collectFilesFromFS(fs, at: url, extensions: ["md", "markdown"], skipNames: skipNames, into: &result, rootURL: rootURL, snapshot: snapshot, directoryTimes: &directoryTimes, fileTimes: &fileTimes, rootScanChildren: rootScanChildren)
     }
     
-    /// 递归收集指定扩展名的云端文件
+    /// 递归收集指定扩展名的云端文件（供 MetadataSyncService 知识点缓存同步共用）
     /// - Parameter rootScanChildren: 预获取的目录子项列表（由根目录扫描传入），非 nil 时省去一次 PROPFIND
-    private func collectFilesFromFS(_ fs: CloudFileSystem, at url: URL, extensions: [String], skipNames: Set<String>, into result: inout [URL], rootURL: URL? = nil, snapshot: SyncSnapshotService? = nil, directoryTimes: inout [String: Date], fileTimes: inout [String: Date], rootScanChildren: [(url: URL, isDirectory: Bool, lastModified: Date?)]? = nil) {
+    func collectFilesFromFS(_ fs: CloudFileSystem, at url: URL, extensions: [String], skipNames: Set<String>, into result: inout [URL], rootURL: URL? = nil, snapshot: SyncSnapshotService? = nil, directoryTimes: inout [String: Date], fileTimes: inout [String: Date], rootScanChildren: [(url: URL, isDirectory: Bool, lastModified: Date?)]? = nil) {
         // 【优化】如果传入了预扫描的子项列表（来自根目录 PROPFIND Depth:1），直接使用，省去一次 PROPFIND
         let children: [(url: URL, isDirectory: Bool, lastModified: Date?)]
         if let preScanned = rootScanChildren {
@@ -971,7 +971,7 @@ final class StorageService: ObservableObject {
     /// - 快照 key 带根目录前缀（Notes/Lecture/Questions），避免同名子目录互相覆盖
     /// - 只有下载成功才更新，失败文件下次同步可重试
     /// - 【优化】使用扫描阶段已收集的 fileTimes 代替额外的 getItemMetadata PROPFIND
-    private func updateSnapshotAfterFileSync(cloud: CloudFileSystem, snap: SyncSnapshotService, rootURL: URL, fileURL: URL, directoryTimes: [String: Date], fileTimes: [String: Date]) {
+    func updateSnapshotAfterFileSync(cloud: CloudFileSystem, snap: SyncSnapshotService, rootURL: URL, fileURL: URL, directoryTimes: [String: Date], fileTimes: [String: Date]) {
         let rootName = rootURL.lastPathComponent
         let relativePath = snap.relativePath(for: fileURL, rootURL: rootURL)
         let prefixedPath = rootName + "/" + relativePath

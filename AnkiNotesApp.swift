@@ -955,6 +955,7 @@ final class AppState: ObservableObject {
         storage.syncSnapshotService = syncSnapshotService
         // 注入到 MetadataSyncService，用于知识点缓存的增量同步跳过
         MetadataSyncService.shared.configure(syncSnapshotService: syncSnapshotService)
+        MetadataSyncService.shared.storage = storage
         // 注入到 KnowledgeService，用于按笔记文件夹路径存储知识点缓存
         KnowledgeService.shared.configure(storageService: storage)
         KnowledgeService.shared.syncSnapshotService = syncSnapshotService
