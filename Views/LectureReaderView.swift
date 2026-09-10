@@ -158,19 +158,27 @@ struct LectureReaderView: View {
                     && lectureContent.contains(String(ttsCurrentText.prefix(20)))
                 
                 // 如果 TTSService 正在播放/暂停当前讲稿，同步实时状态（保留进度）
+                // 注意：TTSService 的 currentSentenceIndex 是相对 speak 文本的索引，
+                // 跳转播放后需加上持久化的 jumpStartIndex 偏移才是本页的绝对索引
                 if ttsIsSpeaking && textMatchesCurrentLecture && ttsCurrentIndex < sentences.count {
-                    isPlaying = true
-                    isPaused = ttsIsPaused
-                    currentSentenceIndex = ttsCurrentIndex
-                    currentSentence = sentences[ttsCurrentIndex]
-                    SyncLogger.shared.info("📖 已同步播放状态: index=\(ttsCurrentIndex), sentence=\(currentSentence.prefix(20))")
+                    let savedJump = loadJumpStart()
+                    jumpStartIndex = savedJump
+                    let actualIndex = savedJump + ttsCurrentIndex
+                    if actualIndex >= 0 && actualIndex < sentences.count {
+                        isPlaying = true
+                        isPaused = ttsIsPaused
+                        currentSentenceIndex = actualIndex
+                        currentSentence = sentences[actualIndex]
+                        SyncLogger.shared.info("📖 已同步播放状态: ttsIndex=\(ttsCurrentIndex), jumpStart=\(savedJump), 实际=\(actualIndex), sentence=\(currentSentence.prefix(20))")
+                    }
                 } else {
                     // TTSService 未在播放当前讲稿（已停止/切到其他讲稿），从持久化进度恢复
                     let saved = loadSavedProgress()
                     if saved > 0 {
+                        jumpStartIndex = loadJumpStart()
                         currentSentenceIndex = saved
                         currentSentence = sentences[saved]
-                        SyncLogger.shared.info("📖 已从持久化恢复播放进度: index=\(saved), sentence=\(currentSentence.prefix(20))")
+                        SyncLogger.shared.info("📖 已从持久化恢复播放进度: index=\(saved), jumpStart=\(jumpStartIndex), sentence=\(currentSentence.prefix(20))")
                     }
                 }
             }
@@ -205,6 +213,7 @@ struct LectureReaderView: View {
                 // 注意：不在 onDisappear 中停止播放，允许后台继续播放
                 if isPlaying || isPaused {
                     saveProgress()
+                    saveJumpStart()
                 }
             }
         }
@@ -375,6 +384,7 @@ struct LectureReaderView: View {
         // 【修复】从当前选中的句子开始播放（未播放时点击句子选中某句后，播放不应重置为第一句）
         let startIndex = min(max(currentSentenceIndex, 0), max(totalSentences - 1, 0))
         jumpStartIndex = startIndex  // 正常进入页面 startIndex=0；选中某句后从该句开始
+        saveJumpStart()  // 持久化偏移，供关闭后重新打开时恢复相对索引转换
         
         // 构造讲稿相对路径（用于TTS缓存按讲稿目录分层存储）
         // 路径格式：{folderPath}/{noteTitle}
@@ -408,8 +418,10 @@ struct LectureReaderView: View {
                     isPaused = false
                     currentSentenceIndex = 0
                     currentSentence = ""
+                    jumpStartIndex = 0
                     // 播放完毕，清除持久化进度（下次从头开始）
                     clearProgress()
+                    clearJumpStart()
                 }
             }
         )
@@ -425,8 +437,10 @@ struct LectureReaderView: View {
         isPaused = false
         currentSentenceIndex = 0
         currentSentence = ""
+        jumpStartIndex = 0
         // 用户主动停止，清除持久化进度（下次从头开始）
         clearProgress()
+        clearJumpStart()
     }
     
     private func previousSentence() {
@@ -446,6 +460,7 @@ struct LectureReaderView: View {
         currentSentenceIndex = index
         currentSentence = sentences[index]
         jumpStartIndex = index  // 【修复】设置跳转起始索引，用于转换TTSService的索引体系
+        saveJumpStart()  // 持久化偏移，供关闭后重新打开时恢复
         
         let remainingText = sentences[index...].joined(separator: "")
         TTSService.shared.stop()
@@ -477,8 +492,10 @@ struct LectureReaderView: View {
                         isPaused = false
                         currentSentenceIndex = 0
                         currentSentence = ""
+                        jumpStartIndex = 0
                         // 播放完毕，清除持久化进度
                         clearProgress()
+                        clearJumpStart()
                     }
                 }
             )
@@ -493,6 +510,11 @@ struct LectureReaderView: View {
     private var progressKey: String {
         let path = folderPath.isEmpty ? note.title : "\(folderPath)/\(note.title)"
         return "lecture_progress_\(path)"
+    }
+    
+    /// 跳转起始偏移存储键（与进度同路径前缀，用于重开后恢复相对索引转换）
+    private var jumpStartKey: String {
+        "\(progressKey)_jumpstart"
     }
     
     /// 保存当前播放进度（暂停/关闭页面时调用）
@@ -511,5 +533,23 @@ struct LectureReaderView: View {
     /// 清除播放进度（播放完毕或主动停止时调用）
     private func clearProgress() {
         UserDefaults.standard.removeObject(forKey: progressKey)
+    }
+    
+    /// 保存跳转起始偏移（开始播放/跳转播放时调用）
+    private func saveJumpStart() {
+        UserDefaults.standard.set(jumpStartIndex, forKey: jumpStartKey)
+        SyncLogger.shared.info("📖 已保存跳转起始偏移: jumpStart=\(jumpStartIndex), key=\(jumpStartKey)")
+    }
+    
+    /// 读取跳转起始偏移（越界时返回 0）
+    private func loadJumpStart() -> Int {
+        let saved = UserDefaults.standard.integer(forKey: jumpStartKey)
+        guard saved >= 0 && saved < sentences.count else { return 0 }
+        return saved
+    }
+    
+    /// 清除跳转起始偏移（播放完毕或主动停止时调用）
+    private func clearJumpStart() {
+        UserDefaults.standard.removeObject(forKey: jumpStartKey)
     }
 }
