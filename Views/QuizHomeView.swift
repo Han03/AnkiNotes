@@ -53,7 +53,6 @@ struct QuizHomeView: View {
             .padding()
         }
         .background(Color(.systemGroupedBackground))
-        .navigationTitle("刷题")
         .onAppear {
             refreshStats()
             refreshGroups()
