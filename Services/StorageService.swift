@@ -328,6 +328,13 @@ final class StorageService: ObservableObject {
             rootScanChildren: nil
         )
 
+        // 【修复】补录 Notes/ 目录自身的快照条目（collectFilesFromFS 只记录后代，不包含根目录自身）
+        // 没有这个条目，根目录级跳过检查中 snapshotDirNames 永远找不到 "Notes"
+        if let notesEntry = rootScanChildren?.first(where: { $0.url.lastPathComponent == "Notes" }),
+           let notesMtime = notesEntry.lastModified {
+            directoryTimes["Notes"] = notesMtime
+        }
+
         report.scannedMarkdownFiles = allCloudFiles.filter { $0.pathExtension == "md" }.count
         syncProgressCallback?("同步云端文件", 10, "发现 \(allCloudFiles.count) 个需要检查的文件")
 
@@ -344,10 +351,12 @@ final class StorageService: ObservableObject {
             // 快照 key 需要与 collectFilesFromFS 中的格式一致（带 Notes/ 前缀）
             let snapshotKey = "Notes/" + relativePath
 
-            // 快照跳过检查
+            // 快照跳过检查（传入云端 mtime，nil 会导致 isFileUpdated 永远返回 true）
+            let fileMtime = fileTimes[snapshotKey]
             if let snap = syncSnapshotService,
-               !snap.isFileUpdated(relativePath: snapshotKey, lastModified: nil) {
-                // 文件无更新，跳过
+               !snap.isFileUpdated(relativePath: snapshotKey, lastModified: fileMtime) {
+                // 文件无更新，跳过下载，但仍刷新快照时间戳
+                snap.updateFile(relativePath: snapshotKey, lastModified: fileMtime)
                 continue
             }
 
