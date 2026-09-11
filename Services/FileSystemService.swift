@@ -367,7 +367,7 @@ final class FileSystemService {
 
         for case let dirURL as URL in enumerator {
             guard let values = try? dirURL.resourceValues(forKeys: [.isDirectoryKey]),
-                  values.isDirectory else { continue }
+                  values.isDirectory == true else { continue }
             let relativePath = dirURL.path.replacingOccurrences(of: root.path + "/", with: "")
             let name = dirURL.lastPathComponent
             let parentPath: String? = {
