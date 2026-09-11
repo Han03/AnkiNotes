@@ -402,11 +402,15 @@ final class FileSystemService {
         let fileManager = FileManager.default
         let root = notesRootDirectory
 
+        SyncLogger.shared.debug("scanFolders: 扫描根目录 \(root.path)")
         guard let enumerator = fileManager.enumerator(
             at: root,
             includingPropertiesForKeys: [.isDirectoryKey],
             options: [.skipsHiddenFiles]
-        ) else { return folders }
+        ) else {
+            SyncLogger.shared.warning("scanFolders: 无法创建目录枚举器")
+            return folders
+        }
 
         for case let dirURL as URL in enumerator {
             guard let values = try? dirURL.resourceValues(forKeys: [.isDirectoryKey]),
@@ -422,25 +426,37 @@ final class FileSystemService {
             }()
             folders.append(Folder(name: name, path: relativePath, parentPath: parentPath))
         }
+        SyncLogger.shared.debug("scanFolders: 找到 \(folders.count) 个文件夹")
         return folders
     }
 
     /// 扫描所有 .meta 文件，构建笔记列表（不含 markdownContent）
     func scanNotes() -> [Note] {
         var notes: [Note] = []
+        var metaFileCount = 0
+        var parseFailCount = 0
         let fileManager = FileManager.default
         let root = notesRootDirectory
 
+        SyncLogger.shared.debug("scanNotes: 扫描根目录 \(root.path)")
         guard let enumerator = fileManager.enumerator(
             at: root,
             includingPropertiesForKeys: [.isRegularFileKey],
             options: [.skipsHiddenFiles, .skipsPackageDescendants]
-        ) else { return notes }
+        ) else {
+            SyncLogger.shared.warning("scanNotes: 无法创建文件枚举器")
+            return notes
+        }
 
         for case let fileURL as URL in enumerator {
             guard fileURL.pathExtension == "meta" else { continue }
+            metaFileCount += 1
             guard let data = try? Data(contentsOf: fileURL),
-                  let meta = try? JSONDecoder().decode(NoteMetaFile.self, from: data) else { continue }
+                  let meta = try? JSONDecoder().decode(NoteMetaFile.self, from: data) else {
+                parseFailCount += 1
+                SyncLogger.shared.warning("scanNotes: 解析失败 \(fileURL.lastPathComponent)")
+                continue
+            }
 
             let title = fileURL.deletingPathExtension().lastPathComponent
             let parentDir = fileURL.deletingLastPathComponent()
@@ -462,6 +478,7 @@ final class FileSystemService {
                 reviewLogs: meta.reviewLogs
             ))
         }
+        SyncLogger.shared.debug("scanNotes: .meta 文件 \(metaFileCount) 个，成功 \(notes.count) 个，失败 \(parseFailCount) 个")
         return notes
     }
 }

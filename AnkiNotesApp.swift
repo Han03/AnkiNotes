@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import Combine
 
 @main
 struct AnkiNotesApp: App {
@@ -76,6 +77,9 @@ final class AppState: ObservableObject {
     @Published var storage: StorageService!
     @Published var scheduler: SchedulerService!
     @Published var isBootstrapped = false
+
+    /// 转发 StorageService 的变更通知到 AppState 的观察者（确保 View 能感知 storage 内部数据变化）
+    private var storageCancellable: AnyCancellable?
 
     // MARK: - 统计
     @Published var todayDueCount: Int = 0
@@ -622,11 +626,13 @@ final class AppState: ObservableObject {
             // 拉取完成后，回到主线程加载数据并更新 UI
             // @Published 属性必须在主线程更新才能触发 UI 刷新
             DispatchQueue.main.async {
+                SyncLogger.shared.info("主线程：开始加载数据到内存")
                 // 从本地缓存加载元数据到内存
                 self.storage.reloadFromCache()
                 // 更新 quizService 的笔记和文件夹列表
                 let notes = self.storage.getAllNotes()
                 let folders = self.storage.getAllFolders()
+                SyncLogger.shared.info("主线程：加载完成，笔记 \(notes.count) 个，文件夹 \(folders.count) 个")
                 self.quizService.updateNotes(notes, folders: folders)
                 // 重新加载题库缓存
                 self.quizService.reloadFromCache()
@@ -650,6 +656,7 @@ final class AppState: ObservableObject {
                                           summary: "同步完成：新增 \(report.importedCount)，跳过 \(report.skippedCount)，失败 \(report.failedCount)",
                                           steps: opSteps)
                 self.refreshStats()
+                SyncLogger.shared.info("主线程：refreshStats 完成，totalNotes=\(self.totalNotes)，totalFolders=\(self.totalFolders)，todayDue=\(self.todayDueCount)")
                 completion?(report)
             }
             SyncLogger.shared.info("同步流程全部完成（仅拉取）")
@@ -816,6 +823,10 @@ final class AppState: ObservableObject {
         let localFileSvc = FileSystemService(cloudFS: localFS)
         fileSystem = localFileSvc
         storage    = StorageService(fileSystem: localFileSvc)
+        // 转发 StorageService 的 objectWillChange 到 AppState，确保 View 能感知 storage 内部数据变化
+        storageCancellable = storage.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
         // 如果选择了 WebDAV，保存实例用于同步；StorageService 持有引用用于双写
         webDAVFS = (type == .webDAV) ? (newFS as? WebDAVFS) : nil
         storage.cloudSyncFS = webDAVFS

@@ -31,10 +31,23 @@ final class StorageService: ObservableObject {
 
     /// 从本地文件系统重新加载所有数据
     func reloadFromCache() {
-        folders = fileSystem.scanFolders()
-        notes = fileSystem.scanNotes()
+        let startTime = Date()
+        let scannedFolders = fileSystem.scanFolders()
+        let scannedNotes = fileSystem.scanNotes()
+        let duration = Date().timeIntervalSince(startTime)
+        
+        folders = scannedFolders
+        notes = scannedNotes
         lectureExistsCache.removeAll()
         triggerRefresh()
+        
+        // 诊断日志：记录扫描结果和线程信息
+        let thread = Thread.isMainThread ? "main" : "background"
+        let folderPreview = scannedFolders.prefix(3).map { "\($0.name)(path=\($0.path))" }.joined(separator: ", ")
+        let notePreview = scannedNotes.prefix(3).map { "\($0.title)(folder=\($0.folderPath))" }.joined(separator: ", ")
+        SyncLogger.shared.info("reloadFromCache 完成 [\(thread)]：文件夹 \(scannedFolders.count) 个，笔记 \(scannedNotes.count) 个，耗时 \(String(format: "%.3f", duration))s")
+        SyncLogger.shared.info("  文件夹示例: \(folderPreview.isEmpty ? "(无)" : folderPreview)")
+        SyncLogger.shared.info("  笔记示例: \(notePreview.isEmpty ? "(无)" : notePreview)")
     }
 
     func triggerRefresh() {
