@@ -616,18 +616,21 @@ final class AppState: ObservableObject {
             CloudLockService.shared.releaseLock(cloudFS: fs)
             SyncLogger.shared.info("拉取完成，释放云端锁")
             
-            // 拉取完成后，从本地缓存加载元数据到内存
-            self.storage.reloadFromCache()
-            // 更新 quizService 的笔记和文件夹列表
-            let notes = self.storage.getAllNotes()
-            let folders = self.storage.getAllFolders()
-            self.quizService.updateNotes(notes, folders: folders)
-            // 重新加载题库缓存
-            self.quizService.reloadFromCache()
             // 保存同步快照
             self.syncSnapshotService.flush()
             
+            // 拉取完成后，回到主线程加载数据并更新 UI
+            // @Published 属性必须在主线程更新才能触发 UI 刷新
             DispatchQueue.main.async {
+                // 从本地缓存加载元数据到内存
+                self.storage.reloadFromCache()
+                // 更新 quizService 的笔记和文件夹列表
+                let notes = self.storage.getAllNotes()
+                let folders = self.storage.getAllFolders()
+                self.quizService.updateNotes(notes, folders: folders)
+                // 重新加载题库缓存
+                self.quizService.reloadFromCache()
+                
                 var status = "✅ 同步完成：新增 \(report.importedCount)，跳过 \(report.skippedCount)，失败 \(report.failedCount)"
                 if report.scannedMarkdownFiles > 0 {
                     status += "，扫描到 \(report.scannedMarkdownFiles) 个 .md 文件"

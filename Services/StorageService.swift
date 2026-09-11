@@ -341,10 +341,12 @@ final class StorageService: ObservableObject {
             }
 
             let relativePath = fileSystem.relativePathFromNotes(localURL(forCloud: srcURL, cloudRoot: cloudNotesRoot, localRoot: localNotesRoot))
+            // 快照 key 需要与 collectFilesFromFS 中的格式一致（带 Notes/ 前缀）
+            let snapshotKey = "Notes/" + relativePath
 
             // 快照跳过检查
             if let snap = syncSnapshotService,
-               !snap.isFileUpdated(relativePath: relativePath, lastModified: nil) {
+               !snap.isFileUpdated(relativePath: snapshotKey, lastModified: nil) {
                 // 文件无更新，跳过
                 continue
             }
@@ -357,8 +359,8 @@ final class StorageService: ObservableObject {
 
                 // 更新快照（使用云端 mtime，而非本地 mtime）
                 if let snap = syncSnapshotService {
-                    let cloudMtime = fileTimes["Notes/" + relativePath]
-                    snap.updateFile(relativePath: relativePath, lastModified: cloudMtime)
+                    let cloudMtime = fileTimes[snapshotKey]
+                    snap.updateFile(relativePath: snapshotKey, lastModified: cloudMtime)
                 }
 
                 // 统计
@@ -378,6 +380,9 @@ final class StorageService: ObservableObject {
         for (dirPath, dirMtime) in directoryTimes {
             syncSnapshotService?.updateDirectory(relativePath: dirPath, lastModified: dirMtime)
         }
+        
+        // 调试日志：输出快照统计
+        SyncLogger.shared.info("快照更新完成：目录快照 \(directoryTimes.count) 个，文件快照 \(fileTimes.count) 个")
 
         return report
     }
@@ -409,7 +414,7 @@ final class StorageService: ObservableObject {
 
             if child.isDirectory {
                 // 记录目录时间
-                if let snap = snapshot, let rootURL = Optional(url) {
+                if let snap = snapshot {
                     let relativePath = snap.relativePath(for: child.url, rootURL: rootURL)
                     let prefixedPath = rootURL.lastPathComponent + (relativePath.isEmpty ? "" : "/" + relativePath)
                     if let modified = child.lastModified {
@@ -422,7 +427,7 @@ final class StorageService: ObservableObject {
                 if extensions.contains(ext) {
                     result.append(child.url)
                     // 记录云端文件 mtime（用于快照更新，避免使用本地 mtime）
-                    if let snap = snapshot, let rootURL = Optional(url) {
+                    if let snap = snapshot {
                         let relativePath = snap.relativePath(for: child.url, rootURL: rootURL)
                         let prefixedPath = rootURL.lastPathComponent + (relativePath.isEmpty ? "" : "/" + relativePath)
                         if let modified = child.lastModified {
