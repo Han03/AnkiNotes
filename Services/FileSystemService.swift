@@ -467,10 +467,12 @@ final class FileSystemService {
         return folders
     }
 
-    /// 扫描所有 .meta 文件，构建笔记列表（不含 markdownContent）
+    /// 扫描所有 .md 文件，构建笔记列表（不含 markdownContent）
+    /// 以 .md 文件为基准发现笔记，缺失 .meta 时自动创建默认值
     func scanNotes() -> [Note] {
         var notes: [Note] = []
-        var metaFileCount = 0
+        var mdFileCount = 0
+        var metaMissingCount = 0
         var parseFailCount = 0
         let fileManager = FileManager.default
         let root = notesRootDirectory
@@ -485,39 +487,55 @@ final class FileSystemService {
             return notes
         }
 
+        // 第一轮：收集所有 .md 文件
+        var mdFiles: [URL] = []
         for case let fileURL as URL in enumerator {
-            guard fileURL.pathExtension == "meta" else { continue }
-            metaFileCount += 1
-            do {
-                let data = try Data(contentsOf: fileURL)
-                let meta = try Self.jsonDecoder.decode(NoteMetaFile.self, from: data)
-
-                let title = fileURL.deletingPathExtension().lastPathComponent
-                let parentDir = fileURL.deletingLastPathComponent()
-                let folderPath = parentDir.path.replacingOccurrences(of: root.path + "/", with: "")
-                let effectiveFolderPath = folderPath == root.path || folderPath.isEmpty ? "" : folderPath
-
-                // 读取 .md 内容
-                let mdURL = parentDir.appendingPathComponent("\(title).md")
-                let content = (try? String(contentsOf: mdURL, encoding: .utf8)) ?? ""
-
-                notes.append(Note(
-                    title: title,
-                    folderPath: effectiveFolderPath,
-                    markdownContent: content,
-                    tags: meta.tags,
-                    srs: meta.srs,
-                    createdAt: meta.createdAt,
-                    updatedAt: meta.updatedAt,
-                    reviewLogs: meta.reviewLogs
-                ))
-            } catch {
-                parseFailCount += 1
-                SyncLogger.shared.warning("scanNotes: 解析失败 \(fileURL.lastPathComponent): \(error)")
-                continue
-            }
+            guard fileURL.pathExtension == "md" else { continue }
+            mdFiles.append(fileURL)
         }
-        SyncLogger.shared.debug("scanNotes: .meta 文件 \(metaFileCount) 个，成功 \(notes.count) 个，失败 \(parseFailCount) 个")
+        mdFileCount = mdFiles.count
+
+        // 第二轮：逐个处理，缺失 .meta 时自动补建
+        for mdURL in mdFiles {
+            let title = mdURL.deletingPathExtension().lastPathComponent
+            let parentDir = mdURL.deletingLastPathComponent()
+            let folderPath = parentDir.path.replacingOccurrences(of: root.path + "/", with: "")
+            let effectiveFolderPath = folderPath == root.path || folderPath.isEmpty ? "" : folderPath
+
+            // 读取 .md 内容
+            let content = (try? String(contentsOf: mdURL, encoding: .utf8)) ?? ""
+
+            // 读取或补建 .meta
+            let metaURL = parentDir.appendingPathComponent("\(title).meta")
+            let meta: NoteMetaFile
+            if fileManager.fileExists(atPath: metaURL.path) {
+                do {
+                    let data = try Data(contentsOf: metaURL)
+                    meta = try Self.jsonDecoder.decode(NoteMetaFile.self, from: data)
+                } catch {
+                    parseFailCount += 1
+                    SyncLogger.shared.warning("scanNotes: .meta 解析失败 \(title).meta，使用默认值: \(error)")
+                    meta = NoteMetaFile()
+                    writeMeta(meta, title: title, folderPath: effectiveFolderPath)
+                }
+            } else {
+                metaMissingCount += 1
+                meta = NoteMetaFile()
+                writeMeta(meta, title: title, folderPath: effectiveFolderPath)
+            }
+
+            notes.append(Note(
+                title: title,
+                folderPath: effectiveFolderPath,
+                markdownContent: content,
+                tags: meta.tags,
+                srs: meta.srs,
+                createdAt: meta.createdAt,
+                updatedAt: meta.updatedAt,
+                reviewLogs: meta.reviewLogs
+            ))
+        }
+        SyncLogger.shared.debug("scanNotes: .md 文件 \(mdFileCount) 个，成功 \(notes.count) 个，缺失 .meta 已补建 \(metaMissingCount) 个，解析失败 \(parseFailCount) 个")
         return notes
     }
 }
