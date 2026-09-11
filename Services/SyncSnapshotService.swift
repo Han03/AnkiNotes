@@ -210,8 +210,8 @@ final class SyncSnapshotService {
     func removeEntries(withPrefix prefix: String) {
         lock.lock()
         defer { lock.unlock() }
-        snapshot?.files.keys.removeAll { $0.hasPrefix(prefix) }
-        snapshot?.directories.keys.removeAll { $0.hasPrefix(prefix) }
+        snapshot?.files = snapshot?.files.filter { !$0.key.hasPrefix(prefix) } ?? [:]
+        snapshot?.directories = snapshot?.directories.filter { !$0.key.hasPrefix(prefix) } ?? [:]
         scheduleSave()
     }
     
