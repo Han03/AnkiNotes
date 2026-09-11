@@ -30,29 +30,25 @@ final class FileSystemService {
         return encoder
     }()
 
-    /// 解码器：兼容 ISO 8601 字符串和数字两种日期格式
-    /// 脚本转换的旧数据使用 ISO 8601，App 自身写入使用数字格式
+    /// 解码器：数字格式为主，兼容 ISO 8601 字符串（云端旧数据）
     static let jsonDecoder: JSONDecoder = {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .custom { decoder in
             let container = try decoder.singleValueContainer()
-            // 先尝试 ISO 8601 字符串
-            if let dateString = try? container.decode(String.self) {
-                let formatter = ISO8601DateFormatter()
-                formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-                if let date = formatter.date(from: dateString) {
-                    return date
-                }
-                // 重试不带小数秒的格式
-                formatter.formatOptions = [.withInternetDateTime]
-                if let date = formatter.date(from: dateString) {
-                    return date
-                }
-                throw DecodingError.dataCorruptedError(in: container, debugDescription: "无法解析 ISO 8601 日期: \(dateString)")
+            // 数字格式（App 自身写入）
+            if let timestamp = try? container.decode(Double.self) {
+                return Date(timeIntervalSinceReferenceDate: timestamp)
             }
-            // 回退到数字格式（timeIntervalSinceReferenceDate）
-            let timestamp = try container.decode(Double.self)
-            return Date(timeIntervalSinceReferenceDate: timestamp)
+            // ISO 8601 字符串（云端旧数据）
+            if let dateString = try? container.decode(String.self) {
+                let isoFormatter = ISO8601DateFormatter()
+                isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                if let date = isoFormatter.date(from: dateString) { return date }
+                isoFormatter.formatOptions = [.withInternetDateTime]
+                if let date = isoFormatter.date(from: dateString) { return date }
+            }
+            // 解析失败，返回当前时间
+            return Date()
         }
         return decoder
     }()

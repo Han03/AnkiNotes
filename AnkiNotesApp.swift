@@ -86,6 +86,9 @@ final class AppState: ObservableObject {
     @Published var totalNotes:   Int = 0
     @Published var totalFolders: Int = 0
 
+    /// 数据版本号：每次 reloadFromCache 后递增，用于触发依赖 AppState 的 View 重渲染
+    @Published var dataVersion: Int = 0
+
     /// 主 Tabs 的选中索引（0 笔记 / 1 复习 / 2 统计 / 3 设置），方便 StatsView 页面内部「前往设置」按钮直接切 Tab
     @Published var mainTabIndex: Int = 0
 
@@ -629,6 +632,7 @@ final class AppState: ObservableObject {
                 SyncLogger.shared.info("主线程：开始加载数据到内存")
                 // 从本地缓存加载元数据到内存
                 self.storage.reloadFromCache()
+                self.dataVersion += 1  // 触发 FolderBrowserView 等依赖 AppState 的 View 重渲染
                 // 更新 quizService 的笔记和文件夹列表
                 let notes = self.storage.getAllNotes()
                 let folders = self.storage.getAllFolders()

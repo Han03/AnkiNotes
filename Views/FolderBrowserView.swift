@@ -29,6 +29,8 @@ struct FolderBrowserView: View {
     @State private var isLoadingMore = false  // 是否正在加载更多
     
     var body: some View {
+        // 读取 dataVersion 建立对 AppState 的观察依赖，确保 storage 数据变更后 View 能重渲染
+        let _ = appState.dataVersion
         let storage = appState.storage!
         let subFolders = storage.getSubFolders(of: currentFolderPath)
         let allNotes = storage.getAllNotesRecursive(in: currentFolderPath ?? "")
