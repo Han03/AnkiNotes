@@ -111,16 +111,16 @@ final class FileSystemService {
             .appendingPathComponent("\(sanitizeFileName(title)).questions")
     }
 
-    /// 知识点缓存目录（Notes/{folderPath}/knowledge_cache/{title}/）
+    /// 知识点缓存目录（Notes/{folderPath}/.knowledge_cache/{title}/）
     func knowledgeCacheDirectory(title: String, folderPath: String) -> URL {
         var dir = noteURL(title: title, folderPath: folderPath).deletingLastPathComponent()
-        dir.appendPathComponent("knowledge_cache", isDirectory: true)
+        dir.appendPathComponent(".knowledge_cache", isDirectory: true)
         dir.appendPathComponent(sanitizeFileName(title), isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
 
-    /// 知识点缓存根目录（Notes/{folderPath}/knowledge_cache/）
+    /// 知识点缓存根目录（Notes/{folderPath}/.knowledge_cache/）
     func knowledgeCacheRoot(for folderPath: String) -> URL {
         var dir = notesRootDirectory
         if !folderPath.isEmpty {
@@ -128,7 +128,7 @@ final class FileSystemService {
                 dir.appendPathComponent(String(component), isDirectory: true)
             }
         }
-        dir.appendPathComponent("knowledge_cache", isDirectory: true)
+        dir.appendPathComponent(".knowledge_cache", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
@@ -437,7 +437,8 @@ final class FileSystemService {
     func scanFolders() -> [Folder] {
         var folders: [Folder] = []
         let fileManager = FileManager.default
-        let root = notesRootDirectory
+        // 标准化路径：iOS 中 /var 和 /private/var 是同一位置，standardizedFileURL 统一解析
+        let root = notesRootDirectory.standardizedFileURL
 
         SyncLogger.shared.debug("scanFolders: 扫描根目录 \(root.path)")
         guard let enumerator = fileManager.enumerator(
@@ -450,14 +451,14 @@ final class FileSystemService {
         }
 
         for case let dirURL as URL in enumerator {
-            guard let values = try? dirURL.resourceValues(forKeys: [.isDirectoryKey]),
+            let stdURL = dirURL.standardizedFileURL
+            guard let values = try? stdURL.resourceValues(forKeys: [.isDirectoryKey]),
                   values.isDirectory == true else { continue }
-            // 跳过知识点缓存目录（非隐藏，需显式过滤）
-            if dirURL.lastPathComponent == "knowledge_cache" { continue }
-            let relativePath = dirURL.path.replacingOccurrences(of: root.path + "/", with: "")
-            let name = dirURL.lastPathComponent
+            // 知识点缓存目录为隐藏目录（.开头），已被 .skipsHiddenFiles 自动跳过，无需显式过滤
+            let relativePath = stdURL.path.replacingOccurrences(of: root.path + "/", with: "")
+            let name = stdURL.lastPathComponent
             let parentPath: String? = {
-                let parent = dirURL.deletingLastPathComponent()
+                let parent = stdURL.deletingLastPathComponent()
                 let parentRelative = parent.path.replacingOccurrences(of: root.path + "/", with: "")
                 return parentRelative == root.path || parentRelative.isEmpty ? nil : parentRelative
             }()
@@ -475,7 +476,8 @@ final class FileSystemService {
         var metaMissingCount = 0
         var parseFailCount = 0
         let fileManager = FileManager.default
-        let root = notesRootDirectory
+        // 标准化路径：iOS 中 /var 和 /private/var 是同一位置，standardizedFileURL 统一解析
+        let root = notesRootDirectory.standardizedFileURL
 
         SyncLogger.shared.debug("scanNotes: 扫描根目录 \(root.path)")
         guard let enumerator = fileManager.enumerator(
@@ -491,7 +493,7 @@ final class FileSystemService {
         var mdFiles: [URL] = []
         for case let fileURL as URL in enumerator {
             guard fileURL.pathExtension == "md" else { continue }
-            mdFiles.append(fileURL)
+            mdFiles.append(fileURL.standardizedFileURL)
         }
         mdFileCount = mdFiles.count
 

@@ -155,13 +155,13 @@ final class KnowledgeService: ObservableObject {
     
     // MARK: - 缓存路径（按笔记目录层级存储）
     
-    /// 知识点提取缓存路径：knowledge_cache/[笔记文件夹路径]/[笔记标题].json
+    /// 知识点提取缓存路径：.knowledge_cache/[笔记文件夹路径]/[笔记标题].json
     private func extractionCacheURL(for note: Note) -> URL {
         let dir = cacheDirectoryFor(note: note)
         return dir.appendingPathComponent("\(note.title).json")
     }
     
-    /// 知识点详解缓存目录：knowledge_cache/[笔记文件夹路径]/[笔记标题]/
+    /// 知识点详解缓存目录：.knowledge_cache/[笔记文件夹路径]/[笔记标题]/
     private func explanationCacheDirectory(for note: Note) -> URL {
         let dir = cacheDirectoryFor(note: note).appendingPathComponent(note.title, isDirectory: true)
         if !fileManager.fileExists(atPath: dir.path) {
@@ -170,18 +170,18 @@ final class KnowledgeService: ObservableObject {
         return dir
     }
     
-    /// 知识点详解缓存路径：knowledge_cache/[笔记文件夹路径]/[笔记标题]/[知识点关键字].md
+    /// 知识点详解缓存路径：.knowledge_cache/[笔记文件夹路径]/[笔记标题]/[知识点关键字].md
     private func explanationCacheURL(for point: KnowledgePoint, note: Note) -> URL {
         let dir = explanationCacheDirectory(for: note)
         let safeFileName = sanitizeFileName(point.keyword)
         return dir.appendingPathComponent("\(safeFileName).md")
     }
     
-    /// 笔记对应的缓存目录：Notes/{folderPath}/knowledge_cache/{title}/
+    /// 笔记对应的缓存目录：Notes/{folderPath}/.knowledge_cache/{title}/
     private func cacheDirectoryFor(note: Note) -> URL {
         guard let storage = storageService else { return cacheDirectory }
         let dir = storage.fileSystem.knowledgeCacheDirectory(title: note.title, folderPath: note.folderPath)
-        return dir.deletingLastPathComponent() // 返回 knowledge_cache/ 目录（不含 title 子目录）
+        return dir.deletingLastPathComponent() // 返回 .knowledge_cache/ 目录（不含 title 子目录）
     }
     
     /// 将关键字转换为安全的文件名（替换文件系统不允许的字符）
