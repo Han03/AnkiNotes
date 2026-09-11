@@ -471,7 +471,8 @@ final class AppState: ObservableObject {
                     // 2. 云端删除目录：快照中存在但 rootScanChildren 中不存在
                     // 3. 云端修改目录：rootScanChildren 中存在且快照中存在但修改时间不同
                     let cloudDirNames = Set(rootScanChildren.compactMap { $0.isDirectory ? $0.url.lastPathComponent : nil })
-                    let snapshotDirNames = Set(self.syncSnapshotService.getAllDirectoryPaths().map { URL(fileURLWithPath: $0).lastPathComponent })
+                    // 【修复】只取根级目录（路径不含 "/"）与云端根目录子项比较，避免嵌套子目录的末级名称误判为根目录变化
+                    let snapshotDirNames = Set(self.syncSnapshotService.getAllDirectoryPaths().filter { !$0.contains("/") })
                     
                     // 如果云端目录结构发生变化（新增/删除/修改），则继续同步
                     if cloudDirNames != snapshotDirNames {
