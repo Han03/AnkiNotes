@@ -24,7 +24,7 @@ struct MainTabView: View {
         TabView(selection: tabSelection) {
             // 笔记菜单
             NavigationStack {
-                FolderBrowserView(currentFolderId: nil)
+                FolderBrowserView(currentFolderPath: nil)
                     .refreshable { await triggerSync() }
             }
             .tabItem {

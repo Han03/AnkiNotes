@@ -76,7 +76,10 @@ struct FolderBrowserView: View {
                         NavigationLink {
                             NoteDetailView(notePath: note.notePath)
                         } label: {
-                            NoteRow(note: note, folderPath: storage.getNoteFolderPath(for: note), hasQuestions: appState.quizService.notesWithQuestionsCache.contains(note.notePath), hasLecture: storage.hasLecture(for: note))
+                            let noteFolderPath = storage.getNoteFolderPath(for: note)
+                            let hasQuestions = appState.quizService.notesWithQuestionsCache.contains(note.notePath)
+                            let hasLecture = storage.hasLecture(for: note)
+                            NoteRow(note: note, folderPath: noteFolderPath, hasQuestions: hasQuestions, hasLecture: hasLecture)
                         }
                         .swipeActions(edge: .leading) {
                             Button {
