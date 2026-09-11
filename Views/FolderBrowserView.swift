@@ -31,197 +31,27 @@ struct FolderBrowserView: View {
     var body: some View {
         let storage = appState.storage!
         let subFolders = storage.getSubFolders(of: currentFolderPath)
-        // 递归获取当前文件夹及所有子文件夹的笔记
         let allNotes = storage.getAllNotesRecursive(in: currentFolderPath ?? "")
-        // 搜索时不直接过滤列表，而是通过 searchSuggestions 下拉浮层展示
         let filteredNotes = allNotes
-        // 分页显示
         let displayedNotes = Array(filteredNotes.prefix(displayCount))
-        
         let currentFolder = currentFolderPath.flatMap { storage.getFolder(path: $0) }
         
         List {
-            if !subFolders.isEmpty {
-                Section {
-                    ForEach(subFolders) { folder in
-                        NavigationLink {
-                            FolderBrowserView(currentFolderPath: folder.path)
-                                .navigationTitle(folder.name)
-                        } label: {
-                            FolderRow(folder: folder, storage: storage,
-                                onRename: { f in renameFolder(f) },
-                                onDelete: { f in deleteFolder(f) })
-                        }
-                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            Button(role: .destructive) {
-                                storage.deleteFolder(path: folder.path)
-                                appState.refreshStats()
-                            } label: {
-                                Label("删除", systemImage: "trash")
-                            }
-                        }
-                    }
-                } header: {
-                    Text("文件夹")
-                }
-            }
-            
-            Section {
-                if filteredNotes.isEmpty {
-                    EmptyStateView("暂无笔记",
-                                   systemImage: "note.text",
-                                   description: Text("点击右上角 + 新建笔记"))
-                } else {
-                    ForEach(displayedNotes) { note in
-                        NavigationLink {
-                            NoteDetailView(notePath: note.notePath)
-                        } label: {
-                            let noteFolderPath = storage.getNoteFolderPath(for: note)
-                            let hasQuestions = appState.quizService.notesWithQuestionsCache.contains(note.notePath)
-                            let hasLecture = storage.hasLecture(for: note)
-                            NoteRow(note: note, folderPath: noteFolderPath, hasQuestions: hasQuestions, hasLecture: hasLecture)
-                        }
-                        .swipeActions(edge: .leading) {
-                            Button {
-                                editingNotePath = note.notePath
-                            } label: {
-                                Label("编辑", systemImage: "pencil")
-                            }
-                            .tint(.orange)
-                        }
-                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            Button(role: .destructive) {
-                                storage.deleteNote(notePath: note.notePath)
-                                appState.refreshStats()
-                            } label: {
-                                Label("删除", systemImage: "trash")
-                            }
-                        }
-                    }
-                }
-            } header: {
-                Text("笔记 · \(filteredNotes.count)")
-            }
-            
-            // 滚动到底部自动加载更多
-            if displayedNotes.count < filteredNotes.count {
-                Section {
-                    HStack {
-                        Spacer()
-                        if isLoadingMore {
-                            ProgressView()
-                                .padding(.vertical, 12)
-                            Text("加载中...")
-                                .foregroundColor(.secondary)
-                                .font(.subheadline)
-                        } else {
-                            Text("加载更多")
-                                .foregroundColor(.brandPrimary)
-                                .font(.subheadline)
-                        }
-                        Spacer()
-                    }
-                    .padding(.vertical, 8)
-                    .onAppear {
-                        // 当这个视图出现时，自动加载更多
-                        guard !isLoadingMore else { return }
-                        isLoadingMore = true
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                            displayCount += 10
-                            isLoadingMore = false
-                        }
-                    }
-                }
-            }
+            folderSection(storage: storage, subFolders: subFolders)
+            notesSection(storage: storage, filteredNotes: filteredNotes, displayedNotes: displayedNotes)
+            loadMoreSection(displayedCount: displayedNotes.count, totalCount: filteredNotes.count)
         }
         .listStyle(.insetGrouped)
         .navigationTitle(currentFolder?.name ?? "全部笔记")
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $searchText, prompt: "搜索笔记标题或内容")
-        // 搜索建议下拉浮层：最多5条，高亮匹配字符，选中跳转详情
         .searchSuggestions {
-            if !searchText.isEmpty {
-                let searchResults = allNotes.filter {
-                    $0.title.localizedCaseInsensitiveContains(searchText) ||
-                    $0.markdownContent.localizedCaseInsensitiveContains(searchText)
-                }.prefix(5)
-                if searchResults.isEmpty {
-                    Text("无匹配结果")
-                        .foregroundColor(.secondary)
-                } else {
-                    ForEach(Array(searchResults)) { note in
-                        Button {
-                            searchedNotePath = note.notePath
-                            searchText = ""
-                        } label: {
-                            HStack(spacing: 10) {
-                                Image(systemName: "magnifyingglass")
-                                    .foregroundColor(.secondary)
-                                    .font(.caption)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    highlightedText(note.title, searchText: searchText)
-                                        .font(.subheadline)
-                                        .lineLimit(1)
-                                    // 显示文件夹路径
-                                    let path = storage.getNoteFolderPath(for: note)
-                                    Text(path)
-                                        .font(.caption2)
-                                        .foregroundColor(.secondary)
-                                        .lineLimit(1)
-                                }
-                                Spacer()
-                            }
-                            .padding(.vertical, 4)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
+            searchSuggestionsContent(storage: storage, allNotes: allNotes)
         }
-        // 搜索选中后跳转到详情
-        .background(
-            NavigationLink(destination: Group {
-                if let notePath = searchedNotePath {
-                    NoteDetailView(notePath: notePath)
-                }
-            }, isActive: Binding(
-                get: { searchedNotePath != nil },
-                set: { if !$0 { searchedNotePath = nil } }
-            )) {
-                EmptyView()
-            }
-            .hidden()
-        )
-        .toolbar {
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                Menu {
-                    Button {
-                        showNewFolderAlert = true
-                    } label: {
-                        Label("新建文件夹", systemImage: "folder.badge.plus")
-                    }
-                    Button {
-                        showNewNoteAlert = true
-                    } label: {
-                        Label("新建笔记", systemImage: "doc.badge.plus")
-                    }
-                } label: {
-                    Image(systemName: "plus")
-                }
-            }
-        }
-        // 新建文件夹 Alert
+        .background(searchNavigationLink)
+        .toolbar { toolbarContent }
         .alert("新建文件夹", isPresented: $showNewFolderAlert) {
-            TextField("文件夹名称", text: $newFolderName)
-            Button("取消", role: .cancel) { newFolderName = "" }
-            Button("创建") {
-                let name = newFolderName.trimmingCharacters(in: .whitespaces)
-                if !name.isEmpty {
-                    storage.createFolder(name: name, parentPath: currentFolderPath)
-                    appState.refreshStats()
-                }
-                newFolderName = ""
-            }
+            newFolderAlertContent(storage: storage)
         } message: {
             Text("输入文件夹名称以创建新的分类。")
         }
@@ -275,6 +105,197 @@ struct FolderBrowserView: View {
         .sheet(item: $editingNotePath) { notePath in
             NavigationStack {
                 NoteEditorView(notePath: notePath)
+            }
+        }
+    }
+    
+    // MARK: - Body 拆分计算属性
+    
+    @ViewBuilder
+    private func folderSection(storage: StorageService, subFolders: [Folder]) -> some View {
+        if !subFolders.isEmpty {
+            Section {
+                ForEach(subFolders) { folder in
+                    NavigationLink {
+                        FolderBrowserView(currentFolderPath: folder.path)
+                            .navigationTitle(folder.name)
+                    } label: {
+                        FolderRow(folder: folder, storage: storage,
+                            onRename: { f in renameFolder(f) },
+                            onDelete: { f in deleteFolder(f) })
+                    }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        Button(role: .destructive) {
+                            storage.deleteFolder(path: folder.path)
+                            appState.refreshStats()
+                        } label: {
+                            Label("删除", systemImage: "trash")
+                        }
+                    }
+                }
+            } header: {
+                Text("文件夹")
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private func notesSection(storage: StorageService, filteredNotes: [Note], displayedNotes: [Note]) -> some View {
+        Section {
+            if filteredNotes.isEmpty {
+                EmptyStateView("暂无笔记",
+                               systemImage: "note.text",
+                               description: Text("点击右上角 + 新建笔记"))
+            } else {
+                ForEach(displayedNotes) { note in
+                    NavigationLink {
+                        NoteDetailView(notePath: note.notePath)
+                    } label: {
+                        let noteFolderPath = storage.getNoteFolderPath(for: note)
+                        let hasQuestions = appState.quizService.notesWithQuestionsCache.contains(note.notePath)
+                        let hasLecture = storage.hasLecture(for: note)
+                        NoteRow(note: note, folderPath: noteFolderPath, hasQuestions: hasQuestions, hasLecture: hasLecture)
+                    }
+                    .swipeActions(edge: .leading) {
+                        Button {
+                            editingNotePath = note.notePath
+                        } label: {
+                            Label("编辑", systemImage: "pencil")
+                        }
+                        .tint(.orange)
+                    }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        Button(role: .destructive) {
+                            storage.deleteNote(notePath: note.notePath)
+                            appState.refreshStats()
+                        } label: {
+                            Label("删除", systemImage: "trash")
+                        }
+                    }
+                }
+            }
+        } header: {
+            Text("笔记 · \(filteredNotes.count)")
+        }
+    }
+    
+    @ViewBuilder
+    private func loadMoreSection(displayedCount: Int, totalCount: Int) -> some View {
+        if displayedCount < totalCount {
+            Section {
+                HStack {
+                    Spacer()
+                    if isLoadingMore {
+                        ProgressView()
+                            .padding(.vertical, 12)
+                        Text("加载中...")
+                            .foregroundColor(.secondary)
+                            .font(.subheadline)
+                    } else {
+                        Text("加载更多")
+                            .foregroundColor(.brandPrimary)
+                            .font(.subheadline)
+                    }
+                    Spacer()
+                }
+                .padding(.vertical, 8)
+                .onAppear {
+                    guard !isLoadingMore else { return }
+                    isLoadingMore = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        displayCount += 10
+                        isLoadingMore = false
+                    }
+                }
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private func searchSuggestionsContent(storage: StorageService, allNotes: [Note]) -> some View {
+        if !searchText.isEmpty {
+            let searchResults = allNotes.filter {
+                $0.title.localizedCaseInsensitiveContains(searchText) ||
+                $0.markdownContent.localizedCaseInsensitiveContains(searchText)
+            }.prefix(5)
+            if searchResults.isEmpty {
+                Text("无匹配结果")
+                    .foregroundColor(.secondary)
+            } else {
+                ForEach(Array(searchResults)) { note in
+                    Button {
+                        searchedNotePath = note.notePath
+                        searchText = ""
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "magnifyingglass")
+                                .foregroundColor(.secondary)
+                                .font(.caption)
+                            VStack(alignment: .leading, spacing: 2) {
+                                highlightedText(note.title, searchText: searchText)
+                                    .font(.subheadline)
+                                    .lineLimit(1)
+                                let path = storage.getNoteFolderPath(for: note)
+                                Text(path)
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                            }
+                            Spacer()
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+    
+    private var searchNavigationLink: some View {
+        NavigationLink(destination: Group {
+            if let notePath = searchedNotePath {
+                NoteDetailView(notePath: notePath)
+            }
+        }, isActive: Binding(
+            get: { searchedNotePath != nil },
+            set: { if !$0 { searchedNotePath = nil } }
+        )) {
+            EmptyView()
+        }
+        .hidden()
+    }
+    
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItemGroup(placement: .topBarTrailing) {
+            Menu {
+                Button {
+                    showNewFolderAlert = true
+                } label: {
+                    Label("新建文件夹", systemImage: "folder.badge.plus")
+                }
+                Button {
+                    showNewNoteAlert = true
+                } label: {
+                    Label("新建笔记", systemImage: "doc.badge.plus")
+                }
+            } label: {
+                Image(systemName: "plus")
+            }
+        }
+    }
+    
+    private func newFolderAlertContent(storage: StorageService) -> some View {
+        Group {
+            TextField("文件夹名称", text: $newFolderName)
+            Button("取消", role: .cancel) { newFolderName = "" }
+            Button("创建") {
+                let name = newFolderName.trimmingCharacters(in: .whitespaces)
+                if !name.isEmpty {
+                    storage.createFolder(name: name, parentPath: currentFolderPath)
+                    appState.refreshStats()
+                }
+                newFolderName = ""
             }
         }
     }
