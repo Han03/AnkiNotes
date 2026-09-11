@@ -229,18 +229,14 @@ struct ReviewHomeView: View {
         .navigationTitle("复习")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
-            stats = scheduler.computeStats()
-            // 异步计算文件夹列表，避免阻塞主线程影响初次加载性能
-            DispatchQueue.global(qos: .userInitiated).async {
-                let folders = storage.getAllFolders().filter { folder in
-                    let dueCount = scheduler.getTodayDueCount(in: folder.path)
-                    let noteCount = storage.countNotesRecursive(in: folder.path)
-                    return dueCount > 0 || noteCount > 0
-                }
-                DispatchQueue.main.async {
-                    cachedFolders = folders
-                }
-            }
+            refreshReviewStats()
+        }
+        // 复习会话关闭后刷新统计
+        .onChange(of: showingReview) { isShowing in
+            if !isShowing { refreshReviewStats() }
+        }
+        .onChange(of: selectedFolderPath) { path in
+            if path == nil { refreshReviewStats() }
         }
         // 开始复习（全部笔记）
         .fullScreenCover(isPresented: $showingReview) {
@@ -252,6 +248,22 @@ struct ReviewHomeView: View {
             set: { if !$0 { selectedFolderPath = nil } }
         )) {
             ReviewSessionView(folderPath: selectedFolderPath)
+        }
+    }
+    
+    /// 刷新复习统计和文件夹列表
+    private func refreshReviewStats() {
+        stats = scheduler.computeStats()
+        // 异步计算文件夹列表，避免阻塞主线程影响初次加载性能
+        DispatchQueue.global(qos: .userInitiated).async {
+            let folders = storage.getAllFolders().filter { folder in
+                let dueCount = scheduler.getTodayDueCount(in: folder.path)
+                let noteCount = storage.countNotesRecursive(in: folder.path)
+                return dueCount > 0 || noteCount > 0
+            }
+            DispatchQueue.main.async {
+                cachedFolders = folders
+            }
         }
     }
     

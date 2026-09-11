@@ -331,7 +331,7 @@ final class StorageService: ObservableObject {
 
         collectFilesFromFS(
             cloud, at: cloudNotesRoot,
-            extensions: ["md", "meta", "txt", "questions", "json"],
+            extensions: ["md", "meta", "lecture", "txt", "questions", "json"],
             skipNames: [],
             into: &allCloudFiles,
             rootURL: cloudNotesRoot,
@@ -388,7 +388,7 @@ final class StorageService: ObservableObject {
                 // 统计
                 switch srcURL.pathExtension {
                 case "md": report.importedCount += 1
-                case "txt": report.lectureImportedCount += 1
+                case "txt", "lecture": report.lectureImportedCount += 1
                 case "questions": report.questionImportedCount += 1
                 default: break
                 }
