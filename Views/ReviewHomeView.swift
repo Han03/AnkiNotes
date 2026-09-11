@@ -253,6 +253,7 @@ struct ReviewHomeView: View {
     
     /// 刷新复习统计和文件夹列表
     private func refreshReviewStats() {
+        guard let storage = appState.storage, let scheduler = appState.scheduler else { return }
         stats = scheduler.computeStats()
         // 异步计算文件夹列表，避免阻塞主线程影响初次加载性能
         DispatchQueue.global(qos: .userInitiated).async {
