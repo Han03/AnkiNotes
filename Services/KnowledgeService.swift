@@ -155,13 +155,13 @@ final class KnowledgeService: ObservableObject {
     
     // MARK: - 缓存路径（按笔记目录层级存储）
     
-    /// 知识点提取缓存路径：.knowledge_cache/[笔记文件夹路径]/[笔记标题].json
+    /// 知识点提取缓存路径：knowledge_cache/[笔记文件夹路径]/[笔记标题].json
     private func extractionCacheURL(for note: Note) -> URL {
         let dir = cacheDirectoryFor(note: note)
         return dir.appendingPathComponent("\(note.title).json")
     }
     
-    /// 知识点详解缓存目录：.knowledge_cache/[笔记文件夹路径]/[笔记标题]/
+    /// 知识点详解缓存目录：knowledge_cache/[笔记文件夹路径]/[笔记标题]/
     private func explanationCacheDirectory(for note: Note) -> URL {
         let dir = cacheDirectoryFor(note: note).appendingPathComponent(note.title, isDirectory: true)
         if !fileManager.fileExists(atPath: dir.path) {
@@ -170,18 +170,18 @@ final class KnowledgeService: ObservableObject {
         return dir
     }
     
-    /// 知识点详解缓存路径：.knowledge_cache/[笔记文件夹路径]/[笔记标题]/[知识点关键字].md
+    /// 知识点详解缓存路径：knowledge_cache/[笔记文件夹路径]/[笔记标题]/[知识点关键字].md
     private func explanationCacheURL(for point: KnowledgePoint, note: Note) -> URL {
         let dir = explanationCacheDirectory(for: note)
         let safeFileName = sanitizeFileName(point.keyword)
         return dir.appendingPathComponent("\(safeFileName).md")
     }
     
-    /// 笔记对应的缓存目录：Notes/{folderPath}/.knowledge_cache/{title}/
+    /// 笔记对应的缓存目录：Notes/{folderPath}/knowledge_cache/{title}/
     private func cacheDirectoryFor(note: Note) -> URL {
         guard let storage = storageService else { return cacheDirectory }
         let dir = storage.fileSystem.knowledgeCacheDirectory(title: note.title, folderPath: note.folderPath)
-        return dir.deletingLastPathComponent() // 返回 .knowledge_cache/ 目录（不含 title 子目录）
+        return dir.deletingLastPathComponent() // 返回 knowledge_cache/ 目录（不含 title 子目录）
     }
     
     /// 将关键字转换为安全的文件名（替换文件系统不允许的字符）
@@ -195,18 +195,22 @@ final class KnowledgeService: ObservableObject {
         guard let cloudFS = cloudFS else { return }
         let docsPath = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0].path
         let relativePath = localURL.path.replacingOccurrences(of: docsPath, with: "")
-        // 去掉前导 "/"，与 pullKnowledgeCache 中的快照 key 格式一致
+        // 去掉前导 "/"，与快照 key 格式一致
         let snapshotKey = relativePath.hasPrefix("/") ? String(relativePath.dropFirst()) : relativePath
-        // 在异步块前捕获修改时间，避免竞态
-        let modDate = (try? fileManager.attributesOfItem(atPath: localURL.path))?[.modificationDate] as? Date
+        let cleanRelativePath = snapshotKey
         let cloudURL = cloudFS.rootDirectory.appendingPathComponent(relativePath)
         DispatchQueue.global(qos: .utility).async { [weak self] in
             do {
                 try cloudFS.createDirectoryIfNeeded(at: cloudURL.deletingLastPathComponent())
                 try cloudFS.writeData(data, to: cloudURL)
-                // 上传成功后更新快照，避免下次同步时冗余 GET 比对
-                if let modDate = modDate {
-                    self?.syncSnapshotService?.updateFile(relativePath: snapshotKey, lastModified: modDate)
+                // PROPFIND 获取云端真实 mtime（快照内必须使用云端时间）
+                let cloudMod = try? cloudFS.getItemMetadata(at: cloudURL)
+                if let cloudMtime = cloudMod?.lastModified {
+                    // 更新文件快照（子）
+                    self?.syncSnapshotService?.updateFile(relativePath: snapshotKey, lastModified: cloudMtime)
+                    // 更新父目录快照（父，用子文件的云端时间）
+                    let parentRelative = (cleanRelativePath as NSString).deletingLastPathComponent
+                    self?.syncSnapshotService?.updateDirectory(relativePath: parentRelative, lastModified: cloudMtime)
                 }
             } catch {
                 print("⚠️ 知识点缓存上传失败: \(error.localizedDescription)")

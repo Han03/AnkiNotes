@@ -79,16 +79,16 @@ final class FileSystemService {
             .appendingPathComponent("\(sanitizeFileName(title)).questions")
     }
 
-    /// 知识点缓存目录（Notes/{folderPath}/.knowledge_cache/{title}/）
+    /// 知识点缓存目录（Notes/{folderPath}/knowledge_cache/{title}/）
     func knowledgeCacheDirectory(title: String, folderPath: String) -> URL {
         var dir = noteURL(title: title, folderPath: folderPath).deletingLastPathComponent()
-        dir.appendPathComponent(".knowledge_cache", isDirectory: true)
+        dir.appendPathComponent("knowledge_cache", isDirectory: true)
         dir.appendPathComponent(sanitizeFileName(title), isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
 
-    /// 知识点缓存根目录（Notes/{folderPath}/.knowledge_cache/）
+    /// 知识点缓存根目录（Notes/{folderPath}/knowledge_cache/）
     func knowledgeCacheRoot(for folderPath: String) -> URL {
         var dir = notesRootDirectory
         if !folderPath.isEmpty {
@@ -96,7 +96,7 @@ final class FileSystemService {
                 dir.appendPathComponent(String(component), isDirectory: true)
             }
         }
-        dir.appendPathComponent(".knowledge_cache", isDirectory: true)
+        dir.appendPathComponent("knowledge_cache", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
@@ -292,17 +292,41 @@ final class FileSystemService {
         }
         let dirURL = currentURL.appendingPathComponent(sanitizeFileName(name), isDirectory: true)
         try FileManager.default.createDirectory(at: dirURL, withIntermediateDirectories: true)
-        // 异步创建云端目录
-        let cloudURL = cloudURL(forLocalURL: dirURL)
+        // 新目录的快照 key：Notes/{fullRelativePath}
+        let fullRelative = relativePathFromNotes(dirURL)
+        let dirSnapshotKey = "Notes/" + fullRelative
+        // 父目录的快照 key
+        let parentRelative = (fullRelative as NSString).deletingLastPathComponent
+        let parentKey = parentRelative.isEmpty ? "Notes" : "Notes/\(parentRelative)"
+        // 异步创建云端目录并更新快照
+        let cloudDirURL = cloudURL(forLocalURL: dirURL)
         DispatchQueue.global(qos: .utility).async { [weak self] in
-            try? self?.cloudFS.createDirectoryIfNeeded(at: cloudURL)
+            guard let self = self else { return }
+            try? self.cloudFS.createDirectoryIfNeeded(at: cloudDirURL)
+            // PROPFIND 获取云端目录真实 mtime
+            let cloudMod = try? self.cloudFS.getItemMetadata(at: cloudDirURL)
+            let cloudMtime = cloudMod?.lastModified ?? Date()
+            self.syncSnapshotService?.updateDirectory(relativePath: dirSnapshotKey, lastModified: cloudMtime)
+            self.syncSnapshotService?.updateDirectory(relativePath: parentKey, lastModified: cloudMtime)
         }
         return dirURL
     }
 
     func deletePhysicalFolder(at url: URL) {
+        let relativePath = relativePathFromNotes(url)
+        let dirSnapshotKey = "Notes/" + relativePath
+        let parentRelative = (relativePath as NSString).deletingLastPathComponent
+        let parentKey = parentRelative.isEmpty ? "Notes" : "Notes/\(parentRelative)"
+        let now = Date()
         try? FileManager.default.removeItem(at: url)
-        deleteCloudFile(at: url)
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            try? self?.cloudFS.removeItem(at: self?.cloudURL(forLocalURL: url) ?? url)
+            // 清理该目录及所有子条目的快照
+            self?.syncSnapshotService?.removeEntries(withPrefix: dirSnapshotKey + "/")
+            self?.syncSnapshotService?.removeDirectory(relativePath: dirSnapshotKey)
+            // 更新父目录快照
+            self?.syncSnapshotService?.updateDirectory(relativePath: parentKey, lastModified: now)
+        }
     }
 
     // MARK: - 云端同步
@@ -310,15 +334,22 @@ final class FileSystemService {
     /// 异步同步文件到云端（路径恒等映射：本地 Documents/Notes/X = 云端 Notes/X）
     private func syncToCloud(data: Data, to localURL: URL) {
         let cloudURL = cloudURL(forLocalURL: localURL)
-        let snapshotKey = relativePathFromNotes(localURL)
-        let modDate = (try? FileManager.default.attributesOfItem(atPath: localURL.path))?[.modificationDate] as? Date
+        // 快照 key 格式：Notes/ 前缀 + 相对路径（与 collectFilesFromFS 中的 prefixedPath 一致）
+        let snapshotKey = "Notes/" + relativePathFromNotes(localURL)
+        let relativePath = relativePathFromNotes(localURL)
+        let parentRelative = (relativePath as NSString).deletingLastPathComponent
+        let parentKey = parentRelative.isEmpty ? "Notes" : "Notes/\(parentRelative)"
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self = self else { return }
             do {
                 try self.cloudFS.createDirectoryIfNeeded(at: cloudURL.deletingLastPathComponent())
                 try self.cloudFS.writeData(data, to: cloudURL)
-                if let modDate = modDate {
-                    self.syncSnapshotService?.updateFile(relativePath: snapshotKey, lastModified: modDate)
+                // PROPFIND 获取云端真实 mtime（快照内必须使用云端时间）
+                let cloudMod = try? self.cloudFS.getItemMetadata(at: cloudURL)
+                if let cloudMtime = cloudMod?.lastModified {
+                    // 更新文件快照（子）+ 父目录快照（父，用子文件的云端时间）
+                    self.syncSnapshotService?.updateFile(relativePath: snapshotKey, lastModified: cloudMtime)
+                    self.syncSnapshotService?.updateDirectory(relativePath: parentKey, lastModified: cloudMtime)
                 }
             } catch {
                 print("⚠️ 云端同步失败: \(error.localizedDescription)")
@@ -326,11 +357,19 @@ final class FileSystemService {
         }
     }
 
-    /// 异步删除云端文件
+    /// 异步删除云端文件，并清理对应快照条目
     private func deleteCloudFile(at localURL: URL) {
         let cloudURL = cloudURL(forLocalURL: localURL)
+        let relativePath = relativePathFromNotes(localURL)
+        let snapshotKey = "Notes/" + relativePath
+        let parentRelative = (relativePath as NSString).deletingLastPathComponent
+        let parentKey = parentRelative.isEmpty ? "Notes" : "Notes/\(parentRelative)"
         DispatchQueue.global(qos: .utility).async { [weak self] in
             try? self?.cloudFS.removeItem(at: cloudURL)
+            // 删除文件快照（子）
+            self?.syncSnapshotService?.removeFile(relativePath: snapshotKey)
+            // 更新父目录快照（父）
+            self?.syncSnapshotService?.updateDirectory(relativePath: parentKey, lastModified: Date())
         }
     }
 
@@ -368,6 +407,8 @@ final class FileSystemService {
         for case let dirURL as URL in enumerator {
             guard let values = try? dirURL.resourceValues(forKeys: [.isDirectoryKey]),
                   values.isDirectory == true else { continue }
+            // 跳过知识点缓存目录（非隐藏，需显式过滤）
+            if dirURL.lastPathComponent == "knowledge_cache" { continue }
             let relativePath = dirURL.path.replacingOccurrences(of: root.path + "/", with: "")
             let name = dirURL.lastPathComponent
             let parentPath: String? = {

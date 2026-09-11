@@ -319,7 +319,7 @@ final class StorageService: ObservableObject {
         collectFilesFromFS(
             cloud, at: cloudNotesRoot,
             extensions: ["md", "meta", "txt", "questions", "json"],
-            skipNames: [".knowledge_cache"],
+            skipNames: [],
             into: &allCloudFiles,
             rootURL: cloudNotesRoot,
             snapshot: syncSnapshotService,
@@ -355,10 +355,10 @@ final class StorageService: ObservableObject {
                 try FileManager.default.createDirectory(at: localURL.deletingLastPathComponent(), withIntermediateDirectories: true)
                 try data.write(to: localURL, options: .atomic)
 
-                // 更新快照
+                // 更新快照（使用云端 mtime，而非本地 mtime）
                 if let snap = syncSnapshotService {
-                    let modDate = (try? FileManager.default.attributesOfItem(atPath: localURL.path))?[.modificationDate] as? Date
-                    snap.updateFile(relativePath: relativePath, lastModified: modDate)
+                    let cloudMtime = fileTimes["Notes/" + relativePath]
+                    snap.updateFile(relativePath: relativePath, lastModified: cloudMtime)
                 }
 
                 // 统计
@@ -372,6 +372,11 @@ final class StorageService: ObservableObject {
                 report.failedCount += 1
                 print("⚠️ 同步失败 \(srcURL.lastPathComponent): \(error.localizedDescription)")
             }
+        }
+
+        // 回写目录快照（使用云端目录 mtime，确保下次同步能正确跳过）
+        for (dirPath, dirMtime) in directoryTimes {
+            syncSnapshotService?.updateDirectory(relativePath: dirPath, lastModified: dirMtime)
         }
 
         return report
@@ -412,6 +417,14 @@ final class StorageService: ObservableObject {
                 let ext = child.url.pathExtension.lowercased()
                 if extensions.contains(ext) {
                     result.append(child.url)
+                    // 记录云端文件 mtime（用于快照更新，避免使用本地 mtime）
+                    if let snap = snapshot, let rootURL = Optional(url) {
+                        let relativePath = snap.relativePath(for: child.url, rootURL: rootURL)
+                        let prefixedPath = rootURL.lastPathComponent + (relativePath.isEmpty ? "" : "/" + relativePath)
+                        if let modified = child.lastModified {
+                            fileTimes[prefixedPath] = modified
+                        }
+                    }
                 }
             }
         }

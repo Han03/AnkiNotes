@@ -205,6 +205,16 @@ final class SyncSnapshotService {
         scheduleSave()
     }
     
+    /// 批量删除指定前缀下的所有文件和目录记录（用于文件夹删除时清理子条目快照）
+    /// - Parameter prefix: 快照 key 前缀，如 "Notes/生物/"
+    func removeEntries(withPrefix prefix: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        snapshot?.files.keys.removeAll { $0.hasPrefix(prefix) }
+        snapshot?.directories.keys.removeAll { $0.hasPrefix(prefix) }
+        scheduleSave()
+    }
+    
     // MARK: - 防抖落盘（内部，调用方需持有锁）
     
     /// 防抖落盘：1 秒内多次更新合并为一次写盘，避免同步期间逐文件频繁写盘
