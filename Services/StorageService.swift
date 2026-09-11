@@ -335,7 +335,7 @@ final class StorageService: ObservableObject {
         for (idx, srcURL) in allCloudFiles.enumerated() {
             if idx % 10 == 0 || idx == allCloudFiles.count - 1 {
                 let total = max(allCloudFiles.count, 1)
-                let progress = 10 + Int(Double(idx) / Double(total) * 80)
+                let progress = Double(10 + Int(Double(idx) / Double(total) * 80))
                 let label = "\(idx + 1)/\(allCloudFiles.count)"
                 syncProgressCallback?("下载文件", progress, label)
             }
