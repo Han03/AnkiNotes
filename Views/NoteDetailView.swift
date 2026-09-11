@@ -10,13 +10,13 @@ import SwiftUI
 /// 笔记详情页：Markdown 预览 + 信息 + 编辑入口
 struct NoteDetailView: View {
     @EnvironmentObject var appState: AppState
-    let noteId: UUID
+    let notePath: String
     
     @State private var note: Note?
     @State private var showEditor = false
     @State private var showMoveFolder = false
     @State private var isSyncingNote = false  // 正在同步单个笔记
-    @State private var selectedFolderId: UUID?
+    @State private var selectedFolderPath: String?
     @StateObject private var knowledgeStore = KnowledgePointsStore()  // 知识点状态（使用 ObservableObject 解决异步更新问题）
     @State private var selectedKnowledgePoint: KnowledgePoint? = nil  // 选中的知识点（用于弹出详解）
     @State private var lectureItem: LectureItem? = nil  // 讲稿阅读页面数据（使用 item 方式确保数据正确传递）
@@ -94,7 +94,7 @@ struct NoteDetailView: View {
                             Button {
                                 // 打开编辑前先单独同步该笔记，减少冲突
                                 isSyncingNote = true
-                                appState.syncSingleNote(noteId: noteId) { _ in
+                                appState.syncSingleNote(notePath: notePath) { _ in
                                     DispatchQueue.main.async {
                                         loadNote()
                                         isSyncingNote = false
@@ -126,12 +126,12 @@ struct NoteDetailView: View {
                     appState.refreshStats()
                 }) {
                     NavigationStack {
-                        NoteEditorView(noteId: noteId)
+                        NoteEditorView(notePath: notePath)
                     }
                 }
                 .sheet(isPresented: $showMoveFolder) {
                     NavigationStack {
-                        FolderPickerView(selectedFolderId: $selectedFolderId)
+                        FolderPickerView(selectedFolderPath: $selectedFolderPath)
                             .navigationTitle("选择目标文件夹")
                             .navigationBarTitleDisplayMode(.inline)
                             .toolbar {
@@ -140,14 +140,14 @@ struct NoteDetailView: View {
                                 }
                                 ToolbarItem(placement: .topBarTrailing) {
                                     Button("移动") {
-                                        moveNoteTo(folderId: selectedFolderId)
+                                        moveNoteTo(folderPath: selectedFolderPath)
                                         showMoveFolder = false
                                     }
                                     .bold()
                                 }
                             }
                     }
-                    .onAppear { selectedFolderId = note.folderId }
+                    .onAppear { selectedFolderPath = note.folderPath.isEmpty ? nil : note.folderPath }
                 }
             } else {
                 EmptyStateView("笔记不存在或已删除", systemImage: "trash")
@@ -287,14 +287,14 @@ struct NoteDetailView: View {
     
     @ViewBuilder
     private func reviewHistoryView(_ note: Note) -> some View {
-        let logs = appState.storage.getReviewLogs(for: note.id)
+        let logs = appState.storage.getReviewLogs(for: note.notePath)
         if logs.isEmpty {
             Text("（尚无复习记录）")
                 .foregroundColor(.textSecondary)
                 .textStyle(.secondaryText)
         } else {
             VStack(spacing: 0) {
-                ForEach(Array(logs.prefix(10).enumerated()), id: \.element.id) { idx, log in
+                ForEach(Array(logs.prefix(10).enumerated()), id: \.offset) { idx, log in
                     HStack {
                         Circle()
                             .fill(Color(hex: log.rating.color))
@@ -322,18 +322,18 @@ struct NoteDetailView: View {
     // MARK: - 操作
     
     private func loadNote() {
-        note = appState.storage.getNote(id: noteId)
+        note = appState.storage.getNote(notePath: notePath)
     }
     
-    private func moveNoteTo(folderId: UUID?) {
+    private func moveNoteTo(folderPath: String?) {
         guard var note = note else { return }
-        note.folderId = folderId
+        note.folderPath = folderPath ?? ""
         appState.storage.updateNote(note)
         loadNote()
     }
     
     private func deleteNote() {
-        appState.storage.deleteNote(id: noteId)
+        appState.storage.deleteNote(notePath: notePath)
         note = nil
         appState.refreshStats()
     }
@@ -387,7 +387,7 @@ struct NoteDetailView: View {
             SyncLogger.shared.error("📖 openLecture: storage 为 nil")
             return
         }
-        SyncLogger.shared.info("📖 openLecture: note.title=\(note.title), folderId=\(note.folderId?.uuidString ?? "nil")")
+        SyncLogger.shared.info("📖 openLecture: note.title=\(note.title), folderPath=\(note.folderPath)")
         do {
             let content = try storage.readLecture(for: note)
             let folderPath = storage.getNoteFolderPath(for: note) ?? ""
@@ -451,15 +451,15 @@ extension Color {
 
 struct FolderPickerView: View {
     @EnvironmentObject var appState: AppState
-    @Binding var selectedFolderId: UUID?
-    @State private var currentParentId: UUID? = nil
+    @Binding var selectedFolderPath: String?
+    @State private var currentParentPath: String? = nil
     
     private var storage: StorageService { appState.storage! }
     
     var body: some View {
         List {
             Button {
-                selectedFolderId = nil
+                selectedFolderPath = nil
             } label: {
                 HStack {
                     Image(systemName: "tray")
@@ -467,18 +467,18 @@ struct FolderPickerView: View {
                         .frame(width: 28)
                     Text("根目录（无文件夹）")
                     Spacer()
-                    if selectedFolderId == nil {
+                    if selectedFolderPath == nil {
                         Image(systemName: "checkmark").foregroundColor(.brandPrimary)
                     }
                 }
             }
             .tint(.primary)
             
-            let subFolders = storage.getSubFolders(of: currentParentId)
-            if let parent = currentParentId {
-                let parentFolder = storage.getFolder(id: parent)
+            let subFolders = storage.getSubFolders(of: currentParentPath)
+            if let parent = currentParentPath {
+                let parentFolder = storage.getFolder(path: parent)
                 Button {
-                    currentParentId = parentFolder?.parentId
+                    currentParentPath = parentFolder?.parentPath
                 } label: {
                     Label("上级文件夹", systemImage: "chevron.up")
                 }
@@ -486,16 +486,16 @@ struct FolderPickerView: View {
             ForEach(subFolders) { folder in
                 HStack {
                     Button {
-                        currentParentId = folder.id
+                        currentParentPath = folder.path
                     } label: {
                         Label(folder.name, systemImage: "folder.fill")
                             .foregroundColor(.brandPrimary.opacity(0.6))
                     }
                     Spacer()
                     Button {
-                        selectedFolderId = folder.id
+                        selectedFolderPath = folder.path
                     } label: {
-                        if selectedFolderId == folder.id {
+                        if selectedFolderPath == folder.path {
                             Image(systemName: "checkmark").foregroundColor(.brandPrimary)
                         } else {
                             Image(systemName: "chevron.right").foregroundColor(.secondary)

@@ -142,13 +142,13 @@ final class KnowledgeService: ObservableObject {
     func configure(storageService: StorageService) {
         self.storageService = storageService
     }
+    /// 知识点缓存根目录（通过 FileSystemService 获取，位于 Notes/ 下）
     private var cacheDirectory: URL {
-        let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let dir = docs.appendingPathComponent(".knowledge_cache", isDirectory: true)
-        if !fileManager.fileExists(atPath: dir.path) {
-            try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+        guard let storage = storageService else {
+            let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            return docs.appendingPathComponent("Notes", isDirectory: true)
         }
-        return dir
+        return storage.fileSystem.notesRootDirectory
     }
     
     private init() {}
@@ -177,20 +177,11 @@ final class KnowledgeService: ObservableObject {
         return dir.appendingPathComponent("\(safeFileName).md")
     }
     
-    /// 笔记对应的缓存目录：.knowledge_cache/[笔记文件夹路径]/
+    /// 笔记对应的缓存目录：Notes/{folderPath}/.knowledge_cache/{title}/
     private func cacheDirectoryFor(note: Note) -> URL {
-        var dir = cacheDirectory
-        // 通过 StorageService 获取笔记的文件夹路径
-        if let storage = storageService {
-            let folderPath = storage.getFolderPath(for: note.folderId)
-            if !folderPath.isEmpty && folderPath != "根目录" {
-                dir = dir.appendingPathComponent(folderPath, isDirectory: true)
-            }
-        }
-        if !fileManager.fileExists(atPath: dir.path) {
-            try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
-        }
-        return dir
+        guard let storage = storageService else { return cacheDirectory }
+        let dir = storage.fileSystem.knowledgeCacheDirectory(title: note.title, folderPath: note.folderPath)
+        return dir.deletingLastPathComponent() // 返回 .knowledge_cache/ 目录（不含 title 子目录）
     }
     
     /// 将关键字转换为安全的文件名（替换文件系统不允许的字符）
@@ -248,7 +239,7 @@ final class KnowledgeService: ObservableObject {
             let keyword = sanitizeKeyword(p.keyword)
             if keyword.isEmpty || keyword == p.keyword { return p }
             changed = true
-            return KnowledgePoint(id: p.id, noteId: p.noteId, keyword: keyword,
+            return KnowledgePoint(id: p.id, notePath: p.notePath, keyword: keyword,
                                   explanation: p.explanation, createdAt: p.createdAt)
         }
         if changed {
@@ -259,7 +250,7 @@ final class KnowledgeService: ObservableObject {
     
     /// 保存知识点提取缓存
     func saveExtraction(for note: Note, points: [KnowledgePoint]) {
-        let result = KnowledgeExtractionResult(noteId: note.id, noteTitle: note.title, points: points)
+        let result = KnowledgeExtractionResult(notePath: note.notePath, noteTitle: note.title, points: points)
         if let data = try? JSONEncoder().encode(result) {
             let url = extractionCacheURL(for: note)
             try? data.write(to: url, options: .atomic)
@@ -406,14 +397,14 @@ final class KnowledgeService: ObservableObject {
                             continue
                         }
                         
-                        let point = KnowledgePoint(noteId: note.id, keyword: sanitized)
+                        let point = KnowledgePoint(notePath: note.notePath, keyword: sanitized)
                         allPoints.append(point)
                         DispatchQueue.main.async {
                             onPoint(point)
                         }
                     }
                 }
-                
+
                 // 处理最后一行
                 let lastLine = currentLine.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !lastLine.isEmpty {
@@ -424,7 +415,7 @@ final class KnowledgeService: ObservableObject {
                     let sanitized = sanitizeKeyword(cleaned)
                     if !sanitized.isEmpty, sanitized.count >= 2,
                        note.markdownContent.localizedCaseInsensitiveContains(sanitized) {
-                        let point = KnowledgePoint(noteId: note.id, keyword: sanitized)
+                        let point = KnowledgePoint(notePath: note.notePath, keyword: sanitized)
                         allPoints.append(point)
                         DispatchQueue.main.async {
                             onPoint(point)

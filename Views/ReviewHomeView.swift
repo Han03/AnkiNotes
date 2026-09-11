@@ -11,7 +11,7 @@ import SwiftUI
 struct ReviewHomeView: View {
     @EnvironmentObject var appState: AppState
     @State private var showingReview = false
-    @State private var selectedFolderId: UUID? = nil  // 选中的文件夹（用于文件夹复习）
+    @State private var selectedFolderPath: String? = nil  // 选中的文件夹路径（用于文件夹复习）
     @State private var stats = StatsSummary()
     @State private var folderDisplayCount = 10  // 文件夹列表分页
     @State private var isLoadingFolders = false  // 是否正在加载更多文件夹
@@ -152,10 +152,10 @@ struct ReviewHomeView: View {
                             .textStyle(.secondaryText)
                     }
                     ForEach(displayedFolders) { folder in
-                        let count = scheduler.getTodayDueCount(in: folder.id)
-                        let folderPath = storage.getFolderPath(for: folder.id)
+                        let count = scheduler.getTodayDueCount(in: folder.path)
+                        let folderPathDisplay = folder.path
                         Button {
-                            selectedFolderId = folder.id
+                            selectedFolderPath = folder.path
                         } label: {
                             HStack(spacing: AppSpacing.md) {
                                 Image(systemName: "folder.fill")
@@ -166,7 +166,7 @@ struct ReviewHomeView: View {
                                         .textStyle(.secondaryText)
                                         .lineLimit(1)
                                     // 显示完整文件夹路径
-                                    Text(folderPath)
+                                    Text(folderPathDisplay)
                                         .font(.appCaption)
                                         .foregroundColor(.textSecondary)
                                         .lineLimit(1)
@@ -233,8 +233,8 @@ struct ReviewHomeView: View {
             // 异步计算文件夹列表，避免阻塞主线程影响初次加载性能
             DispatchQueue.global(qos: .userInitiated).async {
                 let folders = storage.getAllFolders().filter { folder in
-                    let dueCount = scheduler.getTodayDueCount(in: folder.id)
-                    let noteCount = storage.countNotesRecursive(in: folder.id)
+                    let dueCount = scheduler.getTodayDueCount(in: folder.path)
+                    let noteCount = storage.countNotesRecursive(in: folder.path)
                     return dueCount > 0 || noteCount > 0
                 }
                 DispatchQueue.main.async {
@@ -244,11 +244,14 @@ struct ReviewHomeView: View {
         }
         // 开始复习（全部笔记）
         .fullScreenCover(isPresented: $showingReview) {
-            ReviewSessionView(folderId: nil)
+            ReviewSessionView(folderPath: nil)
         }
         // 文件夹复习
-        .fullScreenCover(item: $selectedFolderId) { folderId in
-            ReviewSessionView(folderId: folderId)
+        .fullScreenCover(isPresented: Binding(
+            get: { selectedFolderPath != nil },
+            set: { if !$0 { selectedFolderPath = nil } }
+        )) {
+            ReviewSessionView(folderPath: selectedFolderPath)
         }
     }
     

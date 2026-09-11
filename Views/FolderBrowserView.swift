@@ -10,7 +10,7 @@ import SwiftUI
 /// 文件夹浏览视图：展示子文件夹 + 当前文件夹内的笔记列表
 struct FolderBrowserView: View {
     @EnvironmentObject var appState: AppState
-    var currentFolderId: UUID?
+    var currentFolderPath: String?
     
     @State private var showNewFolderAlert = false
     @State private var showRenameAlert = false
@@ -23,29 +23,29 @@ struct FolderBrowserView: View {
     @State private var newNoteTitle = ""
     @State private var newNoteTags = ""
     @State private var searchText = ""
-    @State private var editingNoteId: UUID?
+    @State private var editingNotePath: String?
     @State private var displayCount = 10  // 分页加载，默认显示10条
-    @State private var searchedNoteId: UUID?  // 搜索选中的笔记ID，用于跳转
+    @State private var searchedNotePath: String?  // 搜索选中的笔记ID，用于跳转
     @State private var isLoadingMore = false  // 是否正在加载更多
     
     var body: some View {
         let storage = appState.storage!
-        let subFolders = storage.getSubFolders(of: currentFolderId)
+        let subFolders = storage.getSubFolders(of: currentFolderPath)
         // 递归获取当前文件夹及所有子文件夹的笔记
-        let allNotes = storage.getAllNotesRecursive(in: currentFolderId)
+        let allNotes = storage.getAllNotesRecursive(in: currentFolderPath ?? "")
         // 搜索时不直接过滤列表，而是通过 searchSuggestions 下拉浮层展示
         let filteredNotes = allNotes
         // 分页显示
         let displayedNotes = Array(filteredNotes.prefix(displayCount))
         
-        let currentFolder = currentFolderId.flatMap { storage.getFolder(id: $0) }
+        let currentFolder = currentFolderPath.flatMap { storage.getFolder(path: $0) }
         
         List {
             if !subFolders.isEmpty {
                 Section {
                     ForEach(subFolders) { folder in
                         NavigationLink {
-                            FolderBrowserView(currentFolderId: folder.id)
+                            FolderBrowserView(currentFolderPath: folder.path)
                                 .navigationTitle(folder.name)
                         } label: {
                             FolderRow(folder: folder, storage: storage,
@@ -54,7 +54,7 @@ struct FolderBrowserView: View {
                         }
                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                             Button(role: .destructive) {
-                                storage.deleteFolder(id: folder.id)
+                                storage.deleteFolder(path: folder.path)
                                 appState.refreshStats()
                             } label: {
                                 Label("删除", systemImage: "trash")
@@ -74,13 +74,13 @@ struct FolderBrowserView: View {
                 } else {
                     ForEach(displayedNotes) { note in
                         NavigationLink {
-                            NoteDetailView(noteId: note.id)
+                            NoteDetailView(notePath: note.notePath)
                         } label: {
-                            NoteRow(note: note, folderPath: storage.getNoteFolderPath(for: note), hasQuestions: appState.quizService.notesWithQuestionsCache.contains(note.id), hasLecture: storage.hasLecture(for: note))
+                            NoteRow(note: note, folderPath: storage.getNoteFolderPath(for: note), hasQuestions: appState.quizService.notesWithQuestionsCache.contains(note.notePath), hasLecture: storage.hasLecture(for: note))
                         }
                         .swipeActions(edge: .leading) {
                             Button {
-                                editingNoteId = note.id
+                                editingNotePath = note.notePath
                             } label: {
                                 Label("编辑", systemImage: "pencil")
                             }
@@ -88,7 +88,7 @@ struct FolderBrowserView: View {
                         }
                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                             Button(role: .destructive) {
-                                storage.deleteNote(id: note.id)
+                                storage.deleteNote(notePath: note.notePath)
                                 appState.refreshStats()
                             } label: {
                                 Label("删除", systemImage: "trash")
@@ -148,7 +148,7 @@ struct FolderBrowserView: View {
                 } else {
                     ForEach(Array(searchResults)) { note in
                         Button {
-                            searchedNoteId = note.id
+                            searchedNotePath = note.notePath
                             searchText = ""
                         } label: {
                             HStack(spacing: 10) {
@@ -178,12 +178,12 @@ struct FolderBrowserView: View {
         // 搜索选中后跳转到详情
         .background(
             NavigationLink(destination: Group {
-                if let noteId = searchedNoteId {
-                    NoteDetailView(noteId: noteId)
+                if let notePath = searchedNotePath {
+                    NoteDetailView(notePath: notePath)
                 }
             }, isActive: Binding(
-                get: { searchedNoteId != nil },
-                set: { if !$0 { searchedNoteId = nil } }
+                get: { searchedNotePath != nil },
+                set: { if !$0 { searchedNotePath = nil } }
             )) {
                 EmptyView()
             }
@@ -214,7 +214,7 @@ struct FolderBrowserView: View {
             Button("创建") {
                 let name = newFolderName.trimmingCharacters(in: .whitespaces)
                 if !name.isEmpty {
-                    storage.createFolder(name: name, parentId: currentFolderId)
+                    storage.createFolder(name: name, parentPath: currentFolderPath)
                     appState.refreshStats()
                 }
                 newFolderName = ""
@@ -246,7 +246,7 @@ struct FolderBrowserView: View {
             }
         } message: {
             if let folder = folderToDelete {
-                let noteCount = storage.countNotesRecursive(in: folder.id)
+                let noteCount = storage.countNotesRecursive(in: folder.path)
                 Text("确定要删除文件夹「\(folder.name)」吗？该文件夹下的 \(noteCount) 篇笔记也会被删除，此操作不可恢复。")
             }
         }
@@ -259,7 +259,7 @@ struct FolderBrowserView: View {
                 let title = newNoteTitle.trimmingCharacters(in: .whitespaces)
                 if !title.isEmpty {
                     let tags = newNoteTags.split(separator: ",").map { String($0.trimmingCharacters(in: .whitespaces)) }
-                    _ = storage.createNote(title: title, folderId: currentFolderId, tags: tags)
+                    _ = storage.createNote(title: title, folderPath: currentFolderPath ?? "", tags: tags)
                     appState.refreshStats()
                 }
                 newNoteTitle = ""
@@ -269,9 +269,9 @@ struct FolderBrowserView: View {
             Text("笔记将以 Markdown 文件形式存储在当前文件夹中。")
         }
         // 编辑笔记
-        .sheet(item: $editingNoteId) { noteId in
+        .sheet(item: $editingNotePath) { notePath in
             NavigationStack {
-                NoteEditorView(noteId: noteId)
+                NoteEditorView(notePath: notePath)
             }
         }
     }
@@ -289,7 +289,7 @@ struct FolderBrowserView: View {
               !renameText.trimmingCharacters(in: .whitespaces).isEmpty else {
             return
         }
-        appState.storage!.renameFolder(id: folder.id, newName: renameText.trimmingCharacters(in: .whitespaces))
+        appState.storage!.renameFolder(path: folder.path, newName: renameText.trimmingCharacters(in: .whitespaces))
         showRenameAlert = false
         folderToRename = nil
         renameText = ""
@@ -302,7 +302,7 @@ struct FolderBrowserView: View {
     
     private func confirmDelete() {
         guard let folder = folderToDelete else { return }
-        appState.storage!.deleteFolder(id: folder.id)
+        appState.storage!.deleteFolder(path: folder.path)
         showDeleteConfirm = false
         folderToDelete = nil
     }
@@ -325,8 +325,8 @@ private struct FolderRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(folder.name)
                     .textStyle(.sectionTitle)
-                let subCount = storage.getSubFolders(of: folder.id).count
-                let noteCount = storage.countNotesRecursive(in: folder.id)
+                let subCount = storage.getSubFolders(of: folder.path).count
+                let noteCount = storage.countNotesRecursive(in: folder.path)
                 Text("\(subCount) 文件夹 · \(noteCount) 笔记")
                     .textStyle(.secondaryText)
                     .foregroundColor(.textSecondary)
@@ -495,13 +495,4 @@ private func highlightedText(_ text: String, searchText: String) -> Text {
     return result
 }
 
-// MARK: - UUID Binding helper
-
-extension Binding where Value == UUID? {
-    func mappedToUUID() -> Binding<UUID?> {
-        return Binding<UUID?>(
-            get: { self.wrappedValue },
-            set: { self.wrappedValue = $0 }
-        )
-    }
-}
+// MARK: - 搜索高亮文本（续）

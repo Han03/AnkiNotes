@@ -2,7 +2,7 @@
 //  Question.swift
 //  AnkiNotes
 //
-//  Created by AI Assistant on 2026/8/29.
+//  题目模型：notePath 替代 noteId，路径即身份
 //
 
 import Foundation
@@ -29,21 +29,21 @@ struct ChoiceOption: Codable, Hashable {
 /// 题目模型
 struct Question: Identifiable, Codable, Hashable {
     let id: UUID
-    let noteId: UUID              // 来源笔记 ID
-    let noteTitle: String         // 来源笔记标题（冗余，便于显示）
-    let type: QuestionType        // 题目类型
-    let question: String          // 题干
+    let notePath: String        // 来源笔记路径（folderPath/title）
+    let noteTitle: String       // 来源笔记标题（冗余，便于显示）
+    let type: QuestionType      // 题目类型
+    let question: String        // 题干
     var options: [ChoiceOption]?  // 选择题选项（问答题为 nil）
-    let answer: String            // 参考答案（选择题为正确选项 key，如 "A"；问答题为参考答案文本）
-    let explanation: String?      // 答案解析
-    var status: QuestionStatus    // 作答状态
-    var answerCount: Int          // 作答次数
-    var correctCount: Int         // 答对次数
+    let answer: String          // 参考答案
+    let explanation: String?    // 答案解析
+    var status: QuestionStatus  // 作答状态
+    var answerCount: Int        // 作答次数
+    var correctCount: Int       // 答对次数
     var createdAt: Date
     var updatedAt: Date
 
     init(id: UUID = UUID(),
-         noteId: UUID,
+         notePath: String,
          noteTitle: String,
          type: QuestionType,
          question: String,
@@ -56,7 +56,7 @@ struct Question: Identifiable, Codable, Hashable {
          createdAt: Date = Date(),
          updatedAt: Date = Date()) {
         self.id = id
-        self.noteId = noteId
+        self.notePath = notePath
         self.noteTitle = noteTitle
         self.type = type
         self.question = question
@@ -70,18 +70,18 @@ struct Question: Identifiable, Codable, Hashable {
         self.updatedAt = updatedAt
     }
 
-    // MARK: - 自定义解码：兼容旧版本题目文件（缺少新增字段时使用默认值）
+    // MARK: - 自定义解码：兼容旧版本题目文件（noteId → notePath 迁移）
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
-        noteId = try container.decode(UUID.self, forKey: .noteId)
+        // 兼容旧数据：优先读 notePath，兜底读 noteId
+        notePath = try container.decodeIfPresent(String.self, forKey: .notePath) ?? ""
         noteTitle = try container.decode(String.self, forKey: .noteTitle)
         type = try container.decode(QuestionType.self, forKey: .type)
         question = try container.decode(String.self, forKey: .question)
         options = try container.decodeIfPresent([ChoiceOption].self, forKey: .options)
         answer = try container.decode(String.self, forKey: .answer)
         explanation = try container.decodeIfPresent(String.self, forKey: .explanation)
-        // 新增字段：旧文件可能缺少，使用默认值
         status = try container.decodeIfPresent(QuestionStatus.self, forKey: .status) ?? .unanswered
         answerCount = try container.decodeIfPresent(Int.self, forKey: .answerCount) ?? 0
         correctCount = try container.decodeIfPresent(Int.self, forKey: .correctCount) ?? 0
@@ -97,7 +97,6 @@ struct Question: Identifiable, Codable, Hashable {
         case .singleChoice:
             return normalizedUser == normalizedAnswer
         case .fillBlank:
-            // 填空题：忽略大小写和首尾空格，支持多个正确答案（用 / 或 | 分隔）
             let possibleAnswers = normalizedAnswer.components(separatedBy: CharacterSet(charactersIn: "/|"))
             return possibleAnswers.contains { $0.trimmingCharacters(in: .whitespaces) == normalizedUser }
         }

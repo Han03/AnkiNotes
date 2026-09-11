@@ -11,7 +11,7 @@ import SwiftUI
 struct ReviewSessionView: View {
     @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) private var dismiss
-    var folderId: UUID?
+    var folderPath: String?
     
     @State private var queue: [Note] = []
     @State private var currentIndex = 0
@@ -74,7 +74,7 @@ struct ReviewSessionView: View {
     
     private func bootstrap() {
         let scheduler = appState.scheduler!
-        queue = scheduler.getTodayReviewQueue(in: folderId)
+        queue = scheduler.getTodayReviewQueue(in: folderPath)
         cardStartTime = Date()
         // 提取第一篇笔记的知识点
         extractKnowledgeForCurrentNote()
@@ -280,7 +280,7 @@ struct ReviewSessionView: View {
     
     @ViewBuilder
     private func bottomOperationBar(note: Note, scheduler: SchedulerService) -> some View {
-        let hasQuiz = appState.quizService.notesWithQuestionsCache.contains(note.id)
+        let hasQuiz = appState.quizService.notesWithQuestionsCache.contains(note.notePath)
         let hasLecture = appState.storage?.hasLecture(for: note) ?? false
         let isPlaying = isPlayingLecture && !isPausedLecture
         
@@ -562,7 +562,7 @@ struct ReviewSessionView: View {
         guard currentIndex < queue.count else { return }
         let note = queue[currentIndex]
         let spent = Date().timeIntervalSince(cardStartTime)
-        _ = appState.scheduler.rate(noteId: note.id, rating: rating, timeSpent: spent)
+        _ = appState.scheduler.rate(notePath: note.notePath, rating: rating, timeSpent: spent)
         reviewedCount += 1
         
         // 过渡动画
@@ -635,7 +635,7 @@ struct ReviewSessionView: View {
             SyncLogger.shared.error("📖 ReviewSessionView openLecture: storage 为 nil")
             return
         }
-        SyncLogger.shared.info("📖 ReviewSessionView openLecture: note.title=\(note.title), folderId=\(note.folderId?.uuidString ?? "nil")")
+        SyncLogger.shared.info("📖 ReviewSessionView openLecture: note.title=\(note.title), folderPath=\(note.folderPath)")
         do {
             let content = try storage.readLecture(for: note)
             let folderPath = storage.getNoteFolderPath(for: note) ?? ""

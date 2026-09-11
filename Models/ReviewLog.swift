@@ -2,15 +2,13 @@
 //  ReviewLog.swift
 //  AnkiNotes
 //
-//  Created by AI Assistant on 2026/8/29.
+//  复习历史记录：嵌入 .meta sidecar，无需 noteId（天然属于该笔记）
 //
 
 import Foundation
 
-/// 复习历史记录
-struct ReviewLog: Identifiable, Codable, Hashable {
-    let id: UUID
-    var noteId: UUID
+/// 复习历史记录（存储在 NoteMetaFile.reviewLogs 中）
+struct ReviewLog: Codable, Hashable {
     var rating: ReviewRating
     var oldInterval: Int      // 复习前间隔（天）
     var newInterval: Int      // 复习后间隔（天）
@@ -18,18 +16,14 @@ struct ReviewLog: Identifiable, Codable, Hashable {
     var newEase: Double       // 复习后EF
     var reviewDate: Date
     var timeSpent: TimeInterval  // 本次复习耗时
-    
-    init(id: UUID = UUID(),
-         noteId: UUID,
-         rating: ReviewRating,
+
+    init(rating: ReviewRating,
          oldInterval: Int,
          newInterval: Int,
          oldEase: Double,
          newEase: Double,
          reviewDate: Date = Date(),
          timeSpent: TimeInterval = 0) {
-        self.id = id
-        self.noteId = noteId
         self.rating = rating
         self.oldInterval = oldInterval
         self.newInterval = newInterval
@@ -49,10 +43,10 @@ struct StatsSummary: Codable, Hashable {
     var masteredCount: Int = 0       // EF >= 2.5 & interval >= 21 的
     var learningCount: Int = 0       // 学习中的数量
     var newCount: Int = 0            // 新卡片数量
-    
+
     // 过去7天复习数量
     var weeklyReviewCounts: [Int] = Array(repeating: 0, count: 7)
-    
+
     // 累计数据
     var totalReviews: Int = 0
     var streakDays: Int = 0

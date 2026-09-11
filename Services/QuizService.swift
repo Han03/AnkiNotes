@@ -28,15 +28,15 @@ struct BailianConfig: Codable, Hashable {
 /// 题库服务：管理题目存储、生成、选题
 final class QuizService {
     private(set) var questions: [Question] = []
-    /// 缓存：已拥有题目的笔记 ID 集合（用于 O(1) 快速查询）
-    private(set) var notesWithQuestionsCache: Set<UUID> = []
-    /// 缓存：按笔记 ID 分组的题目列表 (noteId -> [Question])，用于题库主页极速渲染
-    private(set) var questionGroupsCache: [UUID: [Question]] = [:]
-    private(set) var isGenerating = false  // 是否正在生成题目
-    private(set) var isCancelled = false    // 是否被用户取消
-    private(set) var failedNoteIds: Set<UUID> = []  // 生成失败的笔记ID（可重试）
-    /// noteId → 题目文件所在目录（相对 Questions 根目录），用于题组展示真实路径，不依赖笔记索引
-    private(set) var notePaths: [UUID: String] = [:]
+    /// 缓存：已拥有题目的笔记路径集合（用于 O(1) 快速查询）
+    private(set) var notesWithQuestionsCache: Set<String> = []
+    /// 缓存：按笔记路径分组的题目列表 (notePath -> [Question])
+    private(set) var questionGroupsCache: [String: [Question]] = [:]
+    private(set) var isGenerating = false
+    private(set) var isCancelled = false
+    private(set) var failedNotePaths: Set<String> = []
+    /// notePath → 题目文件所在目录
+    private(set) var notePathMap: [String: String] = [:]
     private var currentAPITask: URLSessionDataTask?  // 当前正在进行的 API 请求任务（保留兼容）
     private var currentStreamTask: Task<Void, Never>?  // 当前流式请求任务（用于取消）
     @Published var generatedCharCount: Int = 0  // 当前笔记已生成字数（实时进度）
@@ -46,7 +46,7 @@ final class QuizService {
     /// 云端文件系统（用于锁验证，由 AppState 设置）
     weak var cloudFS: CloudFileSystem?
     
-    /// 所有笔记（用于查找 folderId 和 title，由 AppState 更新）
+    /// 所有笔记（用于查找 notePath 和 title，由 AppState 更新）
     var notes: [Note] = []
     /// 所有文件夹（用于计算路径，由 AppState 更新）
     var folders: [Folder] = []
@@ -77,86 +77,60 @@ final class QuizService {
     private func load() {
         // 【优化】直接遍历 Questions 目录下的所有 JSON 文件加载题目
         questions = fileSystem.loadAllQuestionsFromDisk()
-        // 记录 noteId → 题目文件目录映射（题组展示真实路径，不依赖笔记索引）
-        notePaths = fileSystem.loadQuestionNotePaths()
+        // 记录 notePath → 题目文件目录映射（题组展示真实路径，不依赖笔记索引）
+        notePathMap = fileSystem.loadQuestionNotePaths()
         // 同步更新缓存
         updateNotesWithQuestionsCache()
     }
 
     private func save() {
-        // 按笔记分组保存题目到 Questions/[路径]/[标题].json
-        let questionsByNote = Dictionary(grouping: questions) { $0.noteId }
-        
-        for (noteId, noteQuestions) in questionsByNote {
-            guard let note = notes.first(where: { $0.id == noteId }) else { continue }
-            do {
-                try fileSystem.writeQuestions(
-                    noteQuestions,
-                    folderId: note.folderId,
-                    title: note.title,
-                    folders: folders
-                )
-            } catch {
-                print("⚠️ 保存题目失败 \(note.title): \(error.localizedDescription)")
-            }
+        let questionsByNote = Dictionary(grouping: questions) { $0.notePath }
+        for (notePath, noteQuestions) in questionsByNote {
+            guard let note = notes.first(where: { $0.notePath == notePath }) else { continue }
+            fileSystem.writeQuestions(noteQuestions, title: note.title, folderPath: note.folderPath)
         }
     }
-    
-    /// 只保存单个笔记的题目（生成题目时使用，提高性能）
+
     private func saveQuestions(for note: Note) {
-        let noteQuestions = questions.filter { $0.noteId == note.id }
-        do {
-            try fileSystem.writeQuestions(
-                noteQuestions,
-                folderId: note.folderId,
-                title: note.title,
-                folders: folders
-            )
-        } catch {
-            print("⚠️ 保存题目失败 \(note.title): \(error.localizedDescription)")
-        }
-        // 同步更新缓存
+        let noteQuestions = questions.filter { $0.notePath == note.notePath }
+        fileSystem.writeQuestions(noteQuestions, title: note.title, folderPath: note.folderPath)
         updateNotesWithQuestionsCache()
     }
     
     /// 更新缓存集合
     private func updateNotesWithQuestionsCache() {
-        notesWithQuestionsCache = Set(questions.map { $0.noteId })
-        // 同步更新分组缓存
-        questionGroupsCache = Dictionary(grouping: questions, by: { $0.noteId })
+        notesWithQuestionsCache = Set(questions.map { $0.notePath })
+        questionGroupsCache = Dictionary(grouping: questions, by: { $0.notePath })
     }
 
     // MARK: - 题库统计
 
     /// 删除指定笔记的所有题目
-    func deleteQuestions(for noteId: UUID) {
+    func deleteQuestions(for notePath: String) {
         let before = questions.count
-        questions.removeAll { $0.noteId == noteId }
-        failedNoteIds.remove(noteId)
-        // 删除对应的 .json 文件
-        if let note = notes.first(where: { $0.id == noteId }) {
-            fileSystem.deleteQuestions(folderId: note.folderId, title: note.title, folders: folders)
+        questions.removeAll { $0.notePath == notePath }
+        failedNotePaths.remove(notePath)
+        // 删除对应的 .questions 文件
+        if let note = notes.first(where: { $0.notePath == notePath }) {
+            fileSystem.deleteQuestions(title: note.title, folderPath: note.folderPath)
         }
-        // 同步更新缓存
         updateNotesWithQuestionsCache()
         if questions.count != before {
-            print("🗑️ 删除笔记 \(noteId) 的题目: \(before - questions.count) 道")
+            print("🗑️ 删除笔记 \(notePath) 的题目: \(before - questions.count) 道")
         }
     }
-    
+
     /// 删除多个笔记的所有题目
-    func deleteQuestions(for noteIds: [UUID]) {
+    func deleteQuestions(for notePaths: [String]) {
         let before = questions.count
-        let idSet = Set(noteIds)
-        questions.removeAll { idSet.contains($0.noteId) }
-        noteIds.forEach { failedNoteIds.remove($0) }
-        // 删除对应的 .json 文件
-        for noteId in noteIds {
-            if let note = notes.first(where: { $0.id == noteId }) {
-                fileSystem.deleteQuestions(folderId: note.folderId, title: note.title, folders: folders)
+        let pathSet = Set(notePaths)
+        questions.removeAll { pathSet.contains($0.notePath) }
+        notePaths.forEach { failedNotePaths.remove($0) }
+        for np in notePaths {
+            if let note = notes.first(where: { $0.notePath == np }) {
+                fileSystem.deleteQuestions(title: note.title, folderPath: note.folderPath)
             }
         }
-        // 同步更新缓存
         updateNotesWithQuestionsCache()
         if questions.count != before {
             print("🗑️ 删除多个笔记的题目: \(before - questions.count) 道")
@@ -173,7 +147,7 @@ final class QuizService {
         stats.fillBlankCount = questions.filter { $0.type == .fillBlank }.count
         stats.totalAnswerCount = questions.reduce(0) { $0 + $1.answerCount }
         stats.totalCorrectCount = questions.reduce(0) { $0 + $1.correctCount }
-        stats.coveredNoteCount = Set(questions.map { $0.noteId }).count
+        stats.coveredNoteCount = Set(questions.map { $0.notePath }).count
         return stats
     }
 
@@ -192,9 +166,9 @@ final class QuizService {
     /// 保证不同题目被选中的实际概率相同（在相同状态下）
     /// - Parameters:
     ///   - count: 抽取数量（nil = 全部）
-    ///   - noteId: 限定某个笔记的题目（nil = 全库）
-    func selectQuestions(count: Int?, noteId: UUID? = nil) -> [Question] {
-        let pool = noteId == nil ? questions : questions.filter { $0.noteId == noteId }
+    ///   - notePath: 限定某个笔记的题目（nil = 全库）
+    func selectQuestions(count: Int?, notePath: String? = nil) -> [Question] {
+        let pool = notePath == nil ? questions : questions.filter { $0.notePath == notePath }
         guard !pool.isEmpty else { return [] }
         let targetCount = min(count ?? pool.count, pool.count)
 
@@ -277,8 +251,8 @@ final class QuizService {
         isCancelled = false
 
         // 筛选未生成题目的笔记（通过校验 questions 数组判断）
-        let notesWithQuestions = Set(questions.map { $0.noteId })
-        let pendingNotes = notes.filter { !notesWithQuestions.contains($0.id) && !failedNoteIds.contains($0.id) }
+        let notesWithQuestions = Set(questions.map { $0.notePath })
+        let pendingNotes = notes.filter { !notesWithQuestions.contains($0.notePath) && !failedNotePaths.contains($0.notePath) }
         guard !pendingNotes.isEmpty else {
             isGenerating = false
             completion(0, 0, false)
@@ -308,11 +282,10 @@ final class QuizService {
                     self.questions.append(contentsOf: newQuestions)
                     totalNewQuestions += newQuestions.count
                     // 生成成功，从失败集合中移除并更新缓存
-                    self.failedNoteIds.remove(note.id)
-                    self.notesWithQuestionsCache.insert(note.id)
+                    self.failedNotePaths.remove(note.notePath)
+                    self.notesWithQuestionsCache.insert(note.notePath)
                 } else {
-                    // 生成失败，记录到失败集合，下次可重试
-                    self.failedNoteIds.insert(note.id)
+                    self.failedNotePaths.insert(note.notePath)
                 }
                 processedNotes += 1
 
@@ -556,7 +529,7 @@ final class QuizService {
             }
 
             let question = Question(
-                noteId: note.id,
+                notePath: note.notePath,
                 noteTitle: note.title,
                 type: type,
                 question: questionText,

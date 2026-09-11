@@ -31,7 +31,6 @@
 		ANSSEStreamManager /* SSEStreamManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANSSEStreamManagerRef /* SSEStreamManager.swift */; };
 		392470F8DA3B93785B7405F8 /* SyncLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 621D2B4E554ED1479A5AE2DD /* SyncLogger.swift */; };
 		8F7E9719C666424FAAEB1E1B /* AppLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A0BB2AA2AE84C65AAA36F23 /* AppLogger.swift */; };
-		ANMetadataSyncService /* MetadataSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANMetadataSyncServiceRef /* MetadataSyncService.swift */; };
 		ANTTSService /* TTSService.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANTTSServiceRef /* TTSService.swift */; };
 		ANTTSCacheManager /* TTSCacheManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANTTSCacheManagerRef /* TTSCacheManager.swift */; };
 		ANLectureReaderView /* LectureReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANLectureReaderViewRef /* LectureReaderView.swift */; };
@@ -39,13 +38,11 @@
 		ANKnowledgeService /* KnowledgeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANKnowledgeServiceRef /* KnowledgeService.swift */; };
 		ANKnowledgePoint /* KnowledgePoint.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANKnowledgePointRef /* KnowledgePoint.swift */; };
 		ANSett /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANSettRef /* SettingsView.swift */; };
-		ANFrontMat /* MarkdownFrontmatterParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANFrontMatRef /* MarkdownFrontmatterParser.swift */; };
 		ANCloudProvider /* CloudProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANCloudProviderRef /* CloudProvider.swift */; };
 		ANQuestion /* Question.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANQuestionRef /* Question.swift */; };
 		ANQuizService /* QuizService.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANQuizServiceRef /* QuizService.swift */; };
 		ANQuizHome /* QuizHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANQuizHomeRef /* QuizHomeView.swift */; };
 		ANQuizSession /* QuizSessionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANQuizSessionRef /* QuizSessionView.swift */; };
-		ANMetadataPushService /* MetadataPushService.swift in Sources */ = {isa = PBXBuildFile; fileRef = ANMetadataPushServiceRef /* MetadataPushService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -72,7 +69,6 @@
 		ANSSEStreamManagerRef /* SSEStreamManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSEStreamManager.swift; sourceTree = "<group>"; };
 		621D2B4E554ED1479A5AE2DD /* SyncLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncLogger.swift; sourceTree = "<group>"; };
 		5A0BB2AA2AE84C65AAA36F23 /* AppLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLogger.swift; sourceTree = "<group>"; };
-		ANMetadataSyncServiceRef /* MetadataSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetadataSyncService.swift; sourceTree = "<group>"; };
 		ANTTSServiceRef /* TTSService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TTSService.swift; sourceTree = "<group>"; };
 		ANTTSCacheManagerRef /* TTSCacheManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TTSCacheManager.swift; sourceTree = "<group>"; };
 		ANLectureReaderViewRef /* LectureReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LectureReaderView.swift; sourceTree = "<group>"; };
@@ -81,13 +77,11 @@
 		ANKnowledgePointRef /* KnowledgePoint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnowledgePoint.swift; sourceTree = "<group>"; };
 		ANSettRef /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		ANSharedViewRef /* SharedViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedViews.swift; sourceTree = "<group>"; };
-		ANFrontMatRef /* MarkdownFrontmatterParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownFrontmatterParser.swift; sourceTree = "<group>"; };
 		ANCloudProviderRef /* CloudProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudProvider.swift; sourceTree = "<group>"; };
 		ANQuestionRef /* Question.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Question.swift; sourceTree = "<group>"; };
 		ANQuizServiceRef /* QuizService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuizService.swift; sourceTree = "<group>"; };
 		ANQuizHomeRef /* QuizHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuizHomeView.swift; sourceTree = "<group>"; };
 		ANQuizSessionRef /* QuizSessionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuizSessionView.swift; sourceTree = "<group>"; };
-		ANMetadataPushServiceRef /* MetadataPushService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetadataPushService.swift; sourceTree = "<group>"; };
 		ANInfoPlist /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		ANEntitlements /* AnkiNotes.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = AnkiNotes.entitlements; sourceTree = "<group>"; };
 		ANProductApp /* AnkiNotes.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AnkiNotes.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -137,7 +131,6 @@
 				ANStoreRef /* StorageService.swift */,
 				ANSM2Ref /* SM2Algorithm.swift */,
 				ANSchedRef /* SchedulerService.swift */,
-				ANFrontMatRef /* MarkdownFrontmatterParser.swift */,
 				ANCloudProviderRef /* CloudProvider.swift */,
 			ANQuizServiceRef /* QuizService.swift */,
 				ANCloudLockServiceRef /* CloudLockService.swift */,
@@ -145,11 +138,9 @@
 				ANSSEStreamManagerRef /* SSEStreamManager.swift */,
 				621D2B4E554ED1479A5AE2DD /* SyncLogger.swift */,
 				5A0BB2AA2AE84C65AAA36F23 /* AppLogger.swift */,
-				ANMetadataSyncServiceRef /* MetadataSyncService.swift */,
 				ANTTSServiceRef /* TTSService.swift */,
 				ANTTSCacheManagerRef /* TTSCacheManager.swift */,
 				ANKnowledgeServiceRef /* KnowledgeService.swift */,
-				ANMetadataPushServiceRef /* MetadataPushService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -281,7 +272,6 @@
 				ANReviewSession /* ReviewSessionView.swift in Sources */,
 				ANReviewQuiz /* ReviewQuizView.swift in Sources */,
 					ANSett /* SettingsView.swift in Sources */,
-				ANFrontMat /* MarkdownFrontmatterParser.swift in Sources */,
 				ANCloudProvider /* CloudProvider.swift in Sources */,
 			ANQuestion /* Question.swift in Sources */,
 			ANQuizService /* QuizService.swift in Sources */,
@@ -293,13 +283,11 @@
 			ANSSEStreamManager /* SSEStreamManager.swift in Sources */,
 			392470F8DA3B93785B7405F8 /* SyncLogger.swift in Sources */,
 			8F7E9719C666424FAAEB1E1B /* AppLogger.swift in Sources */,
-			ANMetadataSyncService /* MetadataSyncService.swift in Sources */,
 			ANTTSService /* TTSService.swift in Sources */,
 			ANTTSCacheManager /* TTSCacheManager.swift in Sources */,
 			ANKnowledgeService /* KnowledgeService.swift in Sources */,
 			ANLectureReaderView /* LectureReaderView.swift in Sources */,
 			ANKnowledgeExplainView /* KnowledgeExplainView.swift in Sources */,
-			ANMetadataPushService /* MetadataPushService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

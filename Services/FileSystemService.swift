@@ -2,199 +2,103 @@
 //  FileSystemService.swift
 //  AnkiNotes
 //
-//  重构版：通过 CloudFileSystem 协议调度（📁本地 / ☁️iCloud / 🌐WebDAV）
-//  上层业务代码完全不感知底层 Provider 差异。
-//
-//  Created by AI Assistant on 2026/8/29.
+//  纯 WebDAV 客户端：文件系统即数据库
+//  单一根目录 Notes/，sidecar 文件存储各类数据
 //
 
 import Foundation
 
-/// 文件系统服务（StorageService 用它做文件/目录的 URL 派生 & 实际 IO 转发）
+/// 文件系统服务
+/// 单一根目录 Notes/，所有数据通过 sidecar 文件存储
 final class FileSystemService {
 
-    // MARK: - 后端 Provider（由 AppState 在 bootstrap/applyProvider 时注入）
+    // MARK: - 后端 Provider
 
     let cloudFS: CloudFileSystem
-    /// 同步快照服务（上传后更新快照，避免下次同步冗余 GET 比对）
     weak var syncSnapshotService: SyncSnapshotService?
 
     init(cloudFS: CloudFileSystem) {
         self.cloudFS = cloudFS
     }
 
-    // MARK: - 路径（全部指向本地 Documents，云端仅用于同步备份）
+    // MARK: - 路径
 
-    /// 本地 Documents 目录（权威数据源）
+    /// 本地 Documents 目录
     var localDocumentsDirectory: URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
     }
 
-    /// 根目录：本地 Documents（云端仅用于同步）
+    /// 根目录：本地 Documents
     var rootDirectory: URL { localDocumentsDirectory }
 
-    /// Markdown 物理文件总目录（Documents/Notes）
+    /// 唯一数据根目录（Documents/Notes）
+    /// 所有笔记、讲稿、题库、知识点缓存均在此目录下
     var notesRootDirectory: URL {
         let dir = localDocumentsDirectory.appendingPathComponent("Notes", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
 
-    /// 课堂讲稿总目录（Documents/Lecture）
-    var lecturesRootDirectory: URL {
-        let dir = localDocumentsDirectory.appendingPathComponent("Lecture", isDirectory: true)
+    /// 同步快照文件路径（Notes/.sync_snapshot.json）
+    var snapshotFileURL: URL {
+        notesRootDirectory.appendingPathComponent(".sync_snapshot.json")
+    }
+
+    // MARK: - 文件 URL 派生（统一模式：Notes/{folderPath}/{title}.{ext}）
+
+    /// 笔记 .md 文件 URL
+    func noteURL(title: String, folderPath: String) -> URL {
+        var dir = notesRootDirectory
+        if !folderPath.isEmpty {
+            for component in folderPath.split(separator: "/") {
+                dir.appendPathComponent(String(component), isDirectory: true)
+            }
+        }
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("\(sanitizeFileName(title)).md")
+    }
+
+    /// 笔记附属数据 .meta 文件 URL
+    func metaURL(title: String, folderPath: String) -> URL {
+        noteURL(title: title, folderPath: folderPath)
+            .deletingLastPathComponent()
+            .appendingPathComponent("\(sanitizeFileName(title)).meta")
+    }
+
+    /// 讲稿 .lecture 文件 URL
+    func lectureURL(title: String, folderPath: String) -> URL {
+        noteURL(title: title, folderPath: folderPath)
+            .deletingLastPathComponent()
+            .appendingPathComponent("\(sanitizeFileName(title)).lecture")
+    }
+
+    /// 题库 .questions 文件 URL
+    func questionsURL(title: String, folderPath: String) -> URL {
+        noteURL(title: title, folderPath: folderPath)
+            .deletingLastPathComponent()
+            .appendingPathComponent("\(sanitizeFileName(title)).questions")
+    }
+
+    /// 知识点缓存目录（Notes/{folderPath}/.knowledge_cache/{title}/）
+    func knowledgeCacheDirectory(title: String, folderPath: String) -> URL {
+        var dir = noteURL(title: title, folderPath: folderPath).deletingLastPathComponent()
+        dir.appendPathComponent(".knowledge_cache", isDirectory: true)
+        dir.appendPathComponent(sanitizeFileName(title), isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
-    
-    /// 题库总目录（Documents/Questions，按笔记文件夹结构存储）
-    var questionsRootDirectory: URL {
-        let dir = localDocumentsDirectory.appendingPathComponent("Questions", isDirectory: true)
+
+    /// 知识点缓存根目录（Notes/{folderPath}/.knowledge_cache/）
+    func knowledgeCacheRoot(for folderPath: String) -> URL {
+        var dir = notesRootDirectory
+        if !folderPath.isEmpty {
+            for component in folderPath.split(separator: "/") {
+                dir.appendPathComponent(String(component), isDirectory: true)
+            }
+        }
+        dir.appendPathComponent(".knowledge_cache", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
-    }
-    
-    /// 直接遍历 Questions 目录下的所有 JSON 文件，加载所有题目（不依赖 notes/folders 数组）
-    /// 这是最健壮的加载方式，避免 folders 数组不完整导致路径计算错误
-    func loadAllQuestionsFromDisk() -> [Question] {
-        var allQuestions: [Question] = []
-        let fileManager = FileManager.default
-        let rootURL = questionsRootDirectory
-        
-        guard let enumerator = fileManager.enumerator(
-            at: rootURL,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles, .skipsPackageDescendants]
-        ) else {
-            print("📂 loadAllQuestionsFromDisk: 无法创建目录枚举器")
-            return []
-        }
-        
-        var fileCount = 0
-        var successCount = 0
-        var failCount = 0
-        
-        for case let fileURL as URL in enumerator {
-            guard fileURL.pathExtension.lowercased() == "json" else { continue }
-            fileCount += 1
-            
-            do {
-                let data = try Data(contentsOf: fileURL)
-                let questions = try JSONDecoder().decode([Question].self, from: data)
-                allQuestions.append(contentsOf: questions)
-                successCount += 1
-            } catch {
-                failCount += 1
-                print("⚠️ loadAllQuestionsFromDisk: 解析失败 \(fileURL.lastPathComponent): \(error.localizedDescription)")
-            }
-        }
-        
-        print("📚 loadAllQuestionsFromDisk: 遍历 \(fileCount) 个文件，成功 \(successCount) 个，失败 \(failCount) 个，题目总数 \(allQuestions.count)")
-        return allQuestions
-    }
-
-    /// 构建 noteId → 题目文件所在目录（相对 Questions 根目录）的映射
-    /// 不依赖 notes/folders 索引，用于题组列表展示真实路径（笔记索引缺失时也能正确显示）
-    func loadQuestionNotePaths() -> [UUID: String] {
-        var paths: [UUID: String] = [:]
-        let fileManager = FileManager.default
-        let rootURL = questionsRootDirectory
-
-        guard let enumerator = fileManager.enumerator(
-            at: rootURL,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles, .skipsPackageDescendants]
-        ) else {
-            return [:]
-        }
-
-        for case let fileURL as URL in enumerator {
-            guard fileURL.pathExtension.lowercased() == "json" else { continue }
-            guard let data = try? Data(contentsOf: fileURL),
-                  let questions = try? JSONDecoder().decode([Question].self, from: data),
-                  let first = questions.first else { continue }
-            // 相对路径：去掉根目录前缀和文件名，得到目录部分
-            var relPath = fileURL.deletingLastPathComponent().path
-            if relPath.hasPrefix(rootURL.path) {
-                relPath = String(relPath.dropFirst(rootURL.path.count))
-            }
-            relPath = relPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-            paths[first.noteId] = relPath
-        }
-        return paths
-    }
-
-    /// JSON 索引目录（Documents/.metadata）
-    var metadataDirectory: URL {
-        let dir = localDocumentsDirectory.appendingPathComponent(".metadata", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        // 隐藏属性
-        var url = dir
-        var values = URLResourceValues()
-        values.isHidden = true
-        try? url.setResourceValues(values)
-        return dir
-    }
-
-    var foldersIndexFile: URL  { metadataDirectory.appendingPathComponent("folders.json") }
-    var notesIndexFile:    URL { metadataDirectory.appendingPathComponent("notes_index.json") }
-    var reviewLogsFile:    URL { metadataDirectory.appendingPathComponent("review_logs.json") }
-
-    // MARK: - Markdown 文件 URL 派生（根据文件夹层级 → Notes/<folderPath>/<title>.md）
-
-    func noteFileURL(noteId: UUID, folderId: UUID?, title: String, folders: [Folder]) -> URL {
-        var currentURL = notesRootDirectory
-        if let folderId = folderId {
-            let pathComponents = buildFolderPath(folderId: folderId, folders: folders)
-            for folderName in pathComponents.reversed() {
-                currentURL = currentURL.appendingPathComponent(folderName, isDirectory: true)
-            }
-        }
-        try? FileManager.default.createDirectory(at: currentURL, withIntermediateDirectories: true)
-        let safeTitle = sanitizeFileName(title)
-        let fileName = "\(safeTitle).md"
-        return currentURL.appendingPathComponent(fileName)
-    }
-
-    /// 讲稿文件 URL（与笔记相同路径和名称，扩展名为 .txt）
-    func lectureFileURL(folderId: UUID?, title: String, folders: [Folder]) -> URL {
-        var currentURL = lecturesRootDirectory
-        if let folderId = folderId {
-            let pathComponents = buildFolderPath(folderId: folderId, folders: folders)
-            for folderName in pathComponents.reversed() {
-                currentURL = currentURL.appendingPathComponent(folderName, isDirectory: true)
-            }
-        }
-        try? FileManager.default.createDirectory(at: currentURL, withIntermediateDirectories: true)
-        let safeTitle = sanitizeFileName(title)
-        let fileName = "\(safeTitle).txt"
-        return currentURL.appendingPathComponent(fileName)
-    }
-    
-    /// 题库文件 URL（与笔记相同路径和名称，扩展名为 .json）
-    func questionFileURL(folderId: UUID?, title: String, folders: [Folder]) -> URL {
-        var currentURL = questionsRootDirectory
-        if let folderId = folderId {
-            let pathComponents = buildFolderPath(folderId: folderId, folders: folders)
-            for folderName in pathComponents.reversed() {
-                currentURL = currentURL.appendingPathComponent(folderName, isDirectory: true)
-            }
-        }
-        try? FileManager.default.createDirectory(at: currentURL, withIntermediateDirectories: true)
-        let safeTitle = sanitizeFileName(title)
-        let fileName = "\(safeTitle).json"
-        return currentURL.appendingPathComponent(fileName)
-    }
-
-    private func buildFolderPath(folderId: UUID, folders: [Folder]) -> [String] {
-        var result: [String] = []
-        var currentId: UUID? = folderId
-        let folderDict = Dictionary(uniqueKeysWithValues: folders.map { ($0.id, $0) })
-        while let cid = currentId, let folder = folderDict[cid] {
-            result.append(sanitizeFileName(folder.name))
-            currentId = folder.parentId
-        }
-        return result
     }
 
     func sanitizeFileName(_ name: String) -> String {
@@ -205,7 +109,66 @@ final class FileSystemService {
         return safe
     }
 
-    // MARK: - Markdown IO（直接操作本地 Documents）
+    // MARK: - 题库加载
+
+    /// 递归扫描 Notes/ 下所有 .questions 文件，加载所有题目
+    func loadAllQuestionsFromDisk() -> [Question] {
+        var allQuestions: [Question] = []
+        let fileManager = FileManager.default
+        let rootURL = notesRootDirectory
+
+        guard let enumerator = fileManager.enumerator(
+            at: rootURL,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else {
+            return []
+        }
+
+        var fileCount = 0
+        var successCount = 0
+
+        for case let fileURL as URL in enumerator {
+            guard fileURL.pathExtension == "questions" else { continue }
+            fileCount += 1
+            do {
+                let data = try Data(contentsOf: fileURL)
+                let questions = try JSONDecoder().decode([Question].self, from: data)
+                allQuestions.append(contentsOf: questions)
+                successCount += 1
+            } catch {
+                print("⚠️ loadAllQuestionsFromDisk: 解析失败 \(fileURL.lastPathComponent)")
+            }
+        }
+
+        print("📚 loadAllQuestionsFromDisk: 扫描 \(fileCount) 个文件，成功 \(successCount) 个，题目 \(allQuestions.count) 道")
+        return allQuestions
+    }
+
+    /// 构建 notePath → 题目文件所在目录的映射
+    func loadQuestionNotePaths() -> [String: String] {
+        var paths: [String: String] = [:]
+        let fileManager = FileManager.default
+        let rootURL = notesRootDirectory
+
+        guard let enumerator = fileManager.enumerator(
+            at: rootURL,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else { return [:] }
+
+        for case let fileURL as URL in enumerator {
+            guard fileURL.pathExtension == "questions" else { continue }
+            guard let data = try? Data(contentsOf: fileURL),
+                  let questions = try? JSONDecoder().decode([Question].self, from: data),
+                  let first = questions.first else { continue }
+            // notePath 直接从题目数据中获取
+            paths[first.notePath] = first.notePath
+        }
+        return paths
+    }
+
+    // MARK: - 笔记 IO
 
     func writeNoteContent(_ content: String, to url: URL, skipCloudSync: Bool = false) throws {
         guard let data = content.data(using: .utf8) else {
@@ -213,7 +176,6 @@ final class FileSystemService {
         }
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: url, options: .atomic)
-        // 异步同步到云端
         if !skipCloudSync {
             syncToCloud(data: data, to: url)
         }
@@ -226,230 +188,235 @@ final class FileSystemService {
         }
         return str
     }
-    
-    /// 异步同步文件到云端
-    private func syncToCloud(data: Data, to url: URL) {
-        // 在异步块前计算快照 key 和修改时间，避免竞态
-        let docsPath = localDocumentsDirectory.path
-        let relativePath = url.path.replacingOccurrences(of: docsPath, with: "")
-        let snapshotKey = relativePath.hasPrefix("/") ? String(relativePath.dropFirst()) : relativePath
-        let modDate = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            guard let self = self else { return }
-            let cloudURL = self.cloudURL(forLocalURL: url)
-            SyncLogger.shared.stepStart("☁️ 上传笔记: \(url.lastPathComponent)")
-            do {
-                try self.cloudFS.writeData(data, to: cloudURL)
-                SyncLogger.shared.stepDone("☁️ 上传笔记")
-                // 上传成功后更新快照，避免下次同步时冗余 GET 比对
-                if let modDate = modDate {
-                    self.syncSnapshotService?.updateFile(relativePath: snapshotKey, lastModified: modDate)
-                }
-            } catch {
-                SyncLogger.shared.stepFail("☁️ 上传笔记", error: error)
+
+    // MARK: - .meta IO
+
+    func writeMeta(_ meta: NoteMetaFile, title: String, folderPath: String, skipCloudSync: Bool = false) {
+        let url = metaURL(title: title, folderPath: folderPath)
+        do {
+            let data = try JSONEncoder().encode(meta)
+            try data.write(to: url, options: .atomic)
+            if !skipCloudSync {
+                syncToCloud(data: data, to: url)
             }
+        } catch {
+            print("⚠️ 写入 .meta 失败: \(error.localizedDescription)")
         }
     }
-    
-    /// 本地 URL 转换为云端 URL
-    private func cloudURL(forLocalURL url: URL) -> URL {
-        let localPath = localDocumentsDirectory.path
-        let relativePath = url.path.replacingOccurrences(of: localPath, with: "")
-        return cloudFS.rootDirectory.appendingPathComponent(relativePath)
+
+    func readMeta(title: String, folderPath: String) -> NoteMetaFile? {
+        let url = metaURL(title: title, folderPath: folderPath)
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode(NoteMetaFile.self, from: data)
     }
 
-    // MARK: - 讲稿 IO（直接操作 Documents/Lecture）
+    // MARK: - 讲稿 IO
 
-    func lectureExists(folderId: UUID?, title: String, folders: [Folder]) -> Bool {
-        let url = lectureFileURL(folderId: folderId, title: title, folders: folders)
-        return FileManager.default.fileExists(atPath: url.path)
+    func lectureExists(title: String, folderPath: String) -> Bool {
+        FileManager.default.fileExists(atPath: lectureURL(title: title, folderPath: folderPath).path)
     }
 
-    func readLecture(folderId: UUID?, title: String, folders: [Folder]) throws -> String {
-        let url = lectureFileURL(folderId: folderId, title: title, folders: folders)
-        SyncLogger.shared.info("📖 读取讲稿: title=\(title), folderId=\(folderId?.uuidString ?? "nil"), folders=\(folders.count), path=\(url.path)")
-        
-        let exists = FileManager.default.fileExists(atPath: url.path)
-        SyncLogger.shared.info("📖 讲稿文件是否存在: \(exists)")
-        
-        guard exists else {
-            SyncLogger.shared.error("📖 讲稿文件不存在: \(url.path)")
-            // 列出上级目录内容，便于排查
-            let parentDir = url.deletingLastPathComponent()
-            if let contents = try? FileManager.default.contentsOfDirectory(atPath: parentDir.path) {
-                SyncLogger.shared.info("📖 上级目录内容(\(parentDir.path)): \(contents)")
-            } else {
-                SyncLogger.shared.error("📖 无法读取上级目录: \(parentDir.path)")
-            }
-            throw NSError(domain: "FileSystemService", code: -3, userInfo: [NSLocalizedDescriptionKey: "讲稿文件不存在: \(url.lastPathComponent)"])
-        }
-        
+    func readLecture(title: String, folderPath: String) throws -> String {
+        let url = lectureURL(title: title, folderPath: folderPath)
         let data = try Data(contentsOf: url)
-        SyncLogger.shared.info("📖 讲稿文件大小: \(data.count) 字节")
-        
         guard let str = String(data: data, encoding: .utf8) else {
-            SyncLogger.shared.error("📖 讲稿文件不是有效的 UTF-8 编码")
-            throw NSError(domain: "FileSystemService", code: -4, userInfo: [NSLocalizedDescriptionKey: "讲稿文件不是有效的 UTF-8 编码"])
+            throw NSError(domain: "FileSystemService", code: -4, userInfo: [NSLocalizedDescriptionKey: "讲稿不是有效的 UTF-8 编码"])
         }
-        
-        SyncLogger.shared.info("📖 讲稿读取成功，内容长度: \(str.count) 字符，前100字: \(String(str.prefix(100)))")
         return str
     }
 
-    func writeLecture(_ content: String, folderId: UUID?, title: String, folders: [Folder], skipCloudSync: Bool = false) throws {
-        guard let data = content.data(using: .utf8) else {
-            throw NSError(domain: "FileSystemService", code: -5, userInfo: [NSLocalizedDescriptionKey: "讲稿内容转 UTF-8 失败"])
-        }
-        let url = lectureFileURL(folderId: folderId, title: title, folders: folders)
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try data.write(to: url, options: .atomic)
-        // 异步同步到云端
+    func writeLecture(_ content: String, title: String, folderPath: String, skipCloudSync: Bool = false) {
+        let url = lectureURL(title: title, folderPath: folderPath)
+        guard let data = content.data(using: .utf8) else { return }
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? data.write(to: url, options: .atomic)
         if !skipCloudSync {
             syncToCloud(data: data, to: url)
         }
     }
 
-    // MARK: - 题库 IO（直接操作 Documents/Questions）
+    // MARK: - 题库 IO
 
-    func questionExists(folderId: UUID?, title: String, folders: [Folder]) -> Bool {
-        let url = questionFileURL(folderId: folderId, title: title, folders: folders)
-        return FileManager.default.fileExists(atPath: url.path)
+    func readQuestions(title: String, folderPath: String) -> [Question] {
+        let url = questionsURL(title: title, folderPath: folderPath)
+        guard let data = try? Data(contentsOf: url) else { return [] }
+        return (try? JSONDecoder().decode([Question].self, from: data)) ?? []
     }
 
-    func readQuestions(folderId: UUID?, title: String, folders: [Folder]) throws -> [Question] {
-        let url = questionFileURL(folderId: folderId, title: title, folders: folders)
-        let data = try Data(contentsOf: url)
-        guard let decoded = try? JSONDecoder().decode([Question].self, from: data) else {
-            throw NSError(domain: "FileSystemService", code: -6, userInfo: [NSLocalizedDescriptionKey: "题库文件解析失败"])
-        }
-        return decoded
-    }
-
-    func writeQuestions(_ questions: [Question], folderId: UUID?, title: String, folders: [Folder], skipCloudSync: Bool = false) throws {
-        let data = try JSONEncoder().encode(questions)
-        let url = questionFileURL(folderId: folderId, title: title, folders: folders)
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try data.write(to: url, options: .atomic)
-        // 异步同步到云端
-        if !skipCloudSync {
-            syncToCloud(data: data, to: url)
+    func writeQuestions(_ questions: [Question], title: String, folderPath: String, skipCloudSync: Bool = false) {
+        let url = questionsURL(title: title, folderPath: folderPath)
+        do {
+            let data = try JSONEncoder().encode(questions)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try data.write(to: url, options: .atomic)
+            if !skipCloudSync {
+                syncToCloud(data: data, to: url)
+            }
+        } catch {
+            print("⚠️ 写入题库失败: \(error.localizedDescription)")
         }
     }
-    
-    func deleteQuestions(folderId: UUID?, title: String, folders: [Folder]) {
-        let url = questionFileURL(folderId: folderId, title: title, folders: folders)
+
+    func deleteQuestions(title: String, folderPath: String) {
+        let url = questionsURL(title: title, folderPath: folderPath)
         try? FileManager.default.removeItem(at: url)
-        // 异步删除云端
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            guard let self = self else { return }
-            let cloudURL = self.cloudURL(forLocalURL: url)
-            try? self.cloudFS.removeItem(at: cloudURL)
-        }
+        deleteCloudFile(at: url)
     }
 
-    func deleteNoteFile(at url: URL) throws {
-        // 删除本地文件
+    // MARK: - 文件删除
+
+    func deleteNoteFile(at url: URL) {
         try? FileManager.default.removeItem(at: url)
-        // 异步删除云端
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            guard let self = self else { return }
-            let cloudURL = self.cloudURL(forLocalURL: url)
-            try? self.cloudFS.removeItem(at: cloudURL)
+        deleteCloudFile(at: url)
+    }
+
+    /// 删除笔记的所有关联文件（.md + .meta + .lecture + .questions）
+    func deleteNoteSidecars(title: String, folderPath: String) {
+        for ext in ["meta", "lecture", "questions"] {
+            let url = noteURL(title: title, folderPath: folderPath)
+                .deletingLastPathComponent()
+                .appendingPathComponent("\(sanitizeFileName(title)).\(ext)")
+            try? FileManager.default.removeItem(at: url)
+            deleteCloudFile(at: url)
         }
     }
 
-    func createPhysicalFolder(named name: String, parentFolderId: UUID?, folders: [Folder]) throws -> URL {
+    // MARK: - 物理文件夹
+
+    func createPhysicalFolder(named name: String, parentPath: String?) throws -> URL {
         var currentURL = notesRootDirectory
-        if let parentId = parentFolderId {
-            let pathComponents = buildFolderPath(folderId: parentId, folders: folders)
-            for folderName in pathComponents.reversed() {
-                currentURL = currentURL.appendingPathComponent(folderName, isDirectory: true)
+        if let parentPath = parentPath, !parentPath.isEmpty {
+            for component in parentPath.split(separator: "/") {
+                currentURL.appendPathComponent(String(component), isDirectory: true)
             }
         }
         let dirURL = currentURL.appendingPathComponent(sanitizeFileName(name), isDirectory: true)
         try FileManager.default.createDirectory(at: dirURL, withIntermediateDirectories: true)
         // 异步创建云端目录
+        let cloudURL = cloudURL(forLocalURL: dirURL)
         DispatchQueue.global(qos: .utility).async { [weak self] in
-            guard let self = self else { return }
-            let cloudURL = self.cloudURL(forLocalURL: dirURL)
-            try? self.cloudFS.createDirectoryIfNeeded(at: cloudURL)
+            try? self?.cloudFS.createDirectoryIfNeeded(at: cloudURL)
         }
         return dirURL
     }
 
-    func deletePhysicalFolder(at url: URL) throws {
-        // 删除本地目录
+    func deletePhysicalFolder(at url: URL) {
         try? FileManager.default.removeItem(at: url)
-        // 异步删除云端目录
+        deleteCloudFile(at: url)
+    }
+
+    // MARK: - 云端同步
+
+    /// 异步同步文件到云端（路径恒等映射：本地 Documents/Notes/X = 云端 Notes/X）
+    private func syncToCloud(data: Data, to localURL: URL) {
+        let cloudURL = cloudURL(forLocalURL: localURL)
+        let snapshotKey = relativePathFromNotes(localURL)
+        let modDate = (try? FileManager.default.attributesOfItem(atPath: localURL.path))?[.modificationDate] as? Date
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self = self else { return }
-            let cloudURL = self.cloudURL(forLocalURL: url)
-            try? self.cloudFS.removeItem(at: cloudURL)
-        }
-    }
-    
-    /// 移动/重命名物理文件夹（本地 + 云端）
-    /// 注意：CloudFileSystem 协议没有 moveItem 方法，这里只确保目标目录存在，
-    /// 实际的文件移动通过后续的全量同步完成
-    func movePhysicalFolder(from sourceURL: URL, to destinationURL: URL) throws {
-        // 确保目标目录存在
-        try FileManager.default.createDirectory(at: destinationURL, withIntermediateDirectories: true)
-        // 本地移动
-        try? FileManager.default.moveItem(at: sourceURL, to: destinationURL)
-        // 云端移动通过全量同步处理
-    }
-
-    // MARK: - JSON 索引读写（转发到 cloudFS；失败打印警告）
-
-    func loadFolders() -> [Folder] {
-        loadJSON(from: foldersIndexFile, defaultValue: [])
-    }
-
-    func saveFolders(_ folders: [Folder]) {
-        saveJSON(folders, to: foldersIndexFile)
-    }
-
-    func loadNoteIndex() -> [NoteMeta] {
-        loadJSON(from: notesIndexFile, defaultValue: [])
-    }
-
-    func saveNoteIndex(_ meta: [NoteMeta]) {
-        saveJSON(meta, to: notesIndexFile)
-    }
-
-    func loadReviewLogs() -> [ReviewLog] {
-        loadJSON(from: reviewLogsFile, defaultValue: [])
-    }
-
-    func saveReviewLogs(_ logs: [ReviewLog]) {
-        saveJSON(logs, to: reviewLogsFile)
-    }
-
-    // MARK: - 通用 JSON 工具
-
-    private func loadJSON<T: Decodable>(from url: URL, defaultValue: T) -> T {
-        // 直接从本地 Documents/.metadata 读取
-        guard FileManager.default.fileExists(atPath: url.path),
-              let data = try? Data(contentsOf: url) else {
-            return defaultValue
-        }
-        do {
-            return try JSONDecoder().decode(T.self, from: data)
-        } catch {
-            print("⚠️ JSON 解码失败 \(url.lastPathComponent): \(error)")
-            return defaultValue
+            do {
+                try self.cloudFS.createDirectoryIfNeeded(at: cloudURL.deletingLastPathComponent())
+                try self.cloudFS.writeData(data, to: cloudURL)
+                if let modDate = modDate {
+                    self.syncSnapshotService?.updateFile(relativePath: snapshotKey, lastModified: modDate)
+                }
+            } catch {
+                print("⚠️ 云端同步失败: \(error.localizedDescription)")
+            }
         }
     }
 
-    private func saveJSON<T: Encodable>(_ value: T, to url: URL) {
-        do {
-            let data = try JSONEncoder().encode(value)
-            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try data.write(to: url, options: .atomic)
-            // 异步同步到云端
-            syncToCloud(data: data, to: url)
-        } catch {
-            print("⚠️ JSON 写入失败 \(url.lastPathComponent): \(error)")
+    /// 异步删除云端文件
+    private func deleteCloudFile(at localURL: URL) {
+        let cloudURL = cloudURL(forLocalURL: localURL)
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            try? self?.cloudFS.removeItem(at: cloudURL)
         }
+    }
+
+    /// 本地 URL → 云端 URL（恒等映射：Documents/Notes/X → cloudRoot/Notes/X）
+    func cloudURL(forLocalURL url: URL) -> URL {
+        let localPath = localDocumentsDirectory.path
+        let relativePath = url.path.replacingOccurrences(of: localPath, with: "")
+        return cloudFS.rootDirectory.appendingPathComponent(relativePath)
+    }
+
+    /// 本地 URL → 相对 Notes/ 的路径（用于快照 key）
+    func relativePathFromNotes(_ url: URL) -> String {
+        let notesPath = notesRootDirectory.path
+        let fullPath = url.path
+        guard fullPath.hasPrefix(notesPath) else { return fullPath }
+        var relative = String(fullPath.dropFirst(notesPath.count))
+        if relative.hasPrefix("/") { relative = String(relative.dropFirst()) }
+        return relative
+    }
+
+    // MARK: - 目录扫描工具
+
+    /// 从 Notes/ 目录结构推导所有文件夹
+    func scanFolders() -> [Folder] {
+        var folders: [Folder] = []
+        let fileManager = FileManager.default
+        let root = notesRootDirectory
+
+        guard let enumerator = fileManager.enumerator(
+            at: root,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else { return folders }
+
+        for case let dirURL as URL in enumerator {
+            guard let values = try? dirURL.resourceValues(forKeys: [.isDirectoryKey]),
+                  values.isDirectory else { continue }
+            let relativePath = dirURL.path.replacingOccurrences(of: root.path + "/", with: "")
+            let name = dirURL.lastPathComponent
+            let parentPath: String? = {
+                let parent = dirURL.deletingLastPathComponent()
+                let parentRelative = parent.path.replacingOccurrences(of: root.path + "/", with: "")
+                return parentRelative == root.path || parentRelative.isEmpty ? nil : parentRelative
+            }()
+            folders.append(Folder(name: name, path: relativePath, parentPath: parentPath))
+        }
+        return folders
+    }
+
+    /// 扫描所有 .meta 文件，构建笔记列表（不含 markdownContent）
+    func scanNotes() -> [Note] {
+        var notes: [Note] = []
+        let fileManager = FileManager.default
+        let root = notesRootDirectory
+
+        guard let enumerator = fileManager.enumerator(
+            at: root,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else { return notes }
+
+        for case let fileURL as URL in enumerator {
+            guard fileURL.pathExtension == "meta" else { continue }
+            guard let data = try? Data(contentsOf: fileURL),
+                  let meta = try? JSONDecoder().decode(NoteMetaFile.self, from: data) else { continue }
+
+            let title = fileURL.deletingPathExtension().lastPathComponent
+            let parentDir = fileURL.deletingLastPathComponent()
+            let folderPath = parentDir.path.replacingOccurrences(of: root.path + "/", with: "")
+            let effectiveFolderPath = folderPath == root.path || folderPath.isEmpty ? "" : folderPath
+
+            // 读取 .md 内容
+            let mdURL = parentDir.appendingPathComponent("\(title).md")
+            let content = (try? String(contentsOf: mdURL, encoding: .utf8)) ?? ""
+
+            notes.append(Note(
+                title: title,
+                folderPath: effectiveFolderPath,
+                markdownContent: content,
+                tags: meta.tags,
+                srs: meta.srs,
+                createdAt: meta.createdAt,
+                updatedAt: meta.updatedAt,
+                reviewLogs: meta.reviewLogs
+            ))
+        }
+        return notes
     }
 }

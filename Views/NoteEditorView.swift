@@ -11,7 +11,7 @@ import SwiftUI
 struct NoteEditorView: View {
     @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) private var dismiss
-    let noteId: UUID
+    let notePath: String
     
     @State private var originalNote: Note?
     @State private var title: String = ""
@@ -179,7 +179,7 @@ struct NoteEditorView: View {
     }
     
     private func load() {
-        guard let n = appState.storage.getNote(id: noteId) else { return }
+        guard let n = appState.storage.getNote(notePath: notePath) else { return }
         originalNote = n
         title = n.title
         markdownText = n.markdownContent

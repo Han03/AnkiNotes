@@ -49,7 +49,7 @@ struct ReviewQuizView: View {
     
     private func loadQuestions() {
         // 从该笔记的题目中随机抽取最多 10 题
-        let noteQuestions = quizService.questions.filter { $0.noteId == note.id }
+        let noteQuestions = quizService.questions.filter { $0.notePath == note.notePath }
         let shuffled = noteQuestions.shuffled()
         questions = Array(shuffled.prefix(10))
     }

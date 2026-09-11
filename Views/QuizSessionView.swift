@@ -15,7 +15,7 @@ struct QuizSessionView: View {
     /// 抽取题目数量（nil = 该范围的全部题目）
     let questionCount: Int?
     /// 限定某个笔记的题目（nil = 全库抽题）
-    var noteIdFilter: UUID? = nil
+    var notePathFilter: String? = nil
 
     @State private var questions: [Question] = []
     @State private var currentIndex = 0
@@ -66,7 +66,7 @@ struct QuizSessionView: View {
 
     private func loadQuestions() {
         guard let quiz = appState.quizService else { return }
-        questions = quiz.selectQuestions(count: questionCount, noteId: noteIdFilter)
+        questions = quiz.selectQuestions(count: questionCount, notePath: notePathFilter)
         if questions.isEmpty {
             finished = true
         }
@@ -86,7 +86,7 @@ struct QuizSessionView: View {
                         Text(q.noteTitle)
                             .font(.appCaption)
                             .foregroundColor(.textSecondary)
-                        if let note = appState.storage?.getNote(id: q.noteId) {
+                        if let note = appState.storage?.getNote(notePath: q.notePath) {
                             let folderPath = appState.storage?.getNoteFolderPath(for: note) ?? ""
                             if !folderPath.isEmpty {
                                 Text(folderPath)

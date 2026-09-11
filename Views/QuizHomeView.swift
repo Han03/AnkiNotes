@@ -14,7 +14,7 @@ struct QuizHomeView: View {
     @State private var selectedCount = 10
     @State private var stats = QuizStats()
     /// 限定刷题范围：nil = 全库；非 nil = 该题组（笔记）的题目
-    @State private var activeGroupNoteId: UUID? = nil
+    @State private var activeGroupNotePath: String? = nil
 
     // 题组列表（一个题目 json 文件 = 一个题组）
     @State private var questionGroups: [QuestionGroupItem] = []
@@ -78,8 +78,8 @@ struct QuizHomeView: View {
         }
         .fullScreenCover(isPresented: $showingQuiz) {
             NavigationStack {
-                QuizSessionView(questionCount: activeGroupNoteId == nil ? selectedCount : nil,
-                                noteIdFilter: activeGroupNoteId)
+                QuizSessionView(questionCount: activeGroupNotePath == nil ? selectedCount : nil,
+                                notePathFilter: activeGroupNotePath)
             }
         }
         // 生成题目报错提示
@@ -229,7 +229,7 @@ struct QuizHomeView: View {
             }
 
             Button {
-                activeGroupNoteId = nil  // 全库抽题
+                activeGroupNotePath = nil  // 全库抽题
                 showingQuiz = true
             } label: {
                 HStack(spacing: AppSpacing.md) {
@@ -337,7 +337,7 @@ struct QuizHomeView: View {
     /// 是否还有未生成题目的笔记（通过校验缓存集合判断，O(1) 复杂度）
     private var hasPendingQuestionNotes: Bool {
         guard let quiz = appState.quizService else { return false }
-        return quiz.notes.contains { !quiz.notesWithQuestionsCache.contains($0.id) && !quiz.failedNoteIds.contains($0.id) }
+        return quiz.notes.contains { !quiz.notesWithQuestionsCache.contains($0.notePath) && !quiz.failedNotePaths.contains($0.notePath) }
     }
 
     // MARK: - 全部题组（按题目文件）
@@ -395,7 +395,7 @@ struct QuizHomeView: View {
 
     private func groupRow(_ group: QuestionGroupItem) -> some View {
         Button {
-            activeGroupNoteId = group.noteId
+            activeGroupNotePath = group.notePath
             showingQuiz = true
         } label: {
             HStack(spacing: AppSpacing.md) {
@@ -446,18 +446,18 @@ struct QuizHomeView: View {
     private func buildGroups() -> [QuestionGroupItem] {
         guard let quiz = appState.quizService, !quiz.questionGroupsCache.isEmpty else { return [] }
         var items: [QuestionGroupItem] = []
-        for (noteId, qs) in quiz.questionGroupsCache {
+        for (notePath, qs) in quiz.questionGroupsCache {
             let title = qs.first?.noteTitle ?? "未知笔记"
             // 优先用笔记索引计算路径；笔记索引缺失（笔记已删/未加载）时回退到题目文件系统路径
             var folderPath = ""
-            if let note = appState.storage?.getNote(id: noteId) {
+            if let note = appState.storage?.getNote(notePath: notePath) {
                 folderPath = appState.storage?.getNoteFolderPath(for: note) ?? ""
             }
             if folderPath.isEmpty {
-                folderPath = quiz.notePaths[noteId] ?? ""
+                folderPath = quiz.notePathMap[notePath] ?? ""
             }
             items.append(QuestionGroupItem(
-                noteId: noteId,
+                notePath: notePath,
                 title: title,
                 folderPath: folderPath,
                 count: qs.count,
@@ -484,13 +484,13 @@ struct QuizHomeView: View {
 // MARK: - 题组条目
 
 private struct QuestionGroupItem: Identifiable {
-    let noteId: UUID
+    let notePath: String
     let title: String
     let folderPath: String
     let count: Int
     let answered: Int
     let correct: Int
-    var id: UUID { noteId }
+    var id: String { notePath }
 }
 
 // MARK: - 统计小方块

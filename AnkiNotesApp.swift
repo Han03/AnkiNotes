@@ -26,8 +26,6 @@ struct AnkiNotesApp: App {
                         if let fs = appState.activeFS {
                             CloudLockService.shared.applicationDidEnterBackground(cloudFS: fs)
                         }
-                        // 【新增】立即执行待推送的元数据
-                        MetadataPushService.shared.flush()
                     }
                 }
         }
@@ -227,26 +225,9 @@ final class AppState: ObservableObject {
         iCloudContainerAvailable = (activeFS as? ICloudFS)?.isAvailable ?? false
         providerStatus = summarizeStatus()
         refreshStats()
-        // 5) 后台异步从云端拉取元数据和知识点缓存到本地
+        // 5) 后台静默同步：从云端拉取最新数据
         DispatchQueue.global(qos: .utility).async { [weak self] in
-            guard let self = self, let fs = self.activeFS else { return }
-            let pulled = MetadataSyncService.shared.pullFromCloud(cloudFS: fs)
-            if pulled > 0 {
-                print("📥 启动时元数据同步: 拉取 \(pulled) 个文件")
-                DispatchQueue.main.async {
-                    self.storage.reloadFromCache()
-                    self.quizService.reloadFromCache()
-                    self.refreshStats()
-                }
-            }
-            // 拉取知识点缓存
-            let knowledgePulled = MetadataSyncService.shared.pullKnowledgeCache(cloudFS: fs)
-            if knowledgePulled > 0 {
-                print("📥 启动时知识点缓存同步: 拉取 \(knowledgePulled) 个文件")
-            }
-            // 【优化】bootstrap 拉取完成后再触发静默同步（串行执行），
-            // 此时快照已更新，silentSync 的根目录检查大概率发现无变更直接跳过，
-            // 避免与 bootstrap 并发执行导致双重 PROPFIND + 双重锁获取
+            guard let self = self else { return }
             DispatchQueue.main.async {
                 self.performSilentSyncOnLaunch()
             }
@@ -623,34 +604,7 @@ final class AppState: ObservableObject {
                 }
             }
             
-            // 从云端拉取元数据和知识点缓存到本地缓存（不加载到内存）
-            // 注意：不调用 reloadFromCache，避免云端索引提前加载导致 importFromCloud 全部判定为重复跳过
-            DispatchQueue.main.async {
-                self.syncStep = "拉取云端元数据"
-                self.syncProgress = 3
-                self.syncDetail = "正在从云端下载 .metadata..."
-            }
-            SyncLogger.shared.stepStart("拉取云端元数据")
-            let metaPullStartTime = Date()
-            let pulled = MetadataSyncService.shared.pullFromCloud(cloudFS: fs, rootScanChildren: rootScanChildren)
-            let metaPullDuration = Date().timeIntervalSince(metaPullStartTime)
-            SyncLogger.shared.stepDone("拉取云端元数据", duration: metaPullDuration)
-            SyncLogger.shared.info("拉取云端元数据: \(pulled) 个文件，耗时 \(String(format: "%.2f", metaPullDuration))秒")
-            opSteps.append("拉取云端元数据(\(pulled)个)")
-            // 拉取知识点缓存
-            DispatchQueue.main.async {
-                self.syncStep = "拉取知识点缓存"
-                self.syncProgress = 4
-                self.syncDetail = "正在从云端下载 .knowledge_cache..."
-            }
-            SyncLogger.shared.stepStart("拉取知识点缓存")
-            let knowledgePullStartTime = Date()
-            let knowledgePulled = MetadataSyncService.shared.pullKnowledgeCache(cloudFS: fs, rootScanChildren: rootScanChildren)
-            let knowledgePullDuration = Date().timeIntervalSince(knowledgePullStartTime)
-            SyncLogger.shared.stepDone("拉取知识点缓存", duration: knowledgePullDuration)
-            SyncLogger.shared.info("拉取知识点缓存: \(knowledgePulled) 个文件，耗时 \(String(format: "%.2f", knowledgePullDuration))秒")
-            opSteps.append("拉取知识点缓存(\(knowledgePulled)个)")
-            // 从云端扫描并导入到本地（此时内存中的索引为空，会创建所有笔记）
+            // 从云端扫描并导入到本地（单次递归扫描 Notes/）
             SyncLogger.shared.stepStart("从云端导入数据（笔记/讲稿/题目）")
             let importStartTime = Date()
             let report = self.storage.importFromCloud(rootScanChildren: rootScanChildren)
@@ -705,16 +659,33 @@ final class AppState: ObservableObject {
     }
 
     /// 从云端同步单个笔记（打开编辑前调用，减少冲突）
-    func syncSingleNote(noteId: UUID, completion: ((Bool) -> Void)? = nil) {
-        guard webDAVFS != nil else {
+    func syncSingleNote(notePath: String, completion: ((Bool) -> Void)? = nil) {
+        guard let webDAVFS = webDAVFS, let note = storage.getNote(notePath: notePath) else {
             completion?(false)
             return
         }
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
-            let success = self.storage.syncSingleNoteFromCloud(noteId: noteId)
+            let cloudNotesRoot = webDAVFS.rootDirectory.appendingPathComponent("Notes", isDirectory: true)
+            let localNotesRoot = self.fileSystem.notesRootDirectory
+            var success = true
+            // 下载该笔记的所有 sidecar 文件
+            for ext in ["md", "meta", "lecture", "questions"] {
+                let relativePath = note.notePath
+                let cloudURL = cloudNotesRoot.appendingPathComponent(relativePath).deletingPathExtension().appendingPathExtension(ext)
+                do {
+                    let data = try webDAVFS.readData(at: cloudURL)
+                    let localURL = localNotesRoot.appendingPathComponent(relativePath).deletingPathExtension().appendingPathExtension(ext)
+                    try FileManager.default.createDirectory(at: localURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    try data.write(to: localURL, options: .atomic)
+                } catch {
+                    // 文件不存在不算失败（如 .lecture 可能不存在）
+                    if ext == "md" || ext == "meta" { success = false }
+                }
+            }
             DispatchQueue.main.async {
                 if success {
+                    self.storage.reloadFromCache()
                     self.storage.triggerRefresh()
                 }
                 completion?(success)
@@ -723,14 +694,27 @@ final class AppState: ObservableObject {
     }
 
     /// 上传单个笔记到云端（保存后调用）
-    func uploadSingleNote(noteId: UUID, completion: ((Bool) -> Void)? = nil) {
-        guard webDAVFS != nil else {
+    func uploadSingleNote(notePath: String, completion: ((Bool) -> Void)? = nil) {
+        guard let note = storage.getNote(notePath: notePath) else {
             completion?(false)
             return
         }
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
-            let success = self.storage.uploadSingleNoteToCloud(noteId: noteId)
+            // 上传 .md 和 .meta（实时写入已通过 FileSystemService.syncToCloud 处理，此处为显式同步）
+            let mdURL = self.fileSystem.noteURL(title: note.title, folderPath: note.folderPath)
+            let metaURL = self.fileSystem.metaURL(title: note.title, folderPath: note.folderPath)
+            var success = true
+            for url in [mdURL, metaURL] {
+                guard let data = try? Data(contentsOf: url) else { continue }
+                let cloudURL = self.fileSystem.cloudURL(forLocalURL: url)
+                do {
+                    try self.fileSystem.cloudFS.createDirectoryIfNeeded(at: cloudURL.deletingLastPathComponent())
+                    try self.fileSystem.cloudFS.writeData(data, to: cloudURL)
+                } catch {
+                    success = false
+                }
+            }
             DispatchQueue.main.async {
                 completion?(success)
             }
@@ -839,9 +823,6 @@ final class AppState: ObservableObject {
         syncSnapshotService = SyncSnapshotService(fileSystem: localFileSvc)
         syncSnapshotService.load()
         storage.syncSnapshotService = syncSnapshotService
-        // 注入到 MetadataSyncService，用于知识点缓存的增量同步跳过
-        MetadataSyncService.shared.configure(syncSnapshotService: syncSnapshotService)
-        MetadataSyncService.shared.storage = storage
         // 注入到 KnowledgeService，用于按笔记文件夹路径存储知识点缓存
         KnowledgeService.shared.configure(storageService: storage)
         KnowledgeService.shared.syncSnapshotService = syncSnapshotService
@@ -852,10 +833,6 @@ final class AppState: ObservableObject {
         localFileSvc.syncSnapshotService = syncSnapshotService
         // 更新 quizService 的笔记和文件夹列表（用于按文件夹结构存储题目）
         quizService.updateNotes(storage.getAllNotes(), folders: storage.getAllFolders())
-        
-        // 【新增】配置元数据推送服务
-        MetadataPushService.shared.cloudFS = webDAVFS ?? localFS
-        MetadataPushService.shared.syncSnapshotService = syncSnapshotService
         
         refreshStats()
     }

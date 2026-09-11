@@ -47,7 +47,7 @@ final class SyncSnapshotService {
     func load() {
         lock.lock()
         defer { lock.unlock() }
-        let url = fileSystem.metadataDirectory.appendingPathComponent(snapshotFileName)
+        let url = fileSystem.snapshotFileURL
         guard FileManager.default.fileExists(atPath: url.path) else {
             print("📸 同步快照不存在，将执行全量同步")
             return
@@ -69,9 +69,9 @@ final class SyncSnapshotService {
         ensureSnapshot()
         guard var snapshot = snapshot else { return }
         snapshot.lastSyncTime = Date()
-        let url = fileSystem.metadataDirectory.appendingPathComponent(snapshotFileName)
+        let url = fileSystem.snapshotFileURL
         do {
-            try FileManager.default.createDirectory(at: fileSystem.metadataDirectory, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             let data = try JSONEncoder().encode(snapshot)
             try data.write(to: url, options: .atomic)
             self.snapshot = snapshot
