@@ -102,9 +102,14 @@ struct FolderBrowserView: View {
             Text("笔记将以 Markdown 文件形式存储在当前文件夹中。")
         }
         // 编辑笔记
-        .sheet(item: $editingNotePath) { notePath in
-            NavigationStack {
-                NoteEditorView(notePath: notePath)
+        .sheet(isPresented: Binding(
+            get: { editingNotePath != nil },
+            set: { if !$0 { editingNotePath = nil } }
+        )) {
+            if let notePath = editingNotePath {
+                NavigationStack {
+                    NoteEditorView(notePath: notePath)
+                }
             }
         }
     }
