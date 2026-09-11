@@ -194,11 +194,15 @@ final class KnowledgeService: ObservableObject {
     private func syncKnowledgeFileToCloud(localURL: URL, data: Data) {
         guard let cloudFS = cloudFS else { return }
         let docsPath = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0].path
-        let relativePath = localURL.path.replacingOccurrences(of: docsPath, with: "")
-        // 去掉前导 "/"，与快照 key 格式一致
-        let snapshotKey = relativePath.hasPrefix("/") ? String(relativePath.dropFirst()) : relativePath
+        var relativePath = localURL.path.replacingOccurrences(of: docsPath, with: "")
+        // 去掉所有前导 "/"，与快照 key 格式一致
+        while relativePath.hasPrefix("/") {
+            relativePath = String(relativePath.dropFirst())
+        }
+        let snapshotKey = relativePath
         let cleanRelativePath = snapshotKey
-        let cloudURL = cloudFS.rootDirectory.appendingPathComponent(relativePath)
+        // 使用去掉前导斜杠的路径拼接云端 URL，避免双斜杠问题
+        let cloudURL = cloudFS.rootDirectory.appendingPathComponent(cleanRelativePath)
         DispatchQueue.global(qos: .utility).async { [weak self] in
             do {
                 try cloudFS.createDirectoryIfNeeded(at: cloudURL.deletingLastPathComponent())

@@ -376,7 +376,11 @@ final class FileSystemService {
     /// 本地 URL → 云端 URL（恒等映射：Documents/Notes/X → cloudRoot/Notes/X）
     func cloudURL(forLocalURL url: URL) -> URL {
         let localPath = localDocumentsDirectory.path
-        let relativePath = url.path.replacingOccurrences(of: localPath, with: "")
+        var relativePath = url.path.replacingOccurrences(of: localPath, with: "")
+        // 移除所有前导斜杠，避免 appendingPathComponent 生成双斜杠路径
+        while relativePath.hasPrefix("/") {
+            relativePath = String(relativePath.dropFirst())
+        }
         return cloudFS.rootDirectory.appendingPathComponent(relativePath)
     }
 

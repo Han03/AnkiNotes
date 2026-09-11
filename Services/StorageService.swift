@@ -384,7 +384,11 @@ final class StorageService: ObservableObject {
 
     /// 云端 URL → 本地 URL（恒等映射）
     private func localURL(forCloud cloudURL: URL, cloudRoot: URL, localRoot: URL) -> URL {
-        let relativePath = cloudURL.path.replacingOccurrences(of: cloudRoot.path, with: "")
+        var relativePath = cloudURL.path.replacingOccurrences(of: cloudRoot.path, with: "")
+        // 移除所有前导斜杠，避免 appendingPathComponent 生成双斜杠路径（如 /Notes//Biology/file.md）
+        while relativePath.hasPrefix("/") {
+            relativePath = String(relativePath.dropFirst())
+        }
         return localRoot.appendingPathComponent(relativePath)
     }
 
