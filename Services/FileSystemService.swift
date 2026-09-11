@@ -21,6 +21,42 @@ final class FileSystemService {
         self.cloudFS = cloudFS
     }
 
+    // MARK: - JSON 编解码器
+
+    /// 编码器：日期使用数字格式（timeIntervalSinceReferenceDate）
+    static let jsonEncoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .deferredToDate  // 数字格式（默认）
+        return encoder
+    }()
+
+    /// 解码器：兼容 ISO 8601 字符串和数字两种日期格式
+    /// 脚本转换的旧数据使用 ISO 8601，App 自身写入使用数字格式
+    static let jsonDecoder: JSONDecoder = {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            // 先尝试 ISO 8601 字符串
+            if let dateString = try? container.decode(String.self) {
+                let formatter = ISO8601DateFormatter()
+                formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                if let date = formatter.date(from: dateString) {
+                    return date
+                }
+                // 重试不带小数秒的格式
+                formatter.formatOptions = [.withInternetDateTime]
+                if let date = formatter.date(from: dateString) {
+                    return date
+                }
+                throw DecodingError.dataCorruptedError(in: container, debugDescription: "无法解析 ISO 8601 日期: \(dateString)")
+            }
+            // 回退到数字格式（timeIntervalSinceReferenceDate）
+            let timestamp = try container.decode(Double.self)
+            return Date(timeIntervalSinceReferenceDate: timestamp)
+        }
+        return decoder
+    }()
+
     // MARK: - 路径
 
     /// 本地 Documents 目录
@@ -133,7 +169,7 @@ final class FileSystemService {
             fileCount += 1
             do {
                 let data = try Data(contentsOf: fileURL)
-                let questions = try JSONDecoder().decode([Question].self, from: data)
+                let questions = try Self.jsonDecoder.decode([Question].self, from: data)
                 allQuestions.append(contentsOf: questions)
                 successCount += 1
             } catch {
@@ -160,7 +196,7 @@ final class FileSystemService {
         for case let fileURL as URL in enumerator {
             guard fileURL.pathExtension == "questions" else { continue }
             guard let data = try? Data(contentsOf: fileURL),
-                  let questions = try? JSONDecoder().decode([Question].self, from: data),
+                  let questions = try? Self.jsonDecoder.decode([Question].self, from: data),
                   let first = questions.first else { continue }
             // notePath 直接从题目数据中获取
             paths[first.notePath] = first.notePath
@@ -194,20 +230,25 @@ final class FileSystemService {
     func writeMeta(_ meta: NoteMetaFile, title: String, folderPath: String, skipCloudSync: Bool = false) {
         let url = metaURL(title: title, folderPath: folderPath)
         do {
-            let data = try JSONEncoder().encode(meta)
+            let data = try Self.jsonEncoder.encode(meta)
             try data.write(to: url, options: .atomic)
             if !skipCloudSync {
                 syncToCloud(data: data, to: url)
             }
         } catch {
-            print("⚠️ 写入 .meta 失败: \(error.localizedDescription)")
+            SyncLogger.shared.error("写入 .meta 失败 \(title): \(error)")
         }
     }
 
     func readMeta(title: String, folderPath: String) -> NoteMetaFile? {
         let url = metaURL(title: title, folderPath: folderPath)
         guard let data = try? Data(contentsOf: url) else { return nil }
-        return try? JSONDecoder().decode(NoteMetaFile.self, from: data)
+        do {
+            return try Self.jsonDecoder.decode(NoteMetaFile.self, from: data)
+        } catch {
+            SyncLogger.shared.warning("读取 .meta 失败 \(title): \(error)")
+            return nil
+        }
     }
 
     // MARK: - 讲稿 IO
@@ -240,13 +281,13 @@ final class FileSystemService {
     func readQuestions(title: String, folderPath: String) -> [Question] {
         let url = questionsURL(title: title, folderPath: folderPath)
         guard let data = try? Data(contentsOf: url) else { return [] }
-        return (try? JSONDecoder().decode([Question].self, from: data)) ?? []
+        return (try? Self.jsonDecoder.decode([Question].self, from: data)) ?? []
     }
 
     func writeQuestions(_ questions: [Question], title: String, folderPath: String, skipCloudSync: Bool = false) {
         let url = questionsURL(title: title, folderPath: folderPath)
         do {
-            let data = try JSONEncoder().encode(questions)
+            let data = try Self.jsonEncoder.encode(questions)
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try data.write(to: url, options: .atomic)
             if !skipCloudSync {
@@ -451,32 +492,34 @@ final class FileSystemService {
         for case let fileURL as URL in enumerator {
             guard fileURL.pathExtension == "meta" else { continue }
             metaFileCount += 1
-            guard let data = try? Data(contentsOf: fileURL),
-                  let meta = try? JSONDecoder().decode(NoteMetaFile.self, from: data) else {
+            do {
+                let data = try Data(contentsOf: fileURL)
+                let meta = try Self.jsonDecoder.decode(NoteMetaFile.self, from: data)
+
+                let title = fileURL.deletingPathExtension().lastPathComponent
+                let parentDir = fileURL.deletingLastPathComponent()
+                let folderPath = parentDir.path.replacingOccurrences(of: root.path + "/", with: "")
+                let effectiveFolderPath = folderPath == root.path || folderPath.isEmpty ? "" : folderPath
+
+                // 读取 .md 内容
+                let mdURL = parentDir.appendingPathComponent("\(title).md")
+                let content = (try? String(contentsOf: mdURL, encoding: .utf8)) ?? ""
+
+                notes.append(Note(
+                    title: title,
+                    folderPath: effectiveFolderPath,
+                    markdownContent: content,
+                    tags: meta.tags,
+                    srs: meta.srs,
+                    createdAt: meta.createdAt,
+                    updatedAt: meta.updatedAt,
+                    reviewLogs: meta.reviewLogs
+                ))
+            } catch {
                 parseFailCount += 1
-                SyncLogger.shared.warning("scanNotes: 解析失败 \(fileURL.lastPathComponent)")
+                SyncLogger.shared.warning("scanNotes: 解析失败 \(fileURL.lastPathComponent): \(error)")
                 continue
             }
-
-            let title = fileURL.deletingPathExtension().lastPathComponent
-            let parentDir = fileURL.deletingLastPathComponent()
-            let folderPath = parentDir.path.replacingOccurrences(of: root.path + "/", with: "")
-            let effectiveFolderPath = folderPath == root.path || folderPath.isEmpty ? "" : folderPath
-
-            // 读取 .md 内容
-            let mdURL = parentDir.appendingPathComponent("\(title).md")
-            let content = (try? String(contentsOf: mdURL, encoding: .utf8)) ?? ""
-
-            notes.append(Note(
-                title: title,
-                folderPath: effectiveFolderPath,
-                markdownContent: content,
-                tags: meta.tags,
-                srs: meta.srs,
-                createdAt: meta.createdAt,
-                updatedAt: meta.updatedAt,
-                reviewLogs: meta.reviewLogs
-            ))
         }
         SyncLogger.shared.debug("scanNotes: .meta 文件 \(metaFileCount) 个，成功 \(notes.count) 个，失败 \(parseFailCount) 个")
         return notes
